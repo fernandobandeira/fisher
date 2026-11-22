@@ -6,6 +6,10 @@ Most of the standards are not written here. They are the formatter, the lints in
 
 A rule lands here only while it waits for a check, or because it cannot be one.
 
+### Rust compilation and lints
+
+`scripts/check` uses `cargo clippy --locked --workspace --all-targets --all-features -- -D warnings` for the compile and lint gate. It checks libraries, binaries and test targets with optional features enabled. The test step also exercises the default feature configuration.
+
 ### Crate interfaces
 
 A deep module gives callers a small interface for a complete job. In Fisher, `Position::legal_moves` lets a caller ask what it can play. The rules crate owns board storage, castling rights and checks for an attacked king. A change to any of those details belongs together in `rules`. [Matt Pocock on deep modules](https://www.youtube.com/watch?v=uC44zFz7JSM)
@@ -21,7 +25,7 @@ A deep module gives callers a small interface for a complete job. In Fisher, `Po
 
 ### Dependency sources and advisories
 
-`cargo deny --locked check advisories sources` checks the lockfile, including development dependencies. Review changes to `deny.toml` alongside the dependency that needs them.
+`cargo deny --locked check advisories sources` checks dependencies with all workspace features enabled, including development dependencies. Review changes to `deny.toml` alongside the dependency that needs them.
 
 ### Deferred work
 

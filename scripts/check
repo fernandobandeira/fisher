@@ -36,8 +36,8 @@ check Lints 'scripts/check' crates_inherit_lints
 check 'Crate boundary fixtures' 'scripts/check-crate-boundaries --self-test' \
     scripts/check-crate-boundaries --self-test
 check 'Crate boundaries' 'scripts/check-crate-boundaries' scripts/check-crate-boundaries
-check Clippy 'cargo clippy --locked --workspace --all-targets -- -D warnings' \
-    cargo clippy --locked --workspace --all-targets -- -D warnings
+check Clippy 'cargo clippy --locked --workspace --all-targets --all-features -- -D warnings' \
+    cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 check Tests 'cargo test --locked --workspace' cargo test --locked --workspace
 check Glossary 'cargo xtask glossary' cargo xtask glossary
 check 'Crate interfaces' 'cargo xtask interfaces' cargo xtask interfaces

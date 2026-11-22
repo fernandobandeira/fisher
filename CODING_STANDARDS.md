@@ -4,7 +4,17 @@ Most of the standards are not written here. They are the formatter, the lints in
 
 ## Standards that are still prose
 
-None yet. A rule lands here only while it waits for a check, or because it cannot be one.
+A rule lands here only while it waits for a check, or because it cannot be one.
+
+### Deferred work
+
+A `TODO` and a ticket always come as a pair, so the code shows what is missing and the tracker shows where it is followed.
+
+- When you defer something, create a ticket for it and leave `// TODO(fisher-<id>): <what is missing>` at the place in the code where the work would go. See [tracker commands](docs/agents/issue-tracker.md). Deferred work that has no place in the code yet has the ticket alone.
+- Every `TODO` in the code names its ticket in that form. A bare `// TODO` is not allowed.
+- A ticket is closed only when no `TODO` still names it.
+
+The first line cannot be a check. The other two wait for one.
 
 ## From review comment to check
 

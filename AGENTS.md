@@ -28,7 +28,7 @@ If it is red and you cannot fix it, say so plainly with the output. Do not weake
 | `CODING_STANDARDS.md` | How a review comment becomes a check, and the few rules that are still prose. |
 | `docs/adr/` | Decisions that are hard to reverse, and why. |
 | `expectations/` | Expected values that came from outside the implementer. |
-| `.scratch/` | Specs and tickets (the issue tracker). |
+| `.beads/` | Local Beads issue tracker. |
 
 ## Boundaries
 
@@ -55,11 +55,11 @@ Matt Pocock's skills live in `.agents/skills/`. They are not committed: `skills-
 
 ### Issue tracker
 
-Specs and tickets are markdown files under `.scratch/<feature>/`. See `docs/agents/issue-tracker.md`.
+Use Beads for specs and tickets. Read [tracker commands](docs/agents/issue-tracker.md) when publishing, finding, claiming, or closing work, or using `/wayfinder`.
 
 ### Triage labels
 
-The five default labels, written as a `Status:` line in each ticket. See `docs/agents/triage-labels.md`.
+Use the [triage label reference](docs/agents/triage-labels.md) when applying or changing a label.
 
 ### Domain docs
 

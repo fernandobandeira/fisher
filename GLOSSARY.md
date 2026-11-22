@@ -81,3 +81,17 @@ _Avoid_: half-move (except in the name halfmove clock), level
 **Perft**:
 The number of leaf nodes in the tree of legal moves to a fixed depth from a position, used to check move generation against published counts.
 _Avoid_: move count, node test
+
+### The protocol
+
+**UCI**:
+The Universal Chess Interface, the text protocol a GUI uses to drive an engine. "The protocol" always means UCI.
+_Avoid_: chess interface, chess engine protocol
+
+**GUI**:
+The program at the other end of UCI, which starts the engine and tells it what to search, whether or not it has a window. A match runner is a GUI. The name is the one the UCI specification gives it.
+_Avoid_: host, client, front end, chess app
+
+**UCI move**:
+A move as UCI writes it: the square a piece leaves, the square it reaches, and a piece kind when a pawn promotes, such as e7e8q. It does not say whether it castles or captures; only a position can turn it into a move.
+_Avoid_: long algebraic notation, coordinate move, move string

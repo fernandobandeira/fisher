@@ -1,30 +1,27 @@
-# Issue tracker: Local Markdown
+# Beads issue tracker
 
-Issues and specs for this repo live as markdown files in `.scratch/`.
+Beads stores Fisher issues in a local Dolt database. IDs start with `fisher-`. Sharing issues across clones requires a Dolt remote. See [setup](../../.beads/README.md).
 
-## Conventions
+## Specs and tickets
 
-- One feature per directory: `.scratch/<feature-slug>/`
-- The spec is `.scratch/<feature-slug>/spec.md`
-- Implementation issues are one file per ticket at `.scratch/<feature-slug>/issues/<NN>-<slug>.md`, numbered from `01`, never a single combined tickets file
-- Triage state is recorded as a `Status:` line near the top of each issue file (see `triage-labels.md` for the role strings)
-- Comments and conversation history append to the bottom of the file under a `## Comments` heading
+- Publish a spec with `bd create "<title>" --type epic --body-file <path> --labels ready-for-agent`.
+- Publish each implementation slice with `bd create "<title>" --type task --body-file <path> --labels ready-for-agent`. Pass `--parent <spec-id>` when slicing an existing spec. Keep the [claims table](../evidence.md) in the ticket body.
+- Record dependencies with `bd dep add <ticket-id> --blocked-by <blocker-id>`.
+- Fetch a ticket by ID with `bd show <id>`.
+- Find implementation work with `bd ready --type task --label ready-for-agent --unassigned`. Claim it with `bd update <id> --claim` before starting work.
+- Record updates and evidence with `bd comments add <id> -f <path>`. Close the ticket with `bd close <id>` once its acceptance criteria and the checks pass.
 
-## When a skill says "publish to the issue tracker"
+Use `bd prime` for the general Beads command reference.
 
-Create a new file under `.scratch/<feature-slug>/` (creating the directory if needed).
+## Deferred work
 
-## When a skill says "fetch the relevant ticket"
-
-Read the file at the referenced path. The user will normally pass the path or the issue number directly.
+- Track deferred work with `bd create "<title>" --type feature --labels needs-triage --body-file <path>`. Say in the body what was deferred, when, and why.
+- Put the new ID in the code as `// TODO(fisher-<id>): <what is missing>`. [CODING_STANDARDS.md](../../CODING_STANDARDS.md) has the rule.
+- Find the comments for a ticket with `grep -rn 'TODO(<id>)' crates/`.
 
 ## Wayfinding operations
 
-Used by `/wayfinder`. The **map** is a file with one **child** file per ticket.
-
-- **Map**: `.scratch/<effort>/map.md` (the Notes / Decisions-so-far / Fog body).
-- **Child ticket**: `.scratch/<effort>/issues/NN-<slug>.md`, numbered from `01`, with the question in the body. A `Type:` line records the ticket type (`research`/`prototype`/`grilling`/`task`); a `Status:` line records `claimed`/`resolved`.
-- **Blocking**: a `Blocked by: NN, NN` line near the top. A ticket is unblocked when every file it lists is `resolved`.
-- **Frontier**: scan `.scratch/<effort>/issues/` for files that are open, unblocked, and unclaimed; first by number wins.
-- **Claim**: set `Status: claimed` and save before any work.
-- **Resolve**: append the answer under an `## Answer` heading, set `Status: resolved`, then append a context pointer (gist + link) to the map's Decisions-so-far in `map.md`.
+- Create the map as an epic with `--labels wayfinder:map` and its body supplied through `--body-file`.
+- Create each decision ticket with `--parent <map-id> --no-inherit-labels --labels wayfinder:<type>`. Use `research`, `prototype`, `grilling`, or `task` for `<type>`. Add blocking dependencies after creating the tickets.
+- Find the frontier with `bd ready --parent <map-id> --unassigned --sort oldest` and claim a ticket with `bd update <id> --claim` before working on it.
+- Record the answer as a comment and close the ticket. Fetch the latest map body and update its Decisions so far with `bd update <map-id> --body-file <path>`, referring to the resolved ticket by title and Beads ID.

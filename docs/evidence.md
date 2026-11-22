@@ -30,6 +30,16 @@ These are not evidence:
 
 Values of kinds 1 and 5 live in [`expectations/`](../expectations/README.md), are committed before the code that has to meet them, and are not edited by the implementer.
 
+## When a reference disagrees
+
+An independent implementation is a witness, not the judge. When fisher and the reference give different answers:
+
+1. The test fails and work stops. Do not change fisher to match the reference.
+2. Settle the position against the rules of chess, with a third implementation as the tie-breaker.
+3. If the reference is wrong, the position goes into `expectations/` as an example the human approved, and the comparison skips it by name.
+
+Two implementations can also be wrong in the same way, and a comparison cannot see that. Published results cover it, because they come from neither.
+
 ## What this looks like for a chess engine
 
 These are the starting examples. The grilling for each feature settles the real list.

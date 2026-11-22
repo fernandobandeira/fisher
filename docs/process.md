@@ -8,7 +8,7 @@ The human is in the loop at the start (what to build, which claims matter) and a
 |---|---|---|---|---|
 | 1 | Size the change | Human | `/ask-matt` if unsure | Small: go to step 3 with one ticket. Larger: step 2. Too big for one session: `/wayfinder`. |
 | 2 | Grill | Human and agent | `/grill-with-docs` | Glossary edits, ADRs, and the claims with the source of each expected value. |
-| 3 | Spec and slice | Agent, human approves the slices | `/to-spec`, `/to-tickets` | `.scratch/<feature>/spec.md` and one ticket per slice, each with its claims table. |
+| 3 | Spec and slice | Agent, human approves the slices | `/to-spec`, `/to-tickets` | A Beads spec and one ticket per slice, each with its claims table. |
 | 4 | Commit the expected values | Human, or an agent that will not implement | | Files in `expectations/`, in their own commit, before any code that has to meet them. |
 | 5 | Implement | Agent, unattended | `/implement-spec` or `/implement`, with `/tdd` | Code, a green `scripts/check`, the claims table filled in. |
 | 6 | Review once | A different agent | `/code-review`; a second provider for a commitment | Concrete failure scenarios, each with a disposition. |

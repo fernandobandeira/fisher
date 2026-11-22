@@ -9,6 +9,7 @@ pub enum Command {
     UciNewGame,
     Position(Result<PositionCommand, PositionSyntaxError>),
     Go(GoParameters),
+    Stop,
     Quit,
 }
 
@@ -84,6 +85,7 @@ pub fn parse_command(line: &str) -> Input {
             "ucinewgame" => return Input::Handled(Command::UciNewGame),
             "position" => return Input::Handled(Command::Position(parse_position(tokens))),
             "go" => return Input::Handled(Command::Go(parse_go(tokens))),
+            "stop" => return Input::Handled(Command::Stop),
             "quit" => return Input::Handled(Command::Quit),
             // TODO(fisher-a2q): Declare and accept UCI options.
             // TODO(fisher-p25): Handle the debug command.

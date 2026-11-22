@@ -72,6 +72,26 @@ fn rejected_position() -> io::Result<()> {
     play_transcript("rejected-position")
 }
 
+#[test]
+fn go_infinite() -> io::Result<()> {
+    play_transcript("go-infinite")
+}
+
+#[test]
+fn go_infinite_terminal() -> io::Result<()> {
+    play_transcript("go-infinite-terminal")
+}
+
+#[test]
+fn quit_while_held() -> io::Result<()> {
+    play_transcript("quit-while-held")
+}
+
+#[test]
+fn end_of_input_while_held() -> io::Result<()> {
+    play_transcript("end-of-input-while-held")
+}
+
 fn play_transcript(name: &str) -> io::Result<()> {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../expectations/uci")
@@ -147,6 +167,7 @@ fn reference_command<'a>(tokens: &mut impl Iterator<Item = &'a str>) -> Option<&
                 | "position"
                 | "go"
                 | "quit"
+                | "stop"
                 | "setoption"
                 | "debug"
                 | "ponderhit"
@@ -216,6 +237,7 @@ struct Session {
     child: Child,
     output: Receiver<io::Result<String>>,
     position: Chess,
+    holding: bool,
 }
 
 impl Session {
@@ -229,6 +251,7 @@ impl Session {
             child,
             output,
             position: Chess::default(),
+            holding: false,
         };
         let stdout = session
             .child
@@ -275,14 +298,23 @@ impl Session {
         stdin.write_all(&command)?;
         stdin.write_all(&[ending])?;
         stdin.flush()?;
-        let text = String::from_utf8_lossy(&command);
-        let mut tokens = text.split_whitespace();
-        if reference_command(&mut tokens) == Some("position")
-            && let Some(position) = reference_position(tokens)
-        {
-            self.position = position;
-        }
+        self.track_reference_command(&command);
         Ok(())
+    }
+
+    fn track_reference_command(&mut self, command: &[u8]) {
+        let text = String::from_utf8_lossy(command);
+        let mut tokens = text.split_whitespace();
+        match reference_command(&mut tokens) {
+            Some("go") if tokens.any(|token| token == "infinite") => self.holding = true,
+            Some("stop") => self.holding = false,
+            Some("position") if !self.holding => {
+                if let Some(position) = reference_position(tokens) {
+                    self.position = position;
+                }
+            }
+            _ => {}
+        }
     }
 
     fn expect_reply(&self, expected: &str) -> io::Result<()> {

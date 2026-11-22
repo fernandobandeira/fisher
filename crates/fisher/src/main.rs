@@ -37,10 +37,15 @@ fn answer_commands(
             }
             Input::Handled(Command::IsReady) => send(output, &Response::ReadyOk)?,
             Input::Handled(Command::Position(command)) => {
-                if let Some(next) = command.ok().and_then(setup_position) {
-                    position = next;
-                } else {
-                    send(output, &Response::InfoString("position rejected"))?;
+                match command
+                    .map_err(|cause| cause.to_string())
+                    .and_then(setup_position)
+                {
+                    Ok(next) => position = next,
+                    Err(cause) => {
+                        let message = format!("position rejected: {cause}");
+                        send(output, &Response::InfoString(&message))?;
+                    }
                 }
             }
             Input::Handled(Command::Go(_)) => {
@@ -60,10 +65,12 @@ fn answer_commands(
     Ok(())
 }
 
-fn setup_position(command: PositionCommand) -> Option<Position> {
+fn setup_position(command: PositionCommand) -> Result<Position, String> {
     let mut position = match command.source {
         PositionSource::Startpos => Position::starting(),
-        PositionSource::Fen(fen) => Position::from_fen(&fen).ok()?,
+        PositionSource::Fen(fen) => {
+            Position::from_fen(&fen).map_err(|cause| format!("invalid FEN: {cause}"))?
+        }
     };
     for uci_move in command.moves {
         let UciMove::Normal {
@@ -72,11 +79,14 @@ fn setup_position(command: PositionCommand) -> Option<Position> {
             promotion,
         } = uci_move
         else {
-            return None;
+            return Err("null move in position move list".to_owned());
         };
-        position = position.legal_move(from, to, promotion)?.play();
+        position = position
+            .legal_move(from, to, promotion)
+            .ok_or_else(|| format!("illegal UCI move {uci_move}"))?
+            .play();
     }
-    Some(position)
+    Ok(position)
 }
 
 fn read_input(

@@ -67,6 +67,11 @@ fn halfmove_clock() -> io::Result<()> {
     play_transcript("halfmove-clock")
 }
 
+#[test]
+fn rejected_position() -> io::Result<()> {
+    play_transcript("rejected-position")
+}
+
 fn play_transcript(name: &str) -> io::Result<()> {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../expectations/uci")
@@ -195,6 +200,14 @@ fn reply_matches(expected: &str, actual: &str, position: &Chess) -> bool {
             .strip_prefix("bestmove ")
             .is_some_and(|text| reference_move(position, text).is_some()),
         "info string {message}" => actual.starts_with("info string "),
+        _ if let Some(required) = expected
+            .strip_prefix("info string {message:")
+            .and_then(|text| text.strip_suffix('}')) =>
+        {
+            actual
+                .strip_prefix("info string ")
+                .is_some_and(|message| message.contains(required))
+        }
         _ => expected == actual,
     }
 }

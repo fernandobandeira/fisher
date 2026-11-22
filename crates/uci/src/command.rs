@@ -1,4 +1,4 @@
-use std::{iter::Peekable, str::SplitWhitespace};
+use std::{fmt, iter::Peekable, str::SplitWhitespace};
 
 use crate::UciMove;
 
@@ -41,6 +41,21 @@ enum PositionSyntaxCause {
     ExpectedMoves,
     InvalidMove(String),
 }
+
+impl fmt::Display for PositionSyntaxError {
+    fn fmt(&self, output: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.0 {
+            PositionSyntaxCause::ExpectedSource => output.write_str("expected startpos or fen"),
+            PositionSyntaxCause::MissingFen => output.write_str("expected FEN after fen"),
+            PositionSyntaxCause::ExpectedMoves => output.write_str("expected moves after startpos"),
+            PositionSyntaxCause::InvalidMove(uci_move) => {
+                write!(output, "malformed UCI move {uci_move:?}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for PositionSyntaxError {}
 
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct GoParameters {

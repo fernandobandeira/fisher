@@ -15,7 +15,7 @@ scripts/check                                                 # run the same che
 
 The skills are Matt Pocock's. They are not committed: `skills-lock.json` pins the commit, and the second command copies them into `.agents/skills/`. A new git worktree needs the same command.
 
-The crate boundary check uses Python 3.8 or newer. The dependency check needs network access to refresh the RustSec advisory database and Cargo registry. Rust comes from [rustup](https://rustup.rs). The version is pinned in `rust-toolchain.toml`.
+The crate boundary check uses Python 3.8 or newer. The pre-commit hook runs the full gate. It needs network access to refresh RustSec and Cargo registry data. If the refresh fails, restore connectivity and rerun `scripts/check`. Rust comes from [rustup](https://rustup.rs). The version is pinned in `rust-toolchain.toml`.
 
 ## Start work
 

@@ -1,4 +1,8 @@
-use std::fmt;
+use std::{fmt, num::NonZeroU64};
+
+mod fen;
+
+pub use fen::FenError;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Color {
@@ -57,6 +61,12 @@ impl Square {
         usize::from(self.rank.0) * 8 + usize::from(self.file.0)
     }
 
+    fn is_adjacent_to(self, other: Self) -> bool {
+        self != other
+            && self.file.0.abs_diff(other.file.0) <= 1
+            && self.rank.0.abs_diff(other.rank.0) <= 1
+    }
+
     fn offset(self, file: i8, rank: i8) -> Option<Self> {
         let file = self
             .file
@@ -69,6 +79,10 @@ impl Square {
             .checked_add_signed(rank)
             .filter(|&value| value < 8)?;
         Some(Self::new(file, rank))
+    }
+
+    fn all() -> impl Iterator<Item = Self> {
+        (0..8).flat_map(|rank| (0..8).map(move |file| Self::new(file, rank)))
     }
 }
 
@@ -119,6 +133,11 @@ impl Move {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Position {
     pieces: [Option<Piece>; 64],
+    side_to_move: Color,
+    castling_rights: CastlingRights,
+    en_passant: Option<Square>,
+    halfmove_clock: u64,
+    fullmove_number: NonZeroU64,
 }
 
 impl Position {
@@ -126,7 +145,14 @@ impl Position {
     pub fn starting() -> Self {
         use PieceKind::{Bishop, King, Knight, Queen, Rook};
 
-        let mut position = Self { pieces: [None; 64] };
+        let mut position = Self {
+            pieces: [None; 64],
+            side_to_move: Color::White,
+            castling_rights: CastlingRights::ALL,
+            en_passant: None,
+            halfmove_clock: 0,
+            fullmove_number: NonZeroU64::MIN,
+        };
         let back_rank = [Rook, Knight, Bishop, Queen, King, Bishop, Knight, Rook];
         for (file, kind) in (0..8).zip(back_rank) {
             for (color, home, pawns) in [(Color::White, 0, 1), (Color::Black, 7, 6)] {
@@ -177,5 +203,67 @@ impl Position {
         if let Some(occupant) = self.pieces.get_mut(square.index()) {
             *occupant = Some(piece);
         }
+    }
+
+    fn has_piece_at(&self, square: Square, color: Color, kind: PieceKind) -> bool {
+        self.piece_at(square) == Some(Piece { color, kind })
+    }
+
+    fn piece_at(&self, square: Square) -> Option<Piece> {
+        self.pieces.get(square.index()).copied().flatten()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Castle {
+    Kingside,
+    Queenside,
+}
+
+impl Castle {
+    const fn rook_home(self, color: Color) -> Square {
+        let file = match self {
+            Self::Kingside => 7,
+            Self::Queenside => 0,
+        };
+        Square::new(file, color.home_rank())
+    }
+}
+
+impl Color {
+    const fn home_rank(self) -> u8 {
+        match self {
+            Self::White => 0,
+            Self::Black => 7,
+        }
+    }
+
+    const fn king_home(self) -> Square {
+        Square::new(4, self.home_rank())
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct CastlingRights(u8);
+
+impl CastlingRights {
+    const NONE: Self = Self(0);
+    const ALL: Self = Self(0b1111);
+
+    const fn mask(color: Color, castle: Castle) -> u8 {
+        match (color, castle) {
+            (Color::White, Castle::Kingside) => 1,
+            (Color::White, Castle::Queenside) => 2,
+            (Color::Black, Castle::Kingside) => 4,
+            (Color::Black, Castle::Queenside) => 8,
+        }
+    }
+
+    fn insert(&mut self, color: Color, castle: Castle) {
+        self.0 |= Self::mask(color, castle);
+    }
+
+    const fn has(self, color: Color, castle: Castle) -> bool {
+        self.0 & Self::mask(color, castle) != 0
     }
 }

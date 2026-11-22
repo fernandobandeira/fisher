@@ -38,6 +38,8 @@ impl Square {
     /// Reads a square name such as `e4`.
     #[must_use]
     pub fn parse(text: &str) -> Option<Self> {
+        // Store file and rank as offsets from a1. For e4, 'e' - 'a' gives file 4
+        // and '4' - '1' gives rank 3, so the square holds (4, 3).
         match *text.as_bytes() {
             [file @ b'a'..=b'h', rank @ b'1'..=b'8'] => Some(Self::new(file - b'a', rank - b'1')),
             _ => None,

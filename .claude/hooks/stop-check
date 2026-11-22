@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# Claude Code Stop hook: an agent does not end its turn on a red check.
+input=$(cat)
+
+cd "${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null)}" || exit 0
+
+# A clean tree was checked when it was committed.
+if [ -z "$(git status --porcelain 2>/dev/null)" ]; then
+  exit 0
+fi
+
+# Already sent back once in this turn. Let it stop and report, rather than loop.
+case "$input" in
+  *'"stop_hook_active":true'* | *'"stop_hook_active": true'*) exit 0 ;;
+esac
+
+if output=$(scripts/check 2>&1); then
+  exit 0
+fi
+
+{
+  printf '%s\n' "$output" | tail -n 60
+  echo
+  echo "scripts/check is red. Fix it before you finish. If you cannot, say plainly that it is red and show this output."
+} >&2
+exit 2

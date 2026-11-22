@@ -1,0 +1,63 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.99.1"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+unused_must_use = "deny"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+indexing_slicing = "deny"
+wildcard_enum_match_arm = "deny"
+match_wildcard_for_single_variants = "deny"
+let_underscore_must_use = "deny"
+must_use_candidate = "deny"
+as_conversions = "deny"
+cast_lossless = "deny"
+cast_possible_truncation = "deny"
+cast_possible_wrap = "deny"
+cast_precision_loss = "deny"
+cast_ptr_alignment = "deny"
+cast_sign_loss = "deny"
+allow_attributes = "deny"
+allow_attributes_without_reason = "deny"
+print_stdout = "deny"
+print_stderr = "deny"
+dbg_macro = "deny"
+
+# Rustfmt owns layout. Spelling and control-flow style leave room for domain notation.
+doc_comment_double_space_linebreaks = "allow"
+elidable_lifetime_names = "allow"
+explicit_deref_methods = "allow"
+explicit_into_iter_loop = "allow"
+explicit_iter_loop = "allow"
+if_not_else = "allow"
+inconsistent_struct_constructor = "allow"
+items_after_statements = "allow"
+many_single_char_names = "allow"
+match_bool = "allow"
+needless_continue = "allow"
+needless_for_each = "allow"
+needless_raw_string_hashes = "allow"
+redundant_else = "allow"
+semicolon_if_nothing_returned = "allow"
+similar_names = "allow"
+single_match_else = "allow"
+struct_field_names = "allow"
+too_many_lines = "allow"
+uninlined_format_args = "allow"
+unnecessary_semicolon = "allow"
+unnecessary_trailing_comma = "allow"
+unnested_or_patterns = "allow"

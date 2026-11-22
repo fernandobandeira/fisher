@@ -1,0 +1,12 @@
+^expectations/
+^scripts/
+^crates/xtask/
+^\.githooks/
+^\.github/workflows/
+^\.claude/settings\.json$
+^\.claude/hooks/
+^\.cargo/
+^Cargo\.toml$
+^clippy\.toml$
+^rustfmt\.toml$
+^rust-toolchain\.toml$

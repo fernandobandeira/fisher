@@ -1,0 +1,55 @@
+# From idea to merge
+
+The human is in the loop at the start (what to build, which claims matter) and at the end (reading what only a human can judge). The middle runs unattended.
+
+## The steps
+
+| # | Step | Who | Skill | What it leaves behind |
+|---|---|---|---|---|
+| 1 | Size the change | Human | `/ask-matt` if unsure | Small: go to step 3 with one ticket. Larger: step 2. Too big for one session: `/wayfinder`. |
+| 2 | Grill | Human and agent | `/grill-with-docs` | Glossary edits, ADRs, and the claims with the source of each expected value. |
+| 3 | Spec and slice | Agent, human approves the slices | `/to-spec`, `/to-tickets` | `.scratch/<feature>/spec.md` and one ticket per slice, each with its claims table. |
+| 4 | Commit the expected values | Human, or an agent that will not implement | | Files in `expectations/`, in their own commit, before any code that has to meet them. |
+| 5 | Implement | Agent, unattended | `/implement-spec` or `/implement`, with `/tdd` | Code, a green `scripts/check`, the claims table filled in. |
+| 6 | Review once | A different agent | `/code-review`; a second provider for a commitment | Concrete failure scenarios, each with a disposition. |
+| 7 | Read | Human | | A merge, or a decision. |
+| 8 | Retro | Agent, human reads the list | `/retro` | Review comments turned into checks. See [CODING_STANDARDS.md](../CODING_STANDARDS.md). |
+
+## Slices
+
+A slice is thin and goes end to end. "The engine answers `go` with a legal move from the starting position" is a slice: it touches the position, move generation, search and the protocol, and it can be run. "All of move generation" is a layer, not a slice.
+
+Merge each slice into `main` when it is green. Do not build a tall stack of dependent branches and review it at the end.
+
+## Tiers
+
+Tier a change by how far it reaches, how easily a mistake in it would be noticed, and how hard it is to undo.
+
+| Tier | Examples | Gate |
+|---|---|---|
+| **Local** | The inside of one crate, where existing evidence pins the behaviour: perft still matches, the bench signature is unchanged | Merge when green. The human does not read it. |
+| **Behaviour** | Search, evaluation, time management | The human reads the claims table and plays or watches a game. Not the code. |
+| **Commitment** | A crate's public interface; how a position or a move is represented; what the engine says over UCI; a file format; a new dependency; `unsafe`; anything under a protected path | The human approves before merge. An ADR if it is hard to reverse. |
+
+## What the human reads, in order
+
+1. **Intent and expected outcomes.** The claims, and where each expected value comes from. Only the owner can say what was meant.
+2. **Commitments.** Whatever is hard to undo.
+3. **Disputed claims and their experiments.** Whether the experiment tested the claim, not only whether it passed.
+4. **Public interfaces and visible behaviour.** The exports of a crate, and a game played against the engine.
+
+The human stops reading: implementation lines of a local change, formatter output, mechanical renames, generated code, and repeated review commentary.
+
+## When review stops
+
+One independent pass. It names concrete failure scenarios, not preferences.
+
+Every serious finding gets exactly one of:
+
+- an experiment that settles it,
+- a design guarantee that makes it impossible (a type, a constructor, a crate boundary),
+- the human's written acceptance of the risk.
+
+Then only the fixes are checked again. Review is over when every serious finding has one of those and `scripts/check` is green.
+
+Style and naming comments do not get a second round. Each one either climbs the ladder in [CODING_STANDARDS.md](../CODING_STANDARDS.md) or is dropped.

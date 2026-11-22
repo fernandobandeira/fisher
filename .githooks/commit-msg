@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# A commit that changes what does the checking has to say so, so the human can
+# find it and read it: git log --grep '^Guard-Change:'
+set -euo pipefail
+
+message_file=$1
+root=$(git rev-parse --show-toplevel)
+
+# A merge brings in commits that were each checked when they were made.
+if [ -f "$(git rev-parse --git-dir)/MERGE_HEAD" ]; then
+  exit 0
+fi
+
+touched=$(git diff --cached --name-only --no-renames | grep -E -f "$root/.githooks/protected-paths" || true)
+if [ -z "$touched" ]; then
+  exit 0
+fi
+
+if grep -qE '^Guard-Change: .*[^[:space:]]' "$message_file"; then
+  exit 0
+fi
+
+{
+  echo "This commit changes protected paths:"
+  echo "$touched" | sed 's/^/  /'
+  echo
+  echo "These files decide what counts as green, so the human reads every change to them."
+  echo "If the change is intended, add a line to the commit message saying why:"
+  echo
+  echo "  Guard-Change: <what this does to the checks, and why>"
+  echo
+  echo "If you changed one of them only to get a check to pass, undo that change instead."
+} >&2
+exit 1

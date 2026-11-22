@@ -5,6 +5,9 @@ version = 4
 [[package]]
 name = "fisher"
 version = "0.1.0"
+dependencies = [
+ "uci",
+]
 
 [[package]]
 name = "memchr"
@@ -22,6 +25,10 @@ dependencies = [
  "unicode-ident",
  "unicode-properties",
 ]
+
+[[package]]
+name = "uci"
+version = "0.1.0"
 
 [[package]]
 name = "unicode-ident"

@@ -1,0 +1,14 @@
+# Sources: April 2006 UCI specification https://backscattering.de/chess/uci/
+# and fisher-l7f owner decisions. Written 2026-11-22.
+# The owner defers option, debug and pondering support. Registration is out of scope.
+# Fisher skips the rest of each ignored line, including command-looking arguments.
+> setoption name Path value quit
+> debug on isready
+> ponderhit isready
+> register name quit code example
+> isready
+# UCI isready/readyok. The four preceding commands are silent.
+< readyok
+# UCI quit.
+> quit
+! exit

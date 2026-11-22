@@ -1,0 +1,42 @@
+# Sources: April 2006 UCI specification https://backscattering.de/chess/uci/
+# and fisher-l7f owner decisions. Written 2026-11-22.
+> position fen 7k/8/5K1Q/8/8/8/8/8 b - - 0 1
+> position fen 7k/8/5K1Q/8/8/8/8/7 b - - 0 1
+# Owner decision for rejected position: one diagnostic for malformed FEN.
+< info string {message:invalid FEN}
+> isready
+# UCI isready/readyok.
+< readyok
+> go
+# Owner-approved example: the original position still has its sole legal move.
+< bestmove h8g8
+> position startpos moves e2e4 e7e5 e4e6
+# Owner decision for rejected position: one diagnostic for illegal move after two legal moves.
+< info string {message:illegal UCI move e4e6}
+> isready
+# UCI isready/readyok.
+< readyok
+> go
+# Owner-approved example: the original position still has its sole legal move.
+< bestmove h8g8
+> position startpos moves e2e4 e7e9
+# Owner decision for rejected position: one diagnostic for malformed UCI move after a legal move.
+< info string {message:malformed UCI move}
+> isready
+# UCI isready/readyok.
+< readyok
+> go
+# Owner-approved example: the original position still has its sole legal move.
+< bestmove h8g8
+> position fen
+# Owner decision for rejected position: one diagnostic for missing FEN.
+< info string {message:expected FEN}
+> isready
+# UCI isready/readyok.
+< readyok
+> go
+# Owner-approved example: the original position still has its sole legal move.
+< bestmove h8g8
+# UCI quit.
+> quit
+! exit

@@ -1,0 +1,13 @@
+# Sources: April 2006 UCI specification https://backscattering.de/chess/uci/
+# and fisher-l7f owner decisions. Written 2026-11-22.
+> position fen 7k/8/5K1Q/8/8/8/8/8 b - - 0 1
+> ucinewgame
+> isready
+# UCI ucinewgame/isready/readyok. The owner makes ucinewgame a no-op.
+< readyok
+> go
+# The owner preserves the position across ucinewgame. Black has one legal move.
+< bestmove h8g8
+# UCI quit.
+> quit
+! exit

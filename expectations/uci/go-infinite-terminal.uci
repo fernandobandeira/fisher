@@ -1,0 +1,13 @@
+# Sources: April 2006 UCI specification https://backscattering.de/chess/uci/
+# and fisher-l7f owner decisions. Written 2026-11-22.
+> position fen 7k/5K2/6Q1/8/8/8/8/8 b - - 0 1
+> go infinite
+> isready
+# UCI go infinite and isready. No bestmove precedes readyok.
+< readyok
+> stop
+# UCI stop/bestmove releases the held move for stalemate, 0000.
+< bestmove 0000
+# UCI quit.
+> quit
+! exit

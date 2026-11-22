@@ -1,0 +1,5 @@
+# Sources: April 2006 UCI specification https://backscattering.de/chess/uci/
+# and fisher-l7f owner decisions. Written 2026-11-22.
+# UCI quit. Keep input open to distinguish quit from EOF.
+> quit
+! exit

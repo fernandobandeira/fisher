@@ -1,0 +1,53 @@
+# Sources: April 2006 UCI specification https://backscattering.de/chess/uci/
+# and fisher-l7f owner decisions. Written 2026-11-22.
+> position startpos
+> go wtime 60000
+# UCI go/bestmove. The owner defers this parameter and replies immediately.
+< bestmove {legal}
+> go btime 60000
+# UCI go/bestmove. The owner defers this parameter and replies immediately.
+< bestmove {legal}
+> go winc 1000
+# UCI go/bestmove. The owner defers this parameter and replies immediately.
+< bestmove {legal}
+> go binc 1000
+# UCI go/bestmove. The owner defers this parameter and replies immediately.
+< bestmove {legal}
+> go movestogo 40
+# UCI go/bestmove. The owner defers this parameter and replies immediately.
+< bestmove {legal}
+> go movetime 50
+# UCI go/bestmove. The owner defers this parameter and replies immediately.
+< bestmove {legal}
+> go depth 1
+# UCI go/bestmove. The owner defers this parameter and replies immediately.
+< bestmove {legal}
+> go nodes 20
+# UCI go/bestmove. The owner defers this parameter and replies immediately.
+< bestmove {legal}
+> go mate 1
+# UCI go/bestmove. The owner defers this parameter and replies immediately.
+< bestmove {legal}
+> go searchmoves e2e4 d2d4
+# UCI go/bestmove. The owner defers this parameter and replies immediately.
+< bestmove {legal}
+> go ponder
+# The owner defers pondering in fisher-2ha and replies immediately.
+< bestmove {legal}
+# UCI position after an unknown prefix replaces a position with one reply.
+> position fen 7k/8/5K1Q/8/8/8/8/8 b - - 0 1
+> go
+< bestmove h8g8
+> unknown position fen 7k/8/5K2/6Q1/8/8/8/8 b - - 0 1
+> go
+< bestmove h8h7
+# The ignored command consumes its arguments, including position.
+> unknown setoption name Path value position fen 7k/8/5K1Q/8/8/8/8/8 b - - 0 1
+> go
+< bestmove h8h7
+> go
+# The reference follows the prefixed position and skips the setoption value.
+< bestmove {legal}
+# UCI quit.
+> quit
+! exit

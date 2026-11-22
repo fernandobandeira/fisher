@@ -8,7 +8,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use shakmaty::{Chess, uci::UciMove};
+use shakmaty::{CastlingMode, Chess, Move, Position, fen::Fen, uci::UciMove};
 
 const TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -40,6 +40,31 @@ fn end_of_input() -> io::Result<()> {
 #[test]
 fn startpos() -> io::Result<()> {
     play_transcript("startpos")
+}
+
+#[test]
+fn new_game() -> io::Result<()> {
+    play_transcript("new-game")
+}
+
+#[test]
+fn position_moves() -> io::Result<()> {
+    play_transcript("position-moves")
+}
+
+#[test]
+fn go_parameters() -> io::Result<()> {
+    play_transcript("go-parameters")
+}
+
+#[test]
+fn terminal_positions() -> io::Result<()> {
+    play_transcript("terminal-positions")
+}
+
+#[test]
+fn halfmove_clock() -> io::Result<()> {
+    play_transcript("halfmove-clock")
 }
 
 fn play_transcript(name: &str) -> io::Result<()> {
@@ -107,15 +132,68 @@ fn decode_hex_digit(byte: Option<u8>) -> io::Result<u8> {
     }
 }
 
-fn reply_matches(expected: &str, actual: &str) -> bool {
+fn reference_command<'a>(tokens: &mut impl Iterator<Item = &'a str>) -> Option<&'a str> {
+    tokens.find(|&token| {
+        matches!(
+            token,
+            "uci"
+                | "isready"
+                | "ucinewgame"
+                | "position"
+                | "go"
+                | "quit"
+                | "setoption"
+                | "debug"
+                | "ponderhit"
+                | "register"
+        )
+    })
+}
+
+fn reference_position<'a>(mut tokens: impl Iterator<Item = &'a str>) -> Option<Chess> {
+    let mut position = match tokens.next()? {
+        "startpos" => Chess::default(),
+        "fen" => {
+            let fields: Vec<_> = tokens.by_ref().take(6).collect();
+            if fields.len() != 6 {
+                return None;
+            }
+            fields
+                .join(" ")
+                .parse::<Fen>()
+                .ok()?
+                .into_position(CastlingMode::Standard)
+                .ok()?
+        }
+        _ => return None,
+    };
+    match tokens.next() {
+        None => return Some(position),
+        Some("moves") => {}
+        Some(_) => return None,
+    }
+    for token in tokens {
+        let movement = reference_move(&position, token)?;
+        position.play_unchecked(movement);
+    }
+    Some(position)
+}
+
+fn reference_move(position: &Chess, text: &str) -> Option<Move> {
+    position
+        .legal_moves()
+        .into_iter()
+        .find(|&movement| UciMove::from_standard(movement).to_string() == text)
+}
+
+fn reply_matches(expected: &str, actual: &str, position: &Chess) -> bool {
     match expected {
         "id name fisher {version}" => {
             actual == concat!("id name fisher ", env!("CARGO_PKG_VERSION"))
         }
         "bestmove {legal}" => actual
             .strip_prefix("bestmove ")
-            .and_then(|text| text.parse::<UciMove>().ok())
-            .is_some_and(|uci_move| uci_move.to_move(&Chess::default()).is_ok()),
+            .is_some_and(|text| reference_move(position, text).is_some()),
         "info string {message}" => actual.starts_with("info string "),
         _ => expected == actual,
     }
@@ -124,6 +202,7 @@ fn reply_matches(expected: &str, actual: &str) -> bool {
 struct Session {
     child: Child,
     output: Receiver<io::Result<String>>,
+    position: Chess,
 }
 
 impl Session {
@@ -133,7 +212,11 @@ impl Session {
             .stdout(Stdio::piped())
             .spawn()?;
         let (sender, output) = mpsc::channel();
-        let mut session = Self { child, output };
+        let mut session = Self {
+            child,
+            output,
+            position: Chess::default(),
+        };
         let stdout = session
             .child
             .stdout
@@ -175,16 +258,25 @@ impl Session {
             .stdin
             .as_mut()
             .ok_or_else(|| io::Error::other("fisher stdin is closed"))?;
-        stdin.write_all(&decode_command(command)?)?;
+        let command = decode_command(command)?;
+        stdin.write_all(&command)?;
         stdin.write_all(&[ending])?;
-        stdin.flush()
+        stdin.flush()?;
+        let text = String::from_utf8_lossy(&command);
+        let mut tokens = text.split_whitespace();
+        if reference_command(&mut tokens) == Some("position")
+            && let Some(position) = reference_position(tokens)
+        {
+            self.position = position;
+        }
+        Ok(())
     }
 
     fn expect_reply(&self, expected: &str) -> io::Result<()> {
         let actual = self.next_reply()?.ok_or_else(|| {
             io::Error::other(format!("stdout closed while expecting {expected:?}"))
         })?;
-        if reply_matches(expected, &actual) {
+        if reply_matches(expected, &actual, &self.position) {
             Ok(())
         } else {
             Err(io::Error::other(format!(

@@ -6,6 +6,15 @@ Most of the standards are not written here. They are the formatter, the lints in
 
 A rule lands here only while it waits for a check, or because it cannot be one.
 
+### Crate interfaces
+
+A deep module gives callers a small interface for a complete job. In Fisher, `Position::legal_moves` lets a caller ask what it can play. The rules crate owns board storage, castling rights and checks for an attacked king. A change to any of those details belongs together in `rules`. [Matt Pocock on deep modules](https://www.youtube.com/watch?v=uC44zFz7JSM)
+
+- Use `src/lib.rs` as the single public entry point for each library crate. Declare implementation modules with `mod` and explicitly re-export the operations and types callers need. Other crates import those names from the crate root.
+- Start types, fields and helpers private. Use the narrowest visibility that reaches the caller. When proposing an export, name the external caller and the job it needs to do, or the agreed ticket that will need it. Revisit an export when its last caller disappears.
+- Keep each capability with its owner. Before adding a crate dependency, identify the operation the caller needs. Keep shared work behind that operation so callers can use it without assembling the same internal steps themselves.
+- Exercise public behavior through the same interface the application uses. An integration test alone is insufficient reason to export an implementation detail. Private tests can live beside the code.
+
 ### Deferred work
 
 A `TODO` and a ticket always come as a pair, so the code shows what is missing and the tracker shows where it is followed.

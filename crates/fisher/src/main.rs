@@ -2,9 +2,11 @@ use std::{
     io::{self, BufRead, Write},
     sync::mpsc,
     thread,
+    time::{SystemTime, UNIX_EPOCH},
 };
 
-use uci::{Command, Input, Response, parse_command};
+use rules::{Move, Position};
+use uci::{Command, Input, Response, UciMove, parse_command};
 
 fn main() -> io::Result<()> {
     let (sender, lines) = mpsc::channel();
@@ -21,6 +23,8 @@ fn answer_commands(
     lines: impl IntoIterator<Item = io::Result<String>>,
     output: &mut impl Write,
 ) -> io::Result<()> {
+    let mut position = Position::starting();
+    let mut random = RandomMove::from_clock();
     for line in lines {
         match parse_command(&line?) {
             Input::Handled(Command::Uci) => {
@@ -32,6 +36,17 @@ fn answer_commands(
                 send(output, &Response::UciOk)?;
             }
             Input::Handled(Command::IsReady) => send(output, &Response::ReadyOk)?,
+            Input::Handled(Command::StartPosition) => position = Position::starting(),
+            Input::Handled(Command::UnsupportedPosition) => {
+                // TODO(fisher-l7f.7): Accept FEN and move lists in position commands.
+                send(output, &Response::InfoString("expected position startpos"))?;
+            }
+            Input::Handled(Command::Go) => {
+                let moves = position.legal_moves();
+                if let Some(chosen) = random.choose(&moves) {
+                    send(output, &Response::BestMove(UciMove::from(*chosen)))?;
+                }
+            }
             Input::Handled(Command::Quit) => break,
             Input::Ignored | Input::Unknown => {}
         }
@@ -69,6 +84,28 @@ fn read_input(
         let _sent = send_line(sender, &line);
     }
     Ok(())
+}
+
+struct RandomMove(u64);
+
+impl RandomMove {
+    fn from_clock() -> Self {
+        let elapsed = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default();
+        Self(elapsed.as_secs() ^ u64::from(elapsed.subsec_nanos()))
+    }
+
+    fn choose<'a>(&mut self, moves: &'a [Move]) -> Option<&'a Move> {
+        // TODO(fisher-2aj): Choose moves by search and evaluation and report search info.
+        let count = u64::try_from(moves.len()).ok()?;
+        self.0 = self.0.wrapping_add(0x9e37_79b9_7f4a_7c15);
+        let mut value = self.0;
+        value = (value ^ (value >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+        value = (value ^ (value >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+        let index = usize::try_from((value ^ (value >> 31)).checked_rem(count)?).ok()?;
+        moves.get(index)
+    }
 }
 
 fn send_line(sender: &mpsc::Sender<io::Result<String>>, line: &[u8]) -> bool {

@@ -8,6 +8,8 @@ use std::{
     time::{Duration, Instant},
 };
 
+use shakmaty::{Chess, uci::UciMove};
+
 const TIMEOUT: Duration = Duration::from_secs(5);
 
 #[test]
@@ -33,6 +35,11 @@ fn quit() -> io::Result<()> {
 #[test]
 fn end_of_input() -> io::Result<()> {
     play_transcript("end-of-input")
+}
+
+#[test]
+fn startpos() -> io::Result<()> {
+    play_transcript("startpos")
 }
 
 fn play_transcript(name: &str) -> io::Result<()> {
@@ -105,6 +112,11 @@ fn reply_matches(expected: &str, actual: &str) -> bool {
         "id name fisher {version}" => {
             actual == concat!("id name fisher ", env!("CARGO_PKG_VERSION"))
         }
+        "bestmove {legal}" => actual
+            .strip_prefix("bestmove ")
+            .and_then(|text| text.parse::<UciMove>().ok())
+            .is_some_and(|uci_move| uci_move.to_move(&Chess::default()).is_ok()),
+        "info string {message}" => actual.starts_with("info string "),
         _ => expected == actual,
     }
 }

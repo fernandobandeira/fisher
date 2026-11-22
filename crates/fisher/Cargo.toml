@@ -5,7 +5,11 @@ edition.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+rules = { path = "../rules" }
 uci = { path = "../uci" }
+
+[dev-dependencies]
+shakmaty = "0.30.3"
 
 [lints]
 workspace = true

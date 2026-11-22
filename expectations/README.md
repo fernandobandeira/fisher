@@ -43,3 +43,14 @@ accepted `position` commands and their move lists. A `bestmove` reply does
 not itself advance the position. For `go infinite`, check `readyok` before
 sending `stop` so an early `bestmove` fails by output order. A runner may
 bound reads and process exit to detect a hang.
+
+## Published perft
+
+[`perft.epd`](perft.epd) holds one position per data line. Split at semicolons.
+The first field is the full six-field FEN. Each remaining field has the form
+`D<depth> <count>`, with both values written in decimal. Skip blank lines and
+lines starting with `#`. Read counts as `u128` to accommodate depth 15.
+Keep the records in published order, from the starting position through
+Position 6, because the tests assign depths in that order.
+The comments record the first depths at which the source reports en passant
+captures, castling, and promotions.

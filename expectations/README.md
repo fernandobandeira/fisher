@@ -9,4 +9,4 @@ Expected values that came from outside the implementer: published perft counts, 
 - The agent implementing a ticket does not edit this directory. If a value looks wrong, it stops and says why.
 - This directory is a protected path: a commit that touches it needs a `Guard-Change:` line, and the human reads it.
 
-Nothing is here yet. The first slice that generates moves adds the perft table.
+For fisher-l7f, fisher-l7f.1 supplies the UCI transcripts before protocol code, and fisher-l7f.2 supplies the published perft counts before move generation.

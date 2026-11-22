@@ -50,7 +50,7 @@ These are the starting examples. The grilling for each feature settles the real 
 | It stays correct on positions nobody picked | The legal moves differ from a reference engine's on a random reachable position | Independent implementation |
 | Making then unmaking a move loses nothing | The position after unmake differs from the one before make | Invariant |
 | The incremental hash is right | It differs from the hash computed from scratch | Invariant |
-| A FEN survives a round trip | Parsing then formatting changes the string | Invariant |
+| A canonical FEN survives a round trip | Parsing then formatting changes the canonical string | Invariant |
 | This change does not alter behaviour (a refactor, a speedup) | The bench signature changes: the node count of a fixed search over fixed positions | The previous revision |
 | This change plays stronger | SPRT against the previous revision does not accept the improvement | Statistical test |
 | It never plays an illegal move, crashes or loses on time | A match of many games reports one | The match runner |

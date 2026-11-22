@@ -1,5 +1,7 @@
-use rules::Position;
-use shakmaty::{Chess, EnPassantMode, Position as _, fen::Fen};
+use std::{io, ops::RangeInclusive, time::Instant};
+
+use rules::{Move, Position, Promotion, Square};
+use shakmaty::{CastlingMode, Chess, EnPassantMode, Position as _, fen::Fen, uci::UciMove};
 
 const PERFT: &str = include_str!("../../../expectations/perft.epd");
 
@@ -13,19 +15,38 @@ fn perft_positions() -> impl Iterator<Item = (&'static str, &'static str)> {
     })
 }
 
-fn reference_games(mut visit: impl FnMut(&Chess)) -> Result<(), Box<dyn std::error::Error>> {
-    for mut seed in 1_u64..=8 {
+fn published_perft_count(
+    fen: &str,
+    counts: &str,
+    depth: u8,
+) -> Result<u128, Box<dyn std::error::Error>> {
+    Ok(counts
+        .split(';')
+        .filter_map(|count| count.trim().split_once(' '))
+        .find_map(|(label, count)| {
+            (label.strip_prefix('D')?.parse::<u8>().ok()? == depth).then_some(count)
+        })
+        .ok_or_else(|| format!("no published perft at depth {depth} for {fen}"))?
+        .parse::<u128>()?)
+}
+
+fn reference_games(
+    seeds: RangeInclusive<u64>,
+    mut visit: impl FnMut(&Chess, Option<shakmaty::Move>),
+) -> Result<(), Box<dyn std::error::Error>> {
+    for mut seed in seeds {
         let mut position = Chess::default();
         for _ in 0..128 {
-            visit(&position);
             let moves = position.legal_moves();
             if moves.is_empty() {
+                visit(&position, None);
                 break;
             }
             seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
             let count = u64::try_from(moves.len())?;
             let index = usize::try_from((seed >> 32) % count)?;
             let chosen = moves.get(index).copied().ok_or("missing reference move")?;
+            visit(&position, Some(chosen));
             position = position.play(chosen)?;
         }
     }
@@ -43,7 +64,7 @@ fn canonical_fen_round_trips() {
     for (fen, _) in perft_positions() {
         assert_eq!(Position::from_fen(fen).unwrap().to_fen(), fen);
     }
-    reference_games(|position| {
+    reference_games(1..=8, |position, _| {
         let fen = Fen::from_position(position, EnPassantMode::Always).to_string();
         assert_eq!(Position::from_fen(&fen).unwrap().to_fen(), fen);
     })
@@ -89,4 +110,174 @@ fn rejected_fens_identify_the_problem() {
         let error = Position::from_fen(fen).unwrap_err().to_string();
         assert!(error.contains(problem), "{fen}: {error}");
     }
+}
+
+#[test]
+fn legal_moves_and_resulting_positions_match_reference_games() {
+    let mut king_in_check = false;
+    let mut played_en_passant = false;
+    let mut played_castling = false;
+    let mut played_promotion = false;
+    // Seed 17 gives the first castle. Seed 21 gives the first en passant capture.
+    reference_games(1..=21, |reference, chosen| {
+        king_in_check |= reference.is_check();
+        let fen = Fen::from_position(reference, EnPassantMode::Always).to_string();
+        let position = Position::from_fen(&fen).unwrap();
+        let mut actual: Vec<_> = position
+            .legal_moves()
+            .into_iter()
+            .map(|movement| (uci_move(movement), movement))
+            .collect();
+        let mut expected: Vec<_> = reference
+            .legal_moves()
+            .into_iter()
+            .map(|movement| (UciMove::from_standard(movement).to_string(), movement))
+            .collect();
+        actual.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
+        expected.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
+        assert_eq!(actual.len(), expected.len(), "legal move count at {fen}");
+
+        for ((actual_uci, movement), (expected_uci, expected_move)) in
+            actual.into_iter().zip(expected)
+        {
+            assert_eq!(actual_uci, expected_uci, "legal moves differ at {fen}");
+            let next = reference.clone().play(expected_move).unwrap();
+            let expected_fen = Fen::from_position(&next, EnPassantMode::Always).to_string();
+            assert_eq!(
+                movement.play().to_fen(),
+                expected_fen,
+                "{fen} + {actual_uci}"
+            );
+
+            assert_eq!(
+                position.legal_move(movement.from(), movement.to(), movement.promotion()),
+                Some(movement),
+                "move lookup at {fen} + {actual_uci}"
+            );
+        }
+
+        if let Some(chosen) = chosen {
+            played_en_passant |= chosen.is_en_passant();
+            played_castling |= chosen.is_castle();
+            played_promotion |= chosen.is_promotion();
+        }
+    })
+    .unwrap();
+    assert!(king_in_check, "no position had the king in check");
+    assert!(played_en_passant, "no en passant capture was played");
+    assert!(played_castling, "no castle was played");
+    assert!(played_promotion, "no promotion was played");
+}
+
+#[test]
+fn illegal_uci_moves_have_no_match() {
+    let initial = Fen::from_position(&Chess::default(), EnPassantMode::Always).to_string();
+    for (case, fen, from, to) in [
+        ("three-square pawn advance", initial.as_str(), "e2", "e5"),
+        (
+            "missing promotion piece",
+            "8/P7/8/8/8/6q1/5k2/7K w - - 0 1",
+            "a7",
+            "a8",
+        ),
+        (
+            "en passant exposing the king",
+            "k7/8/8/r4pPK/8/8/8/8 w - f6 0 1",
+            "g5",
+            "f6",
+        ),
+    ] {
+        let reference = fen
+            .parse::<Fen>()
+            .unwrap()
+            .into_position::<Chess>(CastlingMode::Standard)
+            .unwrap();
+        let notation = format!("{from}{to}");
+        let uci = notation.parse::<UciMove>().unwrap();
+        assert!(
+            uci.to_move(&reference).is_err(),
+            "{case}: {fen} + {notation}"
+        );
+
+        let position = Position::from_fen(fen).unwrap();
+        assert!(
+            position
+                .legal_move(
+                    Square::parse(from).unwrap(),
+                    Square::parse(to).unwrap(),
+                    None
+                )
+                .is_none(),
+            "{case}: {fen} + {notation}"
+        );
+    }
+}
+
+fn uci_move(movement: Move) -> String {
+    let promotion = match movement.promotion() {
+        Some(Promotion::Knight) => "n",
+        Some(Promotion::Bishop) => "b",
+        Some(Promotion::Rook) => "r",
+        Some(Promotion::Queen) => "q",
+        None => "",
+    };
+    format!("{}{}{promotion}", movement.from(), movement.to())
+}
+
+#[test]
+fn shallow_perft_matches_published_counts() {
+    // Position 2 reaches castling and en passant at these depths.
+    // Position 4 also reaches promotion.
+    check_perft(&[3, 2, 3, 2, 3, 3], io::sink()).unwrap();
+}
+
+#[test]
+#[ignore = "Set FISHER_PERFT_DEPTHS to six comma-separated depths and run in release mode"]
+fn perft_at_selected_depths() {
+    let depths: Vec<u8> = std::env::var("FISHER_PERFT_DEPTHS")
+        .unwrap()
+        .split(',')
+        .map(str::parse)
+        .collect::<Result<_, _>>()
+        .unwrap();
+    check_perft(&depths, io::stdout().lock()).unwrap();
+}
+
+fn check_perft(
+    depths: &[u8],
+    mut output: impl io::Write,
+) -> Result<(), Box<dyn std::error::Error>> {
+    assert_eq!(
+        perft_positions().count(),
+        depths.len(),
+        "depths per position"
+    );
+    for (index, ((fen, counts), &depth)) in perft_positions().zip(depths).enumerate() {
+        let expected = published_perft_count(fen, counts, depth)?;
+        let position = Position::from_fen(fen)?;
+        let start = Instant::now();
+        let actual = perft(&position, depth);
+        writeln!(
+            output,
+            "Position {} D{depth} {actual} in {:.3}s",
+            index + 1,
+            start.elapsed().as_secs_f64()
+        )?;
+        assert_eq!(actual, expected, "perft at depth {depth} for {fen}");
+    }
+    Ok(())
+}
+
+fn perft(position: &Position, depth: u8) -> u128 {
+    if depth == 0 {
+        return 1;
+    }
+    let moves = position.legal_moves();
+    if depth == 1 {
+        return moves.into_iter().map(|_| 1_u128).sum();
+    }
+    moves
+        .into_iter()
+        .map(|movement| perft(&movement.play(), depth - 1))
+        .sum()
 }

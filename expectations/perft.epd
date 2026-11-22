@@ -1,0 +1,29 @@
+# Source: https://www.chessprogramming.org/Perft_Results
+# Retrieved: 2026-11-22
+# Each data line has a FEN followed by published perft depths and counts.
+
+# Starting position (the source’s “Initial position”)
+# First occurrences in the published breakdown are en passant at depth 5, castling at depth 7, promotion at depth 9.
+rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1 ; D0 1 ; D1 20 ; D2 400 ; D3 8902 ; D4 197281 ; D5 4865609 ; D6 119060324 ; D7 3195901860 ; D8 84998978956 ; D9 2439530234167 ; D10 69352859712417 ; D11 2097651003696806 ; D12 62854969236701747 ; D13 1981066775000396239 ; D14 61885021521585529237 ; D15 2015099950053364471960
+
+# Position 2
+# The source omits the FEN clocks. Use 0 and 1 to complete the FEN.
+# First occurrences in the published breakdown are en passant at depth 2, castling at depth 1, promotion at depth 4.
+r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1 ; D1 48 ; D2 2039 ; D3 97862 ; D4 4085603 ; D5 193690690 ; D6 8031647685
+
+# Position 3
+# First occurrences in the published breakdown are en passant at depth 3, castling absent, promotion at depth 6.
+8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1 ; D1 14 ; D2 191 ; D3 2812 ; D4 43238 ; D5 674624 ; D6 11030083 ; D7 178633661 ; D8 3009794393
+
+# Position 4
+# The source lists a mirror with the same counts. Use the primary FEN.
+# First occurrences in the published breakdown are en passant at depth 3, castling at depth 2, promotion at depth 2.
+r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1 ; D1 6 ; D2 264 ; D3 9467 ; D4 422333 ; D5 15833292 ; D6 706045033
+
+# Position 5
+# The source publishes only node counts.
+rnbq1k1r/pp1Pbppp/2p5/8/2B5/8/PPP1NnPP/RNBQK2R w KQ - 1 8 ; D1 44 ; D2 1486 ; D3 62379 ; D4 2103487 ; D5 89941194
+
+# Position 6
+# The source publishes only node counts.
+r4rk1/1pp1qppp/p1np1n2/2b1p1B1/2B1P1b1/P1NP1N2/1PP1QPPP/R4RK1 w - - 0 10 ; D0 1 ; D1 46 ; D2 2079 ; D3 89890 ; D4 3894594 ; D5 164075551 ; D6 6923051137 ; D7 287188994746 ; D8 11923589843526 ; D9 490154852788714

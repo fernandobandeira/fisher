@@ -33,7 +33,7 @@ If it is red and you cannot fix it, say so plainly with the output. Do not weake
 ## Boundaries
 
 - Stay inside the crates your ticket names. If the work needs a change outside them, say so in your report instead of making it quietly.
-- Another crate is used only through what it exports. Do not widen an export to reach something; raise it.
+- Design each library crate as a deep module. Other crates enter through its root exports in `lib.rs`. Keep implementation modules private. Follow the [crate interface rules](CODING_STANDARDS.md#crate-interfaces) when adding a dependency, export or cross-crate test.
 - A change to a crate's public interface is a decision for the human. Propose it, do not slip it in.
 
 ## Vocabulary

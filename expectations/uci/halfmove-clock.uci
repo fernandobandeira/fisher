@@ -1,0 +1,14 @@
+# Sources: April 2006 UCI specification https://backscattering.de/chess/uci/
+# and fisher-l7f owner decisions. Written 2026-11-22.
+> position fen 7k/8/5K2/6Q1/8/8/8/8 b - - 0 1
+> go
+# UCI bestmove. Black's only legal move here is h8h7.
+# Rejecting the next FEN would repeat it.
+< bestmove h8h7
+> position fen 7k/8/5K1Q/8/8/8/8/8 b - - 00 1
+> go
+# The owner accepts 00 as zero in fisher-l7f.5. This position has one legal move.
+< bestmove h8g8
+# UCI quit.
+> quit
+! exit

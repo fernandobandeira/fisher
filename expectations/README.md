@@ -10,3 +10,36 @@ Expected values that came from outside the implementer: published perft counts, 
 - This directory is a protected path: a commit that touches it needs a `Guard-Change:` line, and the human reads it.
 
 For fisher-l7f, fisher-l7f.1 supplies the UCI transcripts before protocol code, and fisher-l7f.2 supplies the published perft counts before move generation.
+
+## UCI transcripts
+
+Each `uci/*.uci` path is one session with a fresh fisher process. Read
+the records top to bottom. Blank lines and lines starting with `#` are
+comments. The header gives the sources and date. A comment above a command
+or reply names the passage or owner decision that supplies its expectation.
+
+| Record | Meaning |
+|---|---|
+| `> text` | Send the text and flush standard input. Append LF. Preserve whitespace after the prefix. |
+| `>CR text` | Send and flush as above. Append CR. |
+| `< text` | Read the next standard-output line and compare its text exactly, excluding the line ending. |
+| `! eof` | Close standard input. |
+| `! exit` | Require clean process exit and no further standard output. If input is still open, keep it open until exit. |
+
+In both send records, decode `\t` as TAB, `\r` as CR, `\\` as a backslash,
+and `\xNN` as one byte written with two hexadecimal digits.
+
+The following expected lines have special meanings. All other replies are exact.
+
+| Expected line | Match |
+|---|---|
+| `< id name fisher {version}` | Substitute the version of the fisher binary under test. |
+| `< info string {message}` | Match one `info string` line with any message. |
+| `< info string {message:fragment}` | Match one `info string` line whose message contains the case-sensitive fragment. |
+| `< bestmove {legal}` | Match one `bestmove` carrying a UCI move that an independent implementation lists as legal in the current position. |
+
+For `{legal}`, the reference starts at the starting position and follows
+accepted `position` commands and their move lists. A `bestmove` reply does
+not itself advance the position. For `go infinite`, check `readyok` before
+sending `stop` so an early `bestmove` fails by output order. A runner may
+bound reads and process exit to detect a hang.

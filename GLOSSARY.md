@@ -95,3 +95,6 @@ _Avoid_: host, client, front end, chess app
 **UCI move**:
 A move as UCI writes it: the square a piece leaves, the square it reaches, and a piece kind when a pawn promotes, such as e7e8q. It does not say whether it castles or captures; only a position can turn it into a move.
 _Avoid_: long algebraic notation, coordinate move, move string
+
+**Held move**:
+The selected move or `0000` withheld after `go infinite` until `stop`. The engine discards it on `quit` or EOF.

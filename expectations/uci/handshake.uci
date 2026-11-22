@@ -1,0 +1,15 @@
+# Sources: April 2006 UCI specification https://backscattering.de/chess/uci/
+# and fisher-l7f owner decisions. Written 2026-11-22.
+> uci
+# UCI uci/id and the owner's name and version decision.
+< id name fisher {version}
+# UCI id and the owner's author decision.
+< id author Fernando Bandeira
+# UCI uciok follows the identification.
+< uciok
+> isready
+# UCI isready/readyok.
+< readyok
+# UCI quit.
+> quit
+! exit

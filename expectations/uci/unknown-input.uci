@@ -1,0 +1,20 @@
+# Sources: April 2006 UCI specification https://backscattering.de/chess/uci/
+# and fisher-l7f owner decisions. Written 2026-11-22.
+# UCI general rules for unknown tokens, whitespace and line endings.
+> unknown
+> unknown\tisready\t
+# UCI isready/readyok after skipping the unknown line and prefix.
+< readyok
+>    isready\r
+# UCI arbitrary whitespace and CRLF line endings.
+< readyok
+>CR isready
+# UCI allows CR alone as a command terminator.
+< readyok
+> setoption name Path value caf\xe9
+> isready
+# The owner ignores setoption. UCI isready/readyok verifies that input continues.
+< readyok
+# UCI quit.
+> quit
+! exit

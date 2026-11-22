@@ -2,19 +2,20 @@
 
 A chess engine in Rust, built almost entirely by coding agents, and set up so that their work is checked by experiments instead of by reading every line.
 
-There is no engine yet. This is the ground it will be built on.
+Fisher plays random legal moves over UCI. The [acceptance record](docs/uci-acceptance.md) covers the protocol sessions, perft counts and timed games.
 
 ## Set up a fresh clone
 
 ```sh
 git config core.hooksPath .githooks                           # run the check before every commit
 npx skills@latest experimental_install -a claude-code codex   # restore the agent skills
-scripts/check                                                 # format, lints, tests, glossary
+cargo install cargo-deny --version 0.22.0 --locked             # check dependency advisories and sources
+scripts/check                                                 # run the same checks as CI
 ```
 
 The skills are Matt Pocock's. They are not committed: `skills-lock.json` pins the commit, and the second command copies them into `.agents/skills/`. A new git worktree needs the same command.
 
-Rust comes from [rustup](https://rustup.rs); `rust-toolchain.toml` pins the version.
+The crate boundary check uses Python 3.8 or newer. The dependency check needs network access to refresh the RustSec advisory database and Cargo registry. Rust comes from [rustup](https://rustup.rs). The version is pinned in `rust-toolchain.toml`.
 
 ## Start work
 

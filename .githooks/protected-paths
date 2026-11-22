@@ -10,3 +10,4 @@
 ^clippy\.toml$
 ^rustfmt\.toml$
 ^rust-toolchain\.toml$
+^deny\.toml$

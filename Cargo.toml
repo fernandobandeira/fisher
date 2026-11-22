@@ -8,6 +8,7 @@ rust-version = "1.99.1"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
+unreachable_pub = "deny"
 unused_must_use = "deny"
 
 [workspace.lints.clippy]

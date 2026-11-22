@@ -1,4 +1,5 @@
 mod glossary;
+mod interfaces;
 
 use std::env;
 use std::path::Path;
@@ -10,19 +11,23 @@ use std::process::ExitCode;
 )]
 fn main() -> ExitCode {
     let mut args = env::args_os().skip(1);
-    if args.next().is_some_and(|arg| arg == "glossary") && args.next().is_none() {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        match glossary::check(&root) {
-            Ok(diagnostics) if diagnostics.is_empty() => return ExitCode::SUCCESS,
-            Ok(diagnostics) => {
-                for diagnostic in diagnostics {
-                    eprintln!("{diagnostic}");
-                }
-            }
-            Err(error) => eprintln!("{error}"),
+    let check = match (args.next(), args.next()) {
+        (Some(command), None) if command == "glossary" => glossary::check,
+        (Some(command), None) if command == "interfaces" => interfaces::check,
+        _ => {
+            eprintln!("Usage: cargo xtask <glossary|interfaces>");
+            return ExitCode::FAILURE;
         }
-    } else {
-        eprintln!("Usage: cargo xtask glossary");
+    };
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    match check(&root) {
+        Ok(diagnostics) if diagnostics.is_empty() => return ExitCode::SUCCESS,
+        Ok(diagnostics) => {
+            for diagnostic in diagnostics {
+                eprintln!("{diagnostic}");
+            }
+        }
+        Err(error) => eprintln!("{error}"),
     }
     ExitCode::FAILURE
 }

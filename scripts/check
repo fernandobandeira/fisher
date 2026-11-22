@@ -33,7 +33,17 @@ crates_inherit_lints() {
 
 check Format 'cargo fmt --all' cargo fmt --all -- --check
 check Lints 'scripts/check' crates_inherit_lints
+check 'Crate boundary fixtures' 'scripts/check-crate-boundaries --self-test' \
+    scripts/check-crate-boundaries --self-test
+check 'Crate boundaries' 'scripts/check-crate-boundaries' scripts/check-crate-boundaries
 check Clippy 'cargo clippy --locked --workspace --all-targets -- -D warnings' \
     cargo clippy --locked --workspace --all-targets -- -D warnings
 check Tests 'cargo test --locked --workspace' cargo test --locked --workspace
 check Glossary 'cargo xtask glossary' cargo xtask glossary
+check 'Crate interfaces' 'cargo xtask interfaces' cargo xtask interfaces
+if ! command -v cargo-deny >/dev/null 2>&1; then
+    echo 'Install cargo-deny with: cargo install cargo-deny --version 0.22.0 --locked' >&2
+    exit 1
+fi
+check 'Dependency advisories and sources' 'cargo deny --locked check advisories sources' \
+    cargo deny --locked check advisories sources

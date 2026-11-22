@@ -1,0 +1,218 @@
+use std::{
+    fs,
+    io::{self, BufRead, BufReader, Write},
+    path::Path,
+    process::{Child, Command, Stdio},
+    sync::mpsc::{self, Receiver},
+    thread,
+    time::{Duration, Instant},
+};
+
+const TIMEOUT: Duration = Duration::from_secs(5);
+
+#[test]
+fn handshake() -> io::Result<()> {
+    play_transcript("handshake")
+}
+
+#[test]
+fn unknown_input() -> io::Result<()> {
+    play_transcript("unknown-input")
+}
+
+#[test]
+fn ignored_commands() -> io::Result<()> {
+    play_transcript("ignored-commands")
+}
+
+#[test]
+fn quit() -> io::Result<()> {
+    play_transcript("quit")
+}
+
+#[test]
+fn end_of_input() -> io::Result<()> {
+    play_transcript("end-of-input")
+}
+
+fn play_transcript(name: &str) -> io::Result<()> {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../expectations/uci")
+        .join(format!("{name}.uci"));
+    let transcript = fs::read_to_string(path)?;
+    let mut session = Session::start()?;
+    let mut ended = false;
+
+    for (line_index, line) in transcript.lines().enumerate() {
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+
+        ended = if ended {
+            Err(io::Error::other("record after ! exit"))
+        } else {
+            session.play_record(line)
+        }
+        .map_err(|error| io::Error::other(format!("{name}.uci:{}: {error}", line_index + 1)))?;
+    }
+
+    if ended {
+        Ok(())
+    } else {
+        Err(io::Error::other(format!("{name}.uci: missing ! exit")))
+    }
+}
+
+fn decode_command(command: &str) -> io::Result<Vec<u8>> {
+    let mut decoded = Vec::with_capacity(command.len());
+    let mut bytes = command.bytes();
+    while let Some(byte) = bytes.next() {
+        decoded.push(if byte == b'\\' {
+            match bytes.next() {
+                Some(b't') => b'\t',
+                Some(b'r') => b'\r',
+                Some(b'\\') => b'\\',
+                Some(b'x') => {
+                    let high = decode_hex_digit(bytes.next())?;
+                    let low = decode_hex_digit(bytes.next())?;
+                    high * 16 + low
+                }
+                other => {
+                    return Err(io::Error::other(format!(
+                        "invalid escape {:?}",
+                        other.map(char::from)
+                    )));
+                }
+            }
+        } else {
+            byte
+        });
+    }
+    Ok(decoded)
+}
+
+fn decode_hex_digit(byte: Option<u8>) -> io::Result<u8> {
+    match byte {
+        Some(byte @ b'0'..=b'9') => Ok(byte - b'0'),
+        Some(byte @ b'a'..=b'f') => Ok(byte - b'a' + 10),
+        Some(byte @ b'A'..=b'F') => Ok(byte - b'A' + 10),
+        _ => Err(io::Error::other("invalid hex escape")),
+    }
+}
+
+fn reply_matches(expected: &str, actual: &str) -> bool {
+    match expected {
+        "id name fisher {version}" => {
+            actual == concat!("id name fisher ", env!("CARGO_PKG_VERSION"))
+        }
+        _ => expected == actual,
+    }
+}
+
+struct Session {
+    child: Child,
+    output: Receiver<io::Result<String>>,
+}
+
+impl Session {
+    fn start() -> io::Result<Self> {
+        let child = Command::new(env!("CARGO_BIN_EXE_fisher"))
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()?;
+        let (sender, output) = mpsc::channel();
+        let mut session = Self { child, output };
+        let stdout = session
+            .child
+            .stdout
+            .take()
+            .ok_or_else(|| io::Error::other("missing fisher stdout"))?;
+
+        thread::Builder::new().spawn(move || {
+            for line in BufReader::new(stdout).lines() {
+                if sender.send(line).is_err() {
+                    break;
+                }
+            }
+        })?;
+
+        Ok(session)
+    }
+
+    fn play_record(&mut self, line: &str) -> io::Result<bool> {
+        if let Some(command) = line.strip_prefix("> ") {
+            self.send(command, b'\n')?;
+        } else if let Some(command) = line.strip_prefix(">CR ") {
+            self.send(command, b'\r')?;
+        } else if let Some(expected) = line.strip_prefix("< ") {
+            self.expect_reply(expected)?;
+        } else if line == "! eof" {
+            drop(self.child.stdin.take());
+        } else if line == "! exit" {
+            self.expect_exit()?;
+            return Ok(true);
+        } else {
+            return Err(io::Error::other(format!("unknown record {line:?}")));
+        }
+        Ok(false)
+    }
+
+    fn send(&mut self, command: &str, ending: u8) -> io::Result<()> {
+        let stdin = self
+            .child
+            .stdin
+            .as_mut()
+            .ok_or_else(|| io::Error::other("fisher stdin is closed"))?;
+        stdin.write_all(&decode_command(command)?)?;
+        stdin.write_all(&[ending])?;
+        stdin.flush()
+    }
+
+    fn expect_reply(&self, expected: &str) -> io::Result<()> {
+        let actual = self.next_reply()?.ok_or_else(|| {
+            io::Error::other(format!("stdout closed while expecting {expected:?}"))
+        })?;
+        if reply_matches(expected, &actual) {
+            Ok(())
+        } else {
+            Err(io::Error::other(format!(
+                "expected {expected:?}, got {actual:?}"
+            )))
+        }
+    }
+
+    fn next_reply(&self) -> io::Result<Option<String>> {
+        match self.output.recv_timeout(TIMEOUT) {
+            Ok(line) => line.map(Some),
+            Err(mpsc::RecvTimeoutError::Disconnected) => Ok(None),
+            Err(error @ mpsc::RecvTimeoutError::Timeout) => Err(io::Error::other(error)),
+        }
+    }
+
+    fn expect_exit(&mut self) -> io::Result<()> {
+        if let Some(extra) = self.next_reply()? {
+            return Err(io::Error::other(format!("unexpected output {extra:?}")));
+        }
+        let deadline = Instant::now() + TIMEOUT;
+        loop {
+            if let Some(status) = self.child.try_wait()? {
+                return if status.success() {
+                    Ok(())
+                } else {
+                    Err(io::Error::other(format!("fisher exited with {status}")))
+                };
+            }
+            if Instant::now() >= deadline {
+                return Err(io::Error::other("timed out waiting for fisher to exit"));
+            }
+            thread::sleep(Duration::from_millis(5));
+        }
+    }
+}
+
+impl Drop for Session {
+    fn drop(&mut self) {
+        drop(self.child.kill());
+        drop(self.child.wait());
+    }
+}

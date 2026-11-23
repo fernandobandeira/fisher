@@ -278,6 +278,7 @@ fn info_allowance_matches_the_documented_grammar() {
     // The allowance pattern in expectations/README.md sets these results.
     let cases = [
         ("info depth 4 score cp 0 nodes 0", true),
+        ("info depth 4 score cp 100 nodes 197281", true),
         ("info depth 4 score cp -100 nodes 197281", true),
         ("info depth 4 score mate 2 nodes 197281", true),
         ("info depth 4 score mate -2 nodes 197281", true),

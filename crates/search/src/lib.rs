@@ -24,12 +24,13 @@ pub fn minimax(position: &Position, depth: u8) -> SearchResult {
     let (chosen, score) = search(position, depth, 0, &mut nodes);
     SearchResult {
         chosen_move: chosen,
-        score: classify_score(score, depth),
+        score: mate_within_depth_or_centipawns(score, depth),
         nodes,
     }
 }
 
-fn classify_score(score: i32, depth: u8) -> Score {
+/// Returns a mate score if the mate is within the search depth, or a centipawn score otherwise.
+fn mate_within_depth_or_centipawns(score: i32, depth: u8) -> Score {
     let mate_plies = CHECKMATE - score.abs();
     if let Ok(plies) = u8::try_from(mate_plies)
         && plies <= depth

@@ -1,6 +1,7 @@
 use std::{fmt, num::NonZeroU64};
 
 mod fen;
+mod legal_moves;
 
 pub use fen::FenError;
 
@@ -111,6 +112,7 @@ pub struct Move {
     from: Square,
     to: Square,
     promotion: Option<Promotion>,
+    position: Position,
 }
 
 impl Move {
@@ -128,9 +130,15 @@ impl Move {
     pub fn promotion(self) -> Option<Promotion> {
         self.promotion
     }
+
+    /// Returns the position reached by playing this legal move.
+    #[must_use]
+    pub fn play(self) -> Position {
+        self.position
+    }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Position {
     pieces: [Option<Piece>; 64],
     side_to_move: Color,
@@ -169,39 +177,13 @@ impl Position {
         position
     }
 
-    /// Lists the legal moves of the starting position.
-    #[must_use]
-    pub fn legal_moves(&self) -> Vec<Move> {
-        // TODO(fisher-l7f.6): Generate legal moves for every position.
-        let mut moves = Vec::new();
-        for file in 0..8 {
-            let from = Square::new(file, 1);
-            for to_rank in [2, 3] {
-                moves.push(Move {
-                    from,
-                    to: Square::new(file, to_rank),
-                    promotion: None,
-                });
-            }
-        }
-        for file in [1, 6] {
-            let from = Square::new(file, 0);
-            for file_offset in [-1, 1] {
-                if let Some(to) = from.offset(file_offset, 2) {
-                    moves.push(Move {
-                        from,
-                        to,
-                        promotion: None,
-                    });
-                }
-            }
-        }
-        moves
+    fn put(&mut self, square: Square, piece: Piece) {
+        self.set_piece(square, Some(piece));
     }
 
-    fn put(&mut self, square: Square, piece: Piece) {
+    fn set_piece(&mut self, square: Square, piece: Option<Piece>) {
         if let Some(occupant) = self.pieces.get_mut(square.index()) {
-            *occupant = Some(piece);
+            *occupant = piece;
         }
     }
 

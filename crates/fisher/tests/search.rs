@@ -92,6 +92,16 @@ fn mate_on_the_horizon_scores_as_material() -> Result<(), Box<dyn Error>> {
 }
 
 #[test]
+fn stalemate_on_the_horizon_scores_as_material() -> Result<(), Box<dyn Error>> {
+    let fen = "k7/8/1p6/1Q6/8/8/8/7K w - - 0 1";
+    let position: Chess = fen.parse::<Fen>()?.into_position(CastlingMode::Standard)?;
+    let (chosen, _, _) = reference::minimax(&position, 1);
+    let chosen = chosen.ok_or("reference found no legal move")?;
+    assert!(position.clone().play(chosen)?.is_stalemate());
+    assert_matches_reference(fen, &position, 1)
+}
+
+#[test]
 fn equal_scores_keep_the_first_legal_move() {
     let position = Position::starting();
     // None of the starting position's 20 legal moves changes the material.

@@ -22,9 +22,17 @@ pub struct SearchResult {
 pub fn minimax(position: &Position, depth: u8) -> SearchResult {
     let mut nodes = 0;
     let (chosen, score) = search(position, depth, 0, &mut nodes);
+    SearchResult {
+        chosen_move: chosen,
+        score: classify_score(score, depth),
+        nodes,
+    }
+}
+
+fn classify_score(score: i32, depth: u8) -> Score {
     let mate_plies = CHECKMATE - score.abs();
-    let score = if (0..=i32::from(depth)).contains(&mate_plies)
-        && let Ok(plies) = u8::try_from(mate_plies)
+    if let Ok(plies) = u8::try_from(mate_plies)
+        && plies <= depth
     {
         Score::Mate {
             plies,
@@ -32,11 +40,6 @@ pub fn minimax(position: &Position, depth: u8) -> SearchResult {
         }
     } else {
         Score::Centipawns(score)
-    };
-    SearchResult {
-        chosen_move: chosen,
-        score,
-        nodes,
     }
 }
 

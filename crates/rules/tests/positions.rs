@@ -107,6 +107,7 @@ fn rejected_fens_identify_the_problem() {
         ("4k3/4K3/8/8/8/8/8/8 w - - 0 1", "adjacent kings"),
         ("4k3/8/8/8/8/8/8/4K3 w K - 0 1", "home squares"),
         ("4k3/8/8/8/8/8/8/3K3R w K - 0 1", "home squares"),
+        ("4k3/8/8/8/8/8/8/4RK2 w - - 0 1", "in check"),
     ] {
         let error = Position::from_fen(fen).unwrap_err().to_string();
         assert!(error.contains(problem), "{fen}: {error}");

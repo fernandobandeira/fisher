@@ -73,6 +73,11 @@ fn rejected_position() -> io::Result<()> {
 }
 
 #[test]
+fn rejected_position_opposite_check() -> io::Result<()> {
+    play_transcript("rejected-position-opposite-check")
+}
+
+#[test]
 fn go_infinite() -> io::Result<()> {
     play_transcript("go-infinite")
 }

@@ -26,7 +26,8 @@ impl Position {
     ///
     /// # Errors
     ///
-    /// Reports the invalid field or a position that lacks the required pieces.
+    /// Reports the invalid field, a position that lacks the required pieces, or a position in
+    /// which the color that is not the side to move is in check.
     pub fn from_fen(fen: &str) -> Result<Self, FenError> {
         let fields: Vec<_> = fen.split_whitespace().collect();
         let [pieces, color, castling, en_passant, halfmove, fullmove] = fields.as_slice() else {
@@ -132,6 +133,15 @@ impl Position {
         let black_king = self.fen_king(Color::Black)?;
         if white_king.is_adjacent_to(black_king) {
             return Err(FenError("a position cannot have adjacent kings"));
+        }
+        let king_not_to_move = match self.side_to_move {
+            Color::White => black_king,
+            Color::Black => white_king,
+        };
+        if self.is_attacked(king_not_to_move, self.side_to_move) {
+            return Err(FenError(
+                "the color that is not the side to move cannot be in check",
+            ));
         }
         if self.has_back_rank_pawn() {
             return Err(FenError(

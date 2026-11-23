@@ -64,6 +64,10 @@ A pseudo-legal move that does not leave the mover's own king in check.
 _Avoid_: valid move, allowed move
 _Banned in code_: valid move
 
+**Opposite check**:
+Said of a position in which the king of the color that is not the side to move is attacked. No legal move leads to one, so a FEN that describes one is rejected.
+_Avoid_: other king in check, illegal check
+
 **Fullmove**:
 A move by White followed by a move by Black. The fullmove number starts at 1 and goes up after Black moves.
 _Avoid_: turn, round

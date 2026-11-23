@@ -13,6 +13,7 @@ use std::{
 
 use shakmaty::{CastlingMode, Chess, Move, Position, fen::Fen, uci::UciMove};
 
+const LEGAL_BESTMOVE: &str = "bestmove {legal}";
 const TIMEOUT: Duration = Duration::from_secs(5);
 
 #[test]
@@ -112,22 +113,22 @@ fn material_zero() -> io::Result<()> {
 
 #[test]
 fn equal_scores() -> io::Result<()> {
-    let first = run_transcript("uci-search", "equal-scores")?;
-    let second = run_transcript("uci-search", "equal-scores")?;
+    let first = collect_legal_bestmove_replies("uci-search", "equal-scores")?;
+    let second = collect_legal_bestmove_replies("uci-search", "equal-scores")?;
     assert_eq!(first.len(), 1);
     assert_eq!(first, second);
     Ok(())
 }
 
 fn play_transcript(name: &str) -> io::Result<()> {
-    run_transcript("uci", name).map(drop)
+    collect_legal_bestmove_replies("uci", name).map(drop)
 }
 
 fn play_searched_transcript(name: &str) -> io::Result<()> {
-    run_transcript("uci-search", name).map(drop)
+    collect_legal_bestmove_replies("uci-search", name).map(drop)
 }
 
-fn run_transcript(directory: &str, name: &str) -> io::Result<Vec<String>> {
+fn collect_legal_bestmove_replies(directory: &str, name: &str) -> io::Result<Vec<String>> {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../expectations")
         .join(directory)
@@ -253,7 +254,7 @@ fn reply_matches(expected: &str, actual: &str, position: &Chess) -> bool {
         "id name fisher {version}" => {
             actual == concat!("id name fisher ", env!("CARGO_PKG_VERSION"))
         }
-        "bestmove {legal}" => actual
+        LEGAL_BESTMOVE => actual
             .strip_prefix("bestmove ")
             .is_some_and(|text| reference_move(position, text).is_some()),
         "info depth 4 score {score} nodes {nodes}" => search_info_matches(actual),
@@ -390,7 +391,7 @@ impl Session {
             io::Error::other(format!("stdout closed while expecting {expected:?}"))
         })?;
         if reply_matches(expected, &actual, &self.position) {
-            if expected == "bestmove {legal}" {
+            if expected == LEGAL_BESTMOVE {
                 self.legal_bestmove_replies.push(actual);
             }
             Ok(())

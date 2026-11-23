@@ -63,3 +63,9 @@ uninlined_format_args = "allow"
 unnecessary_semicolon = "allow"
 unnecessary_trailing_comma = "allow"
 unnested_or_patterns = "allow"
+
+[profile.dev.package.rules]
+opt-level = 3
+
+[profile.dev.package.search]
+opt-level = 3

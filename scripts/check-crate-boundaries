@@ -8,7 +8,8 @@ import subprocess
 import sys
 
 ALLOWED = {
-    "fisher": {"rules", "uci"},
+    "fisher": {"rules", "search", "uci"},
+    "search": {"rules"},
     "uci": {"rules"},
     "rules": set(),
     "xtask": set(),
@@ -86,15 +87,17 @@ def self_test():
         name="rules", path="/workspace/crates/rules", kind=None, rename=None, target=None
     )
     uci = dict(rules, name="uci", path="/workspace/crates/uci")
+    search = dict(rules, name="search", path="/workspace/crates/search")
     shakmaty = dict(name="shakmaty", kind="dev", rename=None, target=None)
     metadata = {
         "workspace_root": "/workspace",
-        "workspace_members": ["fisher", "uci", "rules", "xtask"],
+        "workspace_members": ["fisher", "uci", "rules", "xtask", "search"],
         "packages": [
-            package("fisher", [rules, uci]),
+            package("fisher", [rules, search, uci]),
             package("uci", [dict(rules, kind="dev", rename="chess", target="cfg(unix)")]),
             package("rules", [dict(uci, path="/other/crates/uci"), shakmaty]),
             package("xtask", []),
+            package("search", [rules]),
         ],
     }
     if problems := violations(metadata):
@@ -108,8 +111,10 @@ def self_test():
         dict(rules, kind="dev", rename="chess", target="cfg(unix)"),
         dict(shakmaty, kind=None, rename="oracle", optional=True),
     ]
+    metadata["packages"][4]["dependencies"].append(uci)
     metadata["packages"][1]["targets"][0]["src_path"] = "/workspace/crates/uci/unchecked.rs"
     expected = [
+        "search -> uci (normal dependency) is forbidden.",
         "uci: keep the library entry point",
         "new-crate: register its allowed workspace dependencies",
         "xtask -> rules (build dependency) is forbidden.",

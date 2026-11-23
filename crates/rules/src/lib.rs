@@ -6,13 +6,13 @@ mod legal_moves;
 pub use fen::FenError;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum Color {
+pub enum Color {
     White,
     Black,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum PieceKind {
+pub enum PieceKind {
     Pawn,
     Knight,
     Bishop,
@@ -22,9 +22,21 @@ enum PieceKind {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct Piece {
+pub struct Piece {
     color: Color,
     kind: PieceKind,
+}
+
+impl Piece {
+    #[must_use]
+    pub fn color(self) -> Color {
+        self.color
+    }
+
+    #[must_use]
+    pub fn kind(self) -> PieceKind {
+        self.kind
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -82,7 +94,7 @@ impl Square {
         Some(Self::new(file, rank))
     }
 
-    fn all() -> impl Iterator<Item = Self> {
+    pub fn all() -> impl Iterator<Item = Self> {
         (0..8).flat_map(|rank| (0..8).map(move |file| Self::new(file, rank)))
     }
 }
@@ -177,6 +189,11 @@ impl Position {
         position
     }
 
+    #[must_use]
+    pub fn side_to_move(&self) -> Color {
+        self.side_to_move
+    }
+
     fn put(&mut self, square: Square, piece: Piece) {
         self.set_piece(square, Some(piece));
     }
@@ -191,7 +208,8 @@ impl Position {
         self.piece_at(square) == Some(Piece { color, kind })
     }
 
-    fn piece_at(&self, square: Square) -> Option<Piece> {
+    #[must_use]
+    pub fn piece_at(&self, square: Square) -> Option<Piece> {
         self.pieces.get(square.index()).copied().flatten()
     }
 }

@@ -2,6 +2,34 @@ use std::{fmt, iter::Peekable, str::SplitWhitespace};
 
 use crate::UciMove;
 
+const UCI: &str = "uci";
+const ISREADY: &str = "isready";
+const UCINEWGAME: &str = "ucinewgame";
+const POSITION: &str = "position";
+const GO: &str = "go";
+const QUIT: &str = "quit";
+const SETOPTION: &str = "setoption";
+const DEBUG: &str = "debug";
+const PONDERHIT: &str = "ponderhit";
+const REGISTER: &str = "register";
+
+const STARTPOS: &str = "startpos";
+const FEN: &str = "fen";
+const MOVES: &str = "moves";
+
+const SEARCHMOVES: &str = "searchmoves";
+const PONDER: &str = "ponder";
+const INFINITE: &str = "infinite";
+const WTIME: &str = "wtime";
+const BTIME: &str = "btime";
+const WINC: &str = "winc";
+const BINC: &str = "binc";
+const MOVESTOGO: &str = "movestogo";
+const DEPTH: &str = "depth";
+const NODES: &str = "nodes";
+const MATE: &str = "mate";
+const MOVETIME: &str = "movetime";
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum Command {
     Uci,
@@ -79,16 +107,16 @@ pub fn parse_command(line: &str) -> Input {
     let mut tokens = line.split_whitespace();
     while let Some(token) = tokens.next() {
         match token {
-            "uci" => return Input::Handled(Command::Uci),
-            "isready" => return Input::Handled(Command::IsReady),
-            "ucinewgame" => return Input::Handled(Command::UciNewGame),
-            "position" => return Input::Handled(Command::Position(parse_position(tokens))),
-            "go" => return Input::Handled(Command::Go(parse_go(tokens))),
-            "quit" => return Input::Handled(Command::Quit),
+            UCI => return Input::Handled(Command::Uci),
+            ISREADY => return Input::Handled(Command::IsReady),
+            UCINEWGAME => return Input::Handled(Command::UciNewGame),
+            POSITION => return Input::Handled(Command::Position(parse_position(tokens))),
+            GO => return Input::Handled(Command::Go(parse_go(tokens))),
+            QUIT => return Input::Handled(Command::Quit),
             // TODO(fisher-a2q): Declare and accept UCI options.
             // TODO(fisher-p25): Handle the debug command.
             // TODO(fisher-2ha): Handle pondering and ponderhit.
-            "setoption" | "debug" | "ponderhit" | "register" => return Input::Ignored,
+            SETOPTION | DEBUG | PONDERHIT | REGISTER => return Input::Ignored,
             _ => {}
         }
     }
@@ -98,21 +126,14 @@ pub fn parse_command(line: &str) -> Input {
 fn parse_position(tokens: SplitWhitespace<'_>) -> Result<PositionCommand, PositionSyntaxError> {
     let mut tokens = tokens.peekable();
     let source = match tokens.next() {
-        Some("startpos") => PositionSource::Startpos,
-        Some("fen") => {
-            let fields: Vec<_> =
-                std::iter::from_fn(|| tokens.next_if(|token| *token != "moves")).collect();
-            if fields.is_empty() {
-                return Err(PositionSyntaxError(PositionSyntaxCause::MissingFen));
-            }
-            PositionSource::Fen(fields.join(" "))
-        }
+        Some(STARTPOS) => PositionSource::Startpos,
+        Some(FEN) => PositionSource::Fen(read_fen_until_moves(&mut tokens)?),
         _ => return Err(PositionSyntaxError(PositionSyntaxCause::ExpectedSource)),
     };
 
     let moves = match tokens.next() {
         None => Vec::new(),
-        Some("moves") => tokens
+        Some(MOVES) => tokens
             .map(|token| {
                 UciMove::parse(token).ok_or_else(|| {
                     PositionSyntaxError(PositionSyntaxCause::InvalidMove(token.to_owned()))
@@ -124,35 +145,48 @@ fn parse_position(tokens: SplitWhitespace<'_>) -> Result<PositionCommand, Positi
     Ok(PositionCommand { source, moves })
 }
 
+fn read_fen_until_moves(
+    tokens: &mut Peekable<SplitWhitespace<'_>>,
+) -> Result<String, PositionSyntaxError> {
+    let mut fields = Vec::new();
+    while let Some(field) = tokens.next_if(|token| *token != MOVES) {
+        fields.push(field);
+    }
+    if fields.is_empty() {
+        return Err(PositionSyntaxError(PositionSyntaxCause::MissingFen));
+    }
+    Ok(fields.join(" "))
+}
+
 fn parse_go(tokens: SplitWhitespace<'_>) -> GoParameters {
     let mut tokens = tokens.peekable();
     let mut parameters = GoParameters::default();
     while let Some(token) = tokens.next() {
         let limit = match token {
-            "searchmoves" => {
+            SEARCHMOVES => {
                 while let Some(uci_move) = tokens.peek().and_then(|token| UciMove::parse(token)) {
                     let _consumed = tokens.next();
                     parameters.searchmoves.push(uci_move);
                 }
                 continue;
             }
-            "ponder" => {
+            PONDER => {
                 parameters.ponder = true;
                 continue;
             }
-            "infinite" => {
+            INFINITE => {
                 parameters.infinite = true;
                 continue;
             }
-            "wtime" => &mut parameters.wtime,
-            "btime" => &mut parameters.btime,
-            "winc" => &mut parameters.winc,
-            "binc" => &mut parameters.binc,
-            "movestogo" => &mut parameters.movestogo,
-            "depth" => &mut parameters.depth,
-            "nodes" => &mut parameters.nodes,
-            "mate" => &mut parameters.mate,
-            "movetime" => &mut parameters.movetime,
+            WTIME => &mut parameters.wtime,
+            BTIME => &mut parameters.btime,
+            WINC => &mut parameters.winc,
+            BINC => &mut parameters.binc,
+            MOVESTOGO => &mut parameters.movestogo,
+            DEPTH => &mut parameters.depth,
+            NODES => &mut parameters.nodes,
+            MATE => &mut parameters.mate,
+            MOVETIME => &mut parameters.movetime,
             _ => continue,
         };
         if let Some(number) = read_number(&mut tokens) {

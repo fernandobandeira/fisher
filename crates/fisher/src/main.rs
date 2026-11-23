@@ -25,6 +25,7 @@ fn answer_commands(
 ) -> io::Result<()> {
     let mut position = Position::starting();
     let mut random = RandomMove::from_clock();
+    let mut held_move = None;
     for line in lines {
         match parse_command(&line?) {
             Input::Handled(Command::Uci) => {
@@ -36,6 +37,18 @@ fn answer_commands(
                 send(output, &Response::UciOk)?;
             }
             Input::Handled(Command::IsReady) => send(output, &Response::ReadyOk)?,
+            Input::Handled(Command::Position(_)) if held_move.is_some() => {
+                send(
+                    output,
+                    &Response::InfoString("position rejected: waiting for stop"),
+                )?;
+            }
+            Input::Handled(Command::Go(_)) if held_move.is_some() => {
+                send(
+                    output,
+                    &Response::InfoString("go rejected: waiting for stop"),
+                )?;
+            }
             Input::Handled(Command::Position(command)) => {
                 match command
                     .map_err(|cause| cause.to_string())
@@ -48,7 +61,7 @@ fn answer_commands(
                     }
                 }
             }
-            Input::Handled(Command::Go(_)) => {
+            Input::Handled(Command::Go(parameters)) => {
                 // TODO(fisher-7vo): Obey the supplied search limits.
                 // TODO(fisher-2ha): Wait for ponderhit when pondering.
                 let moves = position.legal_moves();
@@ -56,7 +69,16 @@ fn answer_commands(
                     .choose(&moves)
                     .copied()
                     .map_or(UciMove::Null, UciMove::from);
-                send(output, &Response::BestMove(chosen))?;
+                if parameters.infinite {
+                    held_move = Some(chosen);
+                } else {
+                    send(output, &Response::BestMove(chosen))?;
+                }
+            }
+            Input::Handled(Command::Stop) => {
+                if let Some(chosen) = held_move.take() {
+                    send(output, &Response::BestMove(chosen))?;
+                }
             }
             Input::Handled(Command::Quit) => break,
             Input::Handled(Command::UciNewGame) | Input::Ignored | Input::Unknown => {}

@@ -7,6 +7,7 @@ const ISREADY: &str = "isready";
 const UCINEWGAME: &str = "ucinewgame";
 const POSITION: &str = "position";
 const GO: &str = "go";
+const STOP: &str = "stop";
 const QUIT: &str = "quit";
 const SETOPTION: &str = "setoption";
 const DEBUG: &str = "debug";
@@ -37,6 +38,7 @@ pub enum Command {
     UciNewGame,
     Position(Result<PositionCommand, PositionSyntaxError>),
     Go(GoParameters),
+    Stop,
     Quit,
 }
 
@@ -112,6 +114,7 @@ pub fn parse_command(line: &str) -> Input {
             UCINEWGAME => return Input::Handled(Command::UciNewGame),
             POSITION => return Input::Handled(Command::Position(parse_position(tokens))),
             GO => return Input::Handled(Command::Go(parse_go(tokens))),
+            STOP => return Input::Handled(Command::Stop),
             QUIT => return Input::Handled(Command::Quit),
             // TODO(fisher-a2q): Declare and accept UCI options.
             // TODO(fisher-p25): Handle the debug command.

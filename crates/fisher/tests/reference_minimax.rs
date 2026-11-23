@@ -2,59 +2,34 @@
 mod mate_in_two;
 #[path = "support/reference_minimax.rs"]
 mod reference;
+mod support;
 
 use std::error::Error;
 
 use reference::minimax;
-use shakmaty::{CastlingMode, Chess, Position as _, fen::Fen, uci::UciMove};
+use shakmaty::{Chess, Position as _, uci::UciMove};
+use support::{check_perft, reference_position as position};
 
-const PERFT: &str = include_str!("../../../expectations/perft.epd");
-
-fn position(fen: &str) -> Result<Chess, Box<dyn Error>> {
-    Ok(fen.parse::<Fen>()?.into_position(CastlingMode::Standard)?)
-}
-
-fn check_perft(depth: u8) -> Result<(), Box<dyn Error>> {
-    let positions = PERFT
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty() && !line.starts_with('#'));
-
-    for record in positions {
-        let (fen, counts) = record.split_once(';').ok_or("missing perft counts")?;
-        let fen = fen.trim();
-        let mut expected = 0;
-        for ply in 1..=depth {
-            let label = format!("D{ply} ");
-            let count = counts
-                .split(';')
-                .find_map(|entry| entry.trim().strip_prefix(&label))
-                .ok_or_else(|| format!("missing perft count for {fen} at ply {ply}"))?;
-            expected += count.parse::<u64>()?;
-        }
-
-        let (_, _, nodes) = minimax(&position(fen)?, depth);
-        assert_eq!(nodes, expected, "{fen} at depth {depth}");
-    }
-    Ok(())
+fn reference_nodes(fen: &str, depth: u8) -> Result<u64, Box<dyn Error>> {
+    Ok(minimax(&position(fen)?, depth).nodes)
 }
 
 #[test]
 fn node_count_matches_published_perft_at_two_plies() -> Result<(), Box<dyn Error>> {
-    check_perft(2)
+    check_perft(2, reference_nodes)
 }
 
 #[test]
 #[ignore = "run in release mode for the published four-ply counts"]
 fn node_count_matches_published_perft_at_four_plies() -> Result<(), Box<dyn Error>> {
-    check_perft(4)
+    check_perft(4, reference_nodes)
 }
 
 #[test]
 fn mate_in_one_scores_as_a_win() -> Result<(), Box<dyn Error>> {
     let position = position("k7/8/1QK5/8/8/8/8/8 w - - 0 1")?;
     // Qb7 gives check and covers a7 and b8. The white king protects b7.
-    assert_eq!(minimax(&position, 2).1, 99_999);
+    assert_eq!(minimax(&position, 2).score, 99_999);
     Ok(())
 }
 
@@ -64,8 +39,8 @@ fn stalemate_one_ply_away_is_avoided_before_the_horizon() -> Result<(), Box<dyn 
     // Qxb6 leaves a8 unchecked, with a7, b7 and b8 covered. At depth 2,
     // stalemate scores zero, so White prefers retaining its 800-centipawn lead.
     // At depth 1, Qxb6 is evaluated as material and scores 900.
-    assert_eq!(minimax(&position, 2).1, 800);
-    assert_eq!(minimax(&position, 1).1, 900);
+    assert_eq!(minimax(&position, 2).score, 800);
+    assert_eq!(minimax(&position, 1).score, 900);
     Ok(())
 }
 
@@ -73,14 +48,17 @@ fn stalemate_one_ply_away_is_avoided_before_the_horizon() -> Result<(), Box<dyn 
 fn free_capture_scores_the_material_left() -> Result<(), Box<dyn Error>> {
     let position = position("7k/q7/8/8/8/8/8/R6K w - - 0 1")?;
     // Rxa7 wins the queen, leaving White a rook ahead.
-    assert_eq!(minimax(&position, 1).1, 500);
+    assert_eq!(minimax(&position, 1).score, 500);
     Ok(())
 }
 
 #[test]
 fn checkmated_position_has_no_move_or_nodes() -> Result<(), Box<dyn Error>> {
     let position = position("k7/1Q6/2K5/8/8/8/8/8 b - - 0 1")?;
-    assert_eq!(minimax(&position, 1), (None, -100_000, 0));
+    let result = minimax(&position, 1);
+    assert_eq!(result.chosen_move, None);
+    assert_eq!(result.score, -100_000);
+    assert_eq!(result.nodes, 0);
     Ok(())
 }
 
@@ -89,7 +67,7 @@ fn equal_scores_keep_the_first_legal_move() {
     let position = Chess::default();
     // No legal move from the starting position changes the material.
     let first = position.legal_moves().into_iter().next();
-    assert_eq!(minimax(&position, 1).0, first);
+    assert_eq!(minimax(&position, 1).chosen_move, first);
 }
 
 #[test]
@@ -97,7 +75,7 @@ fn free_knight_capture_keeps_the_remaining_material_after_a_reply() -> Result<()
     let position = position("7k/n7/6r1/8/8/8/8/RNBQ3K w - - 0 1")?;
     // Rxa7 wins the knight. Black has legal replies but cannot capture any
     // white piece. The rooks cancel, leaving 300 + 300 + 900 centipawns.
-    assert_eq!(minimax(&position, 2).1, 1_500);
+    assert_eq!(minimax(&position, 2).score, 1_500);
     Ok(())
 }
 
@@ -109,8 +87,8 @@ fn quiet_move_beats_a_capture_that_allows_a_recapture() -> Result<(), Box<dyn Er
     // cxd5 answers it and leaves Black a pawn ahead, -100. A quiet move such as
     // Qd2 keeps the 700 lead: no black piece attacks the queen there, and no
     // white move checkmates or stalemates Black.
-    assert_eq!(minimax(&position, 1).1, 800);
-    assert_eq!(minimax(&position, 2).1, 700);
+    assert_eq!(minimax(&position, 1).score, 800);
+    assert_eq!(minimax(&position, 2).score, 700);
     Ok(())
 }
 
@@ -126,10 +104,12 @@ fn published_mate_in_two_scores_as_a_win_with_the_published_move() -> Result<(),
         .find(|record| record.id == "000Zo")
         .ok_or("missing puzzle 000Zo")?;
 
-    let (best_move, score, _) = minimax(&position(record.fen)?, 4);
+    let result = minimax(&position(record.fen)?, 4);
 
-    assert_eq!(score, expected_score);
-    let best_move = best_move.map(|movement| UciMove::from_standard(movement).to_string());
+    assert_eq!(result.score, expected_score);
+    let best_move = result
+        .chosen_move
+        .map(|movement| UciMove::from_standard(movement).to_string());
     assert_eq!(best_move.as_deref(), Some(record.published_move));
     Ok(())
 }

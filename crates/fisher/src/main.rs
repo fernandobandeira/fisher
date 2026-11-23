@@ -27,6 +27,7 @@ fn answer_commands(
 ) -> io::Result<()> {
     let mut position = Position::starting();
     let mut held_move = None;
+    // TODO(fisher-2aj.5): isready, stop and quit wait here for a running search to finish.
     for line in lines {
         match parse_command(&line?) {
             Input::Handled(Command::Uci) => {
@@ -65,25 +66,25 @@ fn answer_commands(
             Input::Handled(Command::Go(parameters)) => {
                 // TODO(fisher-7vo): Obey the supplied search limits.
                 // TODO(fisher-2ha): Wait for ponderhit when pondering.
-                // TODO(fisher-2aj.5): Answer isready, stop and quit while a search runs.
                 const DEPTH: u8 = 4;
-                let (chosen, score, nodes) = minimax(&position, DEPTH);
-                let score = match score {
+                let result = minimax(&position, DEPTH);
+                let score = match result.score {
                     Score::Centipawns(value) => SearchScore::Centipawns(value),
-                    Score::Mate { plies, winning } => {
-                        let moves = i32::from(plies.div_ceil(2));
-                        SearchScore::Mate(if winning { moves } else { -moves })
-                    }
+                    Score::Mate { plies, winning } => SearchScore::Mate { plies, winning },
                 };
                 send(
                     output,
                     &Response::SearchInfo {
-                        depth: if chosen.is_some() { DEPTH } else { 0 },
+                        depth: if result.chosen_move.is_some() {
+                            DEPTH
+                        } else {
+                            0
+                        },
                         score,
-                        nodes: chosen.map(|_| nodes),
+                        nodes: result.chosen_move.map(|_| result.nodes),
                     },
                 )?;
-                let chosen = chosen.map_or(UciMove::Null, UciMove::from);
+                let chosen = result.chosen_move.map_or(UciMove::Null, UciMove::from);
                 if parameters.infinite {
                     held_move = Some(chosen);
                 } else {

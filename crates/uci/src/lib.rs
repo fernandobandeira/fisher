@@ -27,7 +27,7 @@ pub enum Response<'a> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SearchScore {
     Centipawns(i32),
-    Mate(i32),
+    Mate { plies: u8, winning: bool },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -57,7 +57,11 @@ impl fmt::Display for Response<'_> {
                 write!(output, "info depth {depth} score ")?;
                 match score {
                     SearchScore::Centipawns(value) => write!(output, "cp {value}")?,
-                    SearchScore::Mate(moves) => write!(output, "mate {moves}")?,
+                    SearchScore::Mate { plies, winning } => {
+                        let moves = i32::from(plies.div_ceil(2));
+                        let moves = if *winning { moves } else { -moves };
+                        write!(output, "mate {moves}")?;
+                    }
                 }
                 if let Some(nodes) = nodes {
                     write!(output, " nodes {nodes}")?;
@@ -130,5 +134,39 @@ fn promotion_suffix(promotion: Promotion) -> &'static str {
         Promotion::Bishop => "b",
         Promotion::Rook => "r",
         Promotion::Queen => "q",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Response, SearchScore};
+
+    #[test]
+    fn search_info_reports_mate_in_signed_moves() {
+        for (plies, winning, expected) in [
+            (1, true, "info depth 4 score mate 1 nodes 20"),
+            (2, false, "info depth 4 score mate -1 nodes 20"),
+            (3, true, "info depth 4 score mate 2 nodes 20"),
+        ] {
+            let response = Response::SearchInfo {
+                depth: 4,
+                score: SearchScore::Mate { plies, winning },
+                nodes: Some(20),
+            };
+            assert_eq!(response.to_string(), expected);
+        }
+    }
+
+    #[test]
+    fn terminal_search_info_reports_mate_zero() {
+        let response = Response::SearchInfo {
+            depth: 0,
+            score: SearchScore::Mate {
+                plies: 0,
+                winning: false,
+            },
+            nodes: None,
+        };
+        assert_eq!(response.to_string(), "info depth 0 score mate 0");
     }
 }

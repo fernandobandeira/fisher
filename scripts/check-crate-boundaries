@@ -111,8 +111,10 @@ def self_test():
         dict(rules, kind="dev", rename="chess", target="cfg(unix)"),
         dict(shakmaty, kind=None, rename="oracle", optional=True),
     ]
+    metadata["packages"][4]["dependencies"].append(uci)
     metadata["packages"][1]["targets"][0]["src_path"] = "/workspace/crates/uci/unchecked.rs"
     expected = [
+        "search -> uci (normal dependency) is forbidden.",
         "uci: keep the library entry point",
         "new-crate: register its allowed workspace dependencies",
         "xtask -> rules (build dependency) is forbidden.",

@@ -1,13 +1,25 @@
 use shakmaty::{Chess, Move, Position as _, Role};
 
 // Greater than any material difference, even with promotions.
-const MATE_SCORE: i32 = 100_000;
+pub(super) const MATE_SCORE: i32 = 100_000;
+
+#[derive(Debug, PartialEq, Eq)]
+pub(super) struct ReferenceResult {
+    pub(super) chosen_move: Option<Move>,
+    pub(super) score: i32,
+    pub(super) nodes: u64,
+}
 
 /// Returns the first best move in shakmaty order, the score for the side to
 /// move, and the node count excluding the starting position. Mate scores are
 /// signed, with magnitude `MATE_SCORE` minus the plies to checkmate.
-pub(super) fn minimax(position: &Chess, depth: u8) -> (Option<Move>, i32, u64) {
-    search(position, depth, 0)
+pub(super) fn minimax(position: &Chess, depth: u8) -> ReferenceResult {
+    let (chosen_move, score, nodes) = search(position, depth, 0);
+    ReferenceResult {
+        chosen_move,
+        score,
+        nodes,
+    }
 }
 
 fn search(position: &Chess, depth: u8, ply: u8) -> (Option<Move>, i32, u64) {

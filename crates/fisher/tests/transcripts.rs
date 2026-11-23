@@ -150,7 +150,7 @@ fn run_transcript(directory: &str, name: &str) -> io::Result<Vec<String>> {
     }
 
     if ended {
-        Ok(std::mem::take(&mut session.legal_replies))
+        Ok(std::mem::take(&mut session.legal_bestmove_replies))
     } else {
         Err(io::Error::other(format!("{name}.uci: missing ! exit")))
     }
@@ -297,7 +297,7 @@ struct Session {
     output: Receiver<io::Result<String>>,
     position: Chess,
     holding: bool,
-    legal_replies: Vec<String>,
+    legal_bestmove_replies: Vec<String>,
 }
 
 impl Session {
@@ -319,7 +319,7 @@ impl Session {
             output,
             position: Chess::default(),
             holding: false,
-            legal_replies: Vec::new(),
+            legal_bestmove_replies: Vec::new(),
         };
         let stdout = session
             .child
@@ -391,7 +391,7 @@ impl Session {
         })?;
         if reply_matches(expected, &actual, &self.position) {
             if expected == "bestmove {legal}" {
-                self.legal_replies.push(actual);
+                self.legal_bestmove_replies.push(actual);
             }
             Ok(())
         } else {

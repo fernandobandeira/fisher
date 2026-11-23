@@ -8,21 +8,36 @@ pub enum Score {
     Mate { plies: u8, winning: bool },
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SearchResult {
+    pub chosen_move: Option<Move>,
+    pub score: Score,
+    pub nodes: u64,
+}
+
 /// Searches every legal move to the given depth in plies.
 /// At depth zero the result has no chosen move, even if legal moves exist.
 /// The score is from the starting side to move, and nodes exclude the starting position.
 #[must_use]
-pub fn minimax(position: &Position, depth: u8) -> (Option<Move>, Score, u64) {
+pub fn minimax(position: &Position, depth: u8) -> SearchResult {
     let mut nodes = 0;
     let (chosen, score) = search(position, depth, 0, &mut nodes);
-    let score = match u8::try_from(CHECKMATE - score.abs()) {
-        Ok(plies) => Score::Mate {
+    let mate_plies = CHECKMATE - score.abs();
+    let score = if (0..=i32::from(depth)).contains(&mate_plies)
+        && let Ok(plies) = u8::try_from(mate_plies)
+    {
+        Score::Mate {
             plies,
             winning: score > 0,
-        },
-        Err(_) => Score::Centipawns(score),
+        }
+    } else {
+        Score::Centipawns(score)
     };
-    (chosen, score, nodes)
+    SearchResult {
+        chosen_move: chosen,
+        score,
+        nodes,
+    }
 }
 
 fn search(position: &Position, depth: u8, ply: u8, nodes: &mut u64) -> (Option<Move>, i32) {

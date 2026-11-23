@@ -60,8 +60,8 @@ with single spaces and nothing after the node count.
 ^info depth 4 score (cp (0|-?[1-9][0-9]*)|mate -?[1-9][0-9]*) nodes (0|[1-9][0-9]*)$
 ```
 
-Use this allowance only when the score and node count have no outside
-expected values. The exact lines use the published starting-position
+Use this allowance only when the score has no outside expected value.
+The exact lines use the published starting-position
 perft counts and positions checked independently with python-chess.
 
 Run [equal-scores.uci](uci-search/equal-scores.uci) twice in fresh

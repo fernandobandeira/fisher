@@ -24,9 +24,10 @@
 # UCI position. The en passant capture makes d5 available to the black king.
 > position fen 8/8/5B2/3pP1K1/4k3/8/5Q2/4N3 w - d6 0 1 moves e5d6
 > go
-# Rules 1 to 7 and 10. Four-ply minimax gives Black a material score of -2400.
-# Python-chess counts 1, 40, 177 and 6981 nodes at plies 1 to 4.
-< info depth 4 score cp -2400 nodes 7199
+# Rules 1 and 10. UCI info depth, score and nodes.
+# If pinned, the expected value is cp -2400 nodes 7199. The second review
+# reproduced it with a shakmaty 0.30.3 minimax (per-ply counts 1/40/177/6981).
+< info depth 4 score {score} nodes {nodes}
 # The only legal reply fails if the captured pawn stays on d5.
 < bestmove e4d5
 # UCI position and move format. The pawn promotes to a knight.

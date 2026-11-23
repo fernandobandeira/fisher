@@ -65,8 +65,8 @@ literal tabs into three fields in this order.
 2. The full six-field FEN after the first published move. The spaces inside
    the FEN are part of this field. The en passant square is written after
    a two-square pawn move even when no en passant capture is legal.
-3. The published first move of the solution in standard UCI notation.
+3. The published first move of the solution, written as a UCI move.
 
 The records retain the order of the first 100 puzzles tagged `mateIn2`
-in the export. Each retained record has exactly one first move that forces
-checkmate within two moves, and its shortest forced mate takes two moves.
+in the export. In each position, exactly one legal move forces checkmate
+within three plies, and no legal move gives checkmate in one ply.

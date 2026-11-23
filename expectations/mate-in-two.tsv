@@ -4,7 +4,8 @@
 # Taken: 2026-11-23
 # Export SHA-256: 7b0d235fa40cfd7fdb7df1fec56a96b3b6ee1496b32ed2eb05be90d0ebf94253
 # Independent check: exhaustive search using shakmaty 0.30.3, 100 of 100 accepted
-# Fields: puzzle ID, six-field FEN, published first solution move (UCI), separated by tabs
+# Each position has exactly one legal move that forces checkmate within three plies, and no legal move gives checkmate in one ply.
+# Fields: puzzle ID, six-field FEN, published first move of the solution as a UCI move, separated by tabs
 000Zo	4r3/1k6/pp3P2/1b5p/3R1p2/P1R2P2/1P4PP/6K1 b - - 0 35	e8e1
 000hf	r1bq3r/pp1nbkp1/2p1p2p/8/2BP4/1PN3P1/P3QP1P/3R1RK1 w - - 0 20	e2e6
 001Wz	6k1/5ppp/r1p5/p1n1rP2/8/2P2N1P/2P3P1/3R2K1 w - - 0 22	d1d8

@@ -1,0 +1,14 @@
+# Sources for searched replies: April 2006 UCI specification https://backscattering.de/chess/uci/
+# (info and bestmove), fisher-2aj rules 1, 7 and 10, and python-chess 1.11.2
+# for the independently checked exact values. Written 2026-11-23.
+# UCI position and go.
+> position fen 7k/8/5KQ1/8/8/8/8/8 w - - 0 1
+> go
+# Rules 4, 5, 7 and 10. Qg7 is the only move that gives checkmate in one.
+# Python-chess counts 23, 15, 373 and 840 nodes at plies 1 to 4.
+< info depth 4 score mate 1 nodes 1251
+# UCI bestmove. The unique mate in one fixes the move.
+< bestmove g6g7
+# UCI quit.
+> quit
+! exit

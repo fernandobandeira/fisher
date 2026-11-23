@@ -1,0 +1,23 @@
+# Sources for searched replies: April 2006 UCI specification https://backscattering.de/chess/uci/
+# (info and bestmove), fisher-2aj rules 1, 7 and 10, and python-chess 1.11.2
+# for the independently checked exact values. Written 2026-11-23.
+# Sources: April 2006 UCI specification https://backscattering.de/chess/uci/
+# and fisher-l7f owner decisions. Written 2026-11-22.
+> position fen 7k/8/5K2/6Q1/8/8/8/8 b - - 0 1
+> go
+# Rules 4, 5, 7 and 10. Black must play h8h7, then g5g7 is checkmate.
+# Python-chess counts 1, 25, 45 and 1228 nodes at plies 1 to 4.
+< info depth 4 score mate -1 nodes 1299
+# UCI bestmove. Black's only legal move here is h8h7.
+# Rejecting the next FEN would repeat it.
+< bestmove h8h7
+> position fen 7k/8/5K1Q/8/8/8/8/8 b - - 00 1
+> go
+# Rules 4, 5, 7 and 10. Black must play h8g8, then h6g7 is checkmate.
+# Python-chess counts 1, 21, 30 and 730 nodes at plies 1 to 4.
+< info depth 4 score mate -1 nodes 782
+# The owner accepts 00 as zero in fisher-l7f.5. This position has one legal move.
+< bestmove h8g8
+# UCI quit.
+> quit
+! exit

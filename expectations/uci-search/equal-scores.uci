@@ -1,0 +1,14 @@
+# Sources for searched replies: April 2006 UCI specification https://backscattering.de/chess/uci/
+# (info and bestmove), fisher-2aj rules 1, 7 and 10, and python-chess 1.11.2
+# for the independently checked exact values. Written 2026-11-23.
+# UCI position and go. Play this transcript in two fresh processes.
+> position fen 7k/8/8/8/8/8/8/K7 w - - 0 1
+> go
+# Rules 2, 5, 7 and 10. There is no capture within four plies. All moves score 0.
+# Python-chess counts 3, 9, 54 and 324 nodes at plies 1 to 4.
+< info depth 4 score cp 0 nodes 390
+# UCI bestmove and rule 6. Both processes must pick the same legal move.
+< bestmove {legal}
+# UCI quit.
+> quit
+! exit

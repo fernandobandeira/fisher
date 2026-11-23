@@ -1,0 +1,24 @@
+# Sources for searched replies: April 2006 UCI specification https://backscattering.de/chess/uci/
+# (info and bestmove), fisher-2aj rules 1, 7 and 10, and python-chess 1.11.2
+# for the independently checked exact values. Written 2026-11-23.
+# Sources: April 2006 UCI specification https://backscattering.de/chess/uci/
+# and fisher-l7f owner decisions. Written 2026-11-22.
+> isready
+# UCI isready/readyok.
+< readyok
+> go
+# Rules 1, 2, 5, 7 and 10. The published starting-position perft counts
+# in expectations/perft.epd sum to 206603. Python-chess confirms cp 0.
+< info depth 4 score cp 0 nodes 206603
+# The owner uses the starting position before any position command.
+< bestmove {legal}
+# UCI position/go and bestmove. The reply carries a legal move.
+> position startpos
+> go
+# Rules 1, 2, 5, 7 and 10. The published starting-position perft counts
+# in expectations/perft.epd sum to 206603. Python-chess confirms cp 0.
+< info depth 4 score cp 0 nodes 206603
+< bestmove {legal}
+# UCI quit.
+> quit
+! exit

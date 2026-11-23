@@ -1,0 +1,19 @@
+# Sources for searched replies: April 2006 UCI specification https://backscattering.de/chess/uci/
+# (info and bestmove), fisher-2aj rules 1, 7 and 10, and python-chess 1.11.2
+# for the independently checked exact values. Written 2026-11-23.
+# Sources: April 2006 UCI specification https://backscattering.de/chess/uci/
+# and fisher-l7f owner decisions. Written 2026-11-22.
+> position fen 7k/5K2/6Q1/8/8/8/8/8 b - - 0 1
+> go infinite
+# Rule 9 sends info before the reply to isready. The move waits for stop.
+# Example for the owner to approve. The ticket cites Stockfish as a witness for stalemate.
+< info depth 0 score cp 0
+> isready
+# UCI go infinite and isready. No bestmove precedes readyok.
+< readyok
+> stop
+# UCI stop/bestmove releases the held move for stalemate, 0000.
+< bestmove 0000
+# UCI quit.
+> quit
+! exit

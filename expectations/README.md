@@ -44,6 +44,27 @@ not itself advance the position. For `go infinite`, check `readyok` before
 sending `stop` so an early `bestmove` fails by output order. A runner may
 bound reads and process exit to detect a hang.
 
+### Searched moves
+
+`uci-search/*.uci` holds the expected sessions for fisher-2aj. The runner
+will play them when fisher-2aj.4 adds search. Under rule 9, an accepted
+`go infinite` produces its `info` line before the reply to `isready` and
+holds `bestmove` until `stop`. The terminal `info` lines are examples
+pending owner approval.
+
+| Expected line | Match |
+|---|---|
+| `< info depth 4 score {score} nodes {nodes}` | Match one line with these fields in order and no extra fields. The score is `cp` followed by a decimal integer or `mate` followed by a nonzero decimal integer. The node count is a nonnegative decimal integer. |
+
+Use this allowance only when the score and node count have no outside
+expected values. The exact lines use the published starting-position
+perft counts and positions checked independently with python-chess.
+
+Run [equal-scores.uci](uci-search/equal-scores.uci) twice in fresh
+processes. Require each `bestmove` to match `{legal}` and compare the two
+actual UCI moves for equality, as required by rule 6. This comparison is
+part of running that transcript and uses the existing `{legal}` record.
+
 ## Published perft
 
 [`perft.epd`](perft.epd) holds one position per data line. Split at semicolons.

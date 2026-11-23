@@ -1,0 +1,19 @@
+# Sources for searched replies: April 2006 UCI specification https://backscattering.de/chess/uci/
+# (info and bestmove), fisher-2aj rules 1, 7 and 10, and python-chess 1.11.2
+# for the independently checked exact values. Written 2026-11-23.
+# Sources: April 2006 UCI specification https://backscattering.de/chess/uci/
+# and fisher-l7f owner decisions. Written 2026-11-22.
+> position fen 7k/8/5K1Q/8/8/8/8/8 b - - 0 1
+> ucinewgame
+> isready
+# UCI ucinewgame/isready/readyok. The owner makes ucinewgame a no-op.
+< readyok
+> go
+# Rules 4, 5, 7 and 10. Black must play h8g8, then h6g7 is checkmate.
+# Python-chess counts 1, 21, 30 and 730 nodes at plies 1 to 4.
+< info depth 4 score mate -1 nodes 782
+# The owner preserves the position across ucinewgame. Black has one legal move.
+< bestmove h8g8
+# UCI quit.
+> quit
+! exit

@@ -289,8 +289,18 @@ impl Position {
         ) || self.attacked_at_offsets(target, attacker, PieceKind::Knight, &KNIGHT_OFFSETS)
             || self.attacked_at_offsets(target, attacker, PieceKind::King, &DIAGONALS)
             || self.attacked_at_offsets(target, attacker, PieceKind::King, &ORTHOGONALS)
-            || self.attacked_along(target, attacker, &DIAGONALS, PieceKind::Bishop)
-            || self.attacked_along(target, attacker, &ORTHOGONALS, PieceKind::Rook)
+            || self.attacked_along(
+                target,
+                attacker,
+                &DIAGONALS,
+                [PieceKind::Bishop, PieceKind::Queen],
+            )
+            || self.attacked_along(
+                target,
+                attacker,
+                &ORTHOGONALS,
+                [PieceKind::Rook, PieceKind::Queen],
+            )
     }
 
     fn attacked_at_offsets(
@@ -312,15 +322,13 @@ impl Position {
         target: Square,
         attacker: Color,
         directions: &[(i8, i8)],
-        slider: PieceKind,
+        attacking_kinds: [PieceKind; 2],
     ) -> bool {
         for &(file, rank) in directions {
             let mut square = target;
             while let Some(source) = square.offset(file, rank) {
                 if let Some(piece) = self.piece_at(source) {
-                    if piece.color == attacker
-                        && (piece.kind == slider || piece.kind == PieceKind::Queen)
-                    {
+                    if piece.color == attacker && attacking_kinds.contains(&piece.kind) {
                         return true;
                     }
                     break;

@@ -54,3 +54,19 @@ Keep the records in published order, from the starting position through
 Position 6, because the tests assign depths in that order.
 The comments record the first depths at which the source reports en passant
 captures, castling, and promotions.
+
+## Published mate-in-two positions
+
+[`mate-in-two.tsv`](mate-in-two.tsv) holds one puzzle per data line. Skip
+blank lines and lines starting with `#`. Split each remaining line at
+literal tabs into three fields in this order.
+
+1. The case-sensitive Lichess puzzle ID.
+2. The full six-field FEN after the first published move. The spaces inside
+   the FEN are part of this field. The en passant square is written after
+   a two-square pawn move even when no en passant capture is legal.
+3. The published first move of the solution, written as a UCI move.
+
+The records retain the order of the first 100 puzzles tagged `mateIn2`
+in the export. In each position, exactly one legal move forces checkmate
+within three plies, and no legal move gives checkmate in one ply.

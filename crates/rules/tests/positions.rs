@@ -31,11 +31,12 @@ fn published_perft_count(
 }
 
 fn reference_games(
+    start: &Chess,
     seeds: RangeInclusive<u64>,
     mut visit: impl FnMut(&Chess, Option<shakmaty::Move>),
 ) -> Result<(), Box<dyn std::error::Error>> {
     for mut seed in seeds {
-        let mut position = Chess::default();
+        let mut position = start.clone();
         for _ in 0..128 {
             let moves = position.legal_moves();
             if moves.is_empty() {
@@ -64,7 +65,7 @@ fn canonical_fen_round_trips() {
     for (fen, _) in perft_positions() {
         assert_eq!(Position::from_fen(fen).unwrap().to_fen(), fen);
     }
-    reference_games(1..=8, |position, _| {
+    reference_games(&Chess::default(), 1..=8, |position, _| {
         let fen = Fen::from_position(position, EnPassantMode::Always).to_string();
         assert_eq!(Position::from_fen(&fen).unwrap().to_fen(), fen);
     })
@@ -115,58 +116,100 @@ fn rejected_fens_identify_the_problem() {
 #[test]
 fn legal_moves_and_resulting_positions_match_reference_games() {
     let mut king_in_check = false;
+    let mut king_beside_other_king = false;
     let mut played_en_passant = false;
     let mut played_castling = false;
     let mut played_promotion = false;
-    // Seed 17 gives the first castle. Seed 21 gives the first en passant capture.
-    reference_games(1..=21, |reference, chosen| {
+    let mut compare = |reference: &Chess, chosen: Option<shakmaty::Move>| {
         king_in_check |= reference.is_check();
-        let fen = Fen::from_position(reference, EnPassantMode::Always).to_string();
-        let position = Position::from_fen(&fen).unwrap();
-        let mut actual: Vec<_> = position
-            .legal_moves()
-            .into_iter()
-            .map(|movement| (uci_move(movement), movement))
-            .collect();
-        let mut expected: Vec<_> = reference
-            .legal_moves()
-            .into_iter()
-            .map(|movement| (UciMove::from_standard(movement).to_string(), movement))
-            .collect();
-        actual.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
-        expected.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
-        assert_eq!(actual.len(), expected.len(), "legal move count at {fen}");
-
-        for ((actual_uci, movement), (expected_uci, expected_move)) in
-            actual.into_iter().zip(expected)
-        {
-            assert_eq!(actual_uci, expected_uci, "legal moves differ at {fen}");
-            let next = reference.clone().play(expected_move).unwrap();
-            let expected_fen = Fen::from_position(&next, EnPassantMode::Always).to_string();
-            assert_eq!(
-                movement.play().to_fen(),
-                expected_fen,
-                "{fen} + {actual_uci}"
-            );
-
-            assert_eq!(
-                position.legal_move(movement.from(), movement.to(), movement.promotion()),
-                Some(movement),
-                "move lookup at {fen} + {actual_uci}"
-            );
-        }
-
+        king_beside_other_king |= king_can_step_beside_other_king_on_rank_or_file(reference);
+        compare_with_reference(reference).unwrap();
         if let Some(chosen) = chosen {
             played_en_passant |= chosen.is_en_passant();
             played_castling |= chosen.is_castle();
             played_promotion |= chosen.is_promotion();
         }
-    })
-    .unwrap();
+    };
+    // Seed 17 gives the first castle. Seed 21 gives the first en passant capture.
+    reference_games(&Chess::default(), 1..=21, &mut compare).unwrap();
+    // Games from the starting position never let a king step beside the other
+    // king on its rank or file. Games from the other published positions do.
+    // The first published position is the starting position, so skip it.
+    for (fen, _) in perft_positions().skip(1) {
+        let start = fen
+            .parse::<Fen>()
+            .unwrap()
+            .into_position::<Chess>(CastlingMode::Standard)
+            .unwrap();
+        reference_games(&start, SEEDS_FROM_PUBLISHED_POSITIONS, &mut compare).unwrap();
+    }
     assert!(king_in_check, "no position had the king in check");
+    assert!(
+        king_beside_other_king,
+        "no position let a king step beside the other king on its rank or file"
+    );
     assert!(played_en_passant, "no en passant capture was played");
     assert!(played_castling, "no castle was played");
     assert!(played_promotion, "no promotion was played");
+}
+
+/// Few seeds, because `scripts/check` runs this on every commit.
+const SEEDS_FROM_PUBLISHED_POSITIONS: RangeInclusive<u64> = 1..=4;
+
+/// Whether the king of the side to move could step onto a square beside the
+/// other king on its rank or file, a move the rules forbid.
+fn king_can_step_beside_other_king_on_rank_or_file(reference: &Chess) -> bool {
+    let kings = reference.board().kings();
+    let (Some(king), Some(other_king)) = (
+        (kings & reference.us()).first(),
+        (kings & reference.them()).first(),
+    ) else {
+        return false;
+    };
+    shakmaty::attacks::king_attacks(king)
+        .without(reference.us())
+        .into_iter()
+        .any(|square| {
+            square.file().distance(other_king.file()) + square.rank().distance(other_king.rank())
+                == 1
+        })
+}
+
+fn compare_with_reference(reference: &Chess) -> Result<(), Box<dyn std::error::Error>> {
+    let fen = Fen::from_position(reference, EnPassantMode::Always).to_string();
+    let position = Position::from_fen(&fen)?;
+    let mut actual: Vec<_> = position
+        .legal_moves()
+        .into_iter()
+        .map(|movement| (uci_move(movement), movement))
+        .collect();
+    let mut expected: Vec<_> = reference
+        .legal_moves()
+        .into_iter()
+        .map(|movement| (UciMove::from_standard(movement).to_string(), movement))
+        .collect();
+    actual.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
+    expected.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
+    assert_eq!(actual.len(), expected.len(), "legal move count at {fen}");
+
+    for ((actual_uci, movement), (expected_uci, expected_move)) in actual.into_iter().zip(expected)
+    {
+        assert_eq!(actual_uci, expected_uci, "legal moves differ at {fen}");
+        let next = reference.clone().play(expected_move)?;
+        let expected_fen = Fen::from_position(&next, EnPassantMode::Always).to_string();
+        assert_eq!(
+            movement.play().to_fen(),
+            expected_fen,
+            "{fen} + {actual_uci}"
+        );
+
+        assert_eq!(
+            position.legal_move(movement.from(), movement.to(), movement.promotion()),
+            Some(movement),
+            "move lookup at {fen} + {actual_uci}"
+        );
+    }
+    Ok(())
 }
 
 #[test]

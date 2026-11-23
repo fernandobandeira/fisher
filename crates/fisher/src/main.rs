@@ -5,7 +5,7 @@ use std::{
 };
 
 use rules::Position;
-use search::{Score, minimax};
+use search::{Score, SearchResult, minimax};
 use uci::{
     Command, Input, PositionCommand, PositionSource, Response, SearchScore, UciMove, parse_command,
 };
@@ -68,22 +68,7 @@ fn answer_commands(
                 // TODO(fisher-2ha): Wait for ponderhit when pondering.
                 const DEPTH: u8 = 4;
                 let result = minimax(&position, DEPTH);
-                let score = match result.score {
-                    Score::Centipawns(value) => SearchScore::Centipawns(value),
-                    Score::Mate { plies, winning } => SearchScore::Mate { plies, winning },
-                };
-                send(
-                    output,
-                    &Response::SearchInfo {
-                        depth: if result.chosen_move.is_some() {
-                            DEPTH
-                        } else {
-                            0
-                        },
-                        score,
-                        nodes: result.chosen_move.map(|_| result.nodes),
-                    },
-                )?;
+                send(output, &search_info(DEPTH, result))?;
                 let chosen = result.chosen_move.map_or(UciMove::Null, UciMove::from);
                 if parameters.infinite {
                     held_move = Some(chosen);
@@ -101,6 +86,25 @@ fn answer_commands(
         }
     }
     Ok(())
+}
+
+/// Terminal positions report `info depth 0 score mate 0` for checkmate
+/// or `info depth 0 score cp 0` for stalemate.
+fn search_info(depth: u8, result: SearchResult) -> Response<'static> {
+    let (depth, nodes) = if result.chosen_move.is_some() {
+        (depth, Some(result.nodes))
+    } else {
+        (0, None)
+    };
+    let score = match result.score {
+        Score::Centipawns(value) => SearchScore::Centipawns(value),
+        Score::Mate { plies, winning } => SearchScore::Mate { plies, winning },
+    };
+    Response::SearchInfo {
+        depth,
+        score,
+        nodes,
+    }
 }
 
 fn setup_position(command: PositionCommand) -> Result<Position, String> {

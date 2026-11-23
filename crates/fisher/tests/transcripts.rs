@@ -271,6 +271,31 @@ fn reply_matches(expected: &str, actual: &str, position: &Chess) -> bool {
     }
 }
 
+#[test]
+fn info_allowance_matches_the_documented_grammar() {
+    let expected = "info depth 4 score {score} nodes {nodes}";
+    let position = Chess::default();
+    // The allowance pattern in expectations/README.md sets these results.
+    let cases = [
+        ("info depth 4 score cp 0 nodes 0", true),
+        ("info depth 4 score cp -100 nodes 197281", true),
+        ("info depth 4 score mate 2 nodes 197281", true),
+        ("info depth 4 score mate -2 nodes 197281", true),
+        ("info depth 4 score cp 0 nodes 0777461", false),
+        ("info depth 4 score cp +-100 nodes 197281", false),
+        ("info depth 4 score mate 0 nodes 197281", false),
+        ("info depth 4 score cp 0 nodes 197281 extra", false),
+    ];
+
+    for (actual, matches) in cases {
+        assert_eq!(
+            reply_matches(expected, actual, &position),
+            matches,
+            "{actual}"
+        );
+    }
+}
+
 fn search_info_matches(line: &str) -> bool {
     let Some((score, nodes)) = line
         .strip_prefix("info depth 4 score ")

@@ -3,7 +3,7 @@
 > position fen 7k/8/5K1Q/8/8/8/8/8 b - - 0 1
 > position fen 7k/8/5K1Q/8/8/8/8/7 b - - 0 1
 # Owner decision for rejected position: one diagnostic for malformed FEN.
-< info string {message:invalid FEN}
+< info string {message:eight files}
 > isready
 # UCI isready/readyok.
 < readyok
@@ -36,6 +36,24 @@
 < readyok
 > go
 # Owner-approved example: the original position still has its sole legal move.
+< bestmove h8g8
+> position
+< info string {message:expected startpos or fen}
+> isready
+< readyok
+> go
+< bestmove h8g8
+> position startpos e2e4
+< info string {message:expected moves}
+> isready
+< readyok
+> go
+< bestmove h8g8
+> position startpos moves e2e4 0000
+< info string {message:null move}
+> isready
+< readyok
+> go
 < bestmove h8g8
 # UCI quit.
 > quit

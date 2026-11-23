@@ -1,9 +1,11 @@
-# Sources for searched replies: April 2006 UCI specification https://backscattering.de/chess/uci/
-# (info and bestmove), fisher-2aj rules 1, 7 and 10, and python-chess 1.11.2
-# for the independently checked exact values. Written 2026-11-23.
 # Sources: April 2006 UCI specification https://backscattering.de/chess/uci/
-# and fisher-l7f owner decisions. Written 2026-11-22.
-# Exact replies and legal move sequences verified with python-chess 1.11.2.
+# and fisher-l7f owner decisions from 2026-11-22.
+# Search: fisher-2aj rules 1 to 7 and 10. Exact search values
+# were checked by exhaustive enumeration with python-chess 1.11.2.
+# Starting score: four-ply minimax with python-chess 1.11.2 followed rules
+# 1 to 7. An independent reviewer reproduced cp 0 and per-ply counts
+# 20/400/8902/197281 with their own minimax. See expectations/perft.epd.
+# Searched transcript written 2026-11-23.
 # UCI position and move format. e5d6 is en passant, and e1g1 castles.
 > position startpos moves e2e4 a7a6 e4e5 d7d5 e5d6 e7e6 g1f3 g8f6 f1e2 f8e7 e1g1
 > go
@@ -14,22 +16,25 @@
 # UCI position and move format. The castling rook leaves the h-file.
 > position fen 8/6k1/6B1/3B4/5Q2/8/6R1/4K2R w K - 0 1 moves e1g1
 > go
-# Rules 1 and 10. UCI info depth, score and nodes.
-< info depth 4 score {score} nodes {nodes}
+# Rules 1 to 7 and 10. Black must play g7h8, then f4f8 is checkmate.
+# Python-chess counts 1, 64, 58 and 3599 nodes at plies 1 to 4.
+< info depth 4 score mate -1 nodes 3722
 # The only legal reply fails if the castling rook still attacks h8.
 < bestmove g7h8
 # UCI position. The en passant capture makes d5 available to the black king.
 > position fen 8/8/5B2/3pP1K1/4k3/8/5Q2/4N3 w - d6 0 1 moves e5d6
 > go
-# Rules 1 and 10. UCI info depth, score and nodes.
-< info depth 4 score {score} nodes {nodes}
+# Rules 1 to 7 and 10. Four-ply minimax gives Black a material score of -2400.
+# Python-chess counts 1, 40, 177 and 6981 nodes at plies 1 to 4.
+< info depth 4 score cp -2400 nodes 7199
 # The only legal reply fails if the captured pawn stays on d5.
 < bestmove e4d5
 # UCI position and move format. The pawn promotes to a knight.
 > position fen 3Q4/P7/k7/3K4/8/1R6/8/8 w - - 0 1 moves a7a8n
 > go
-# Rules 1 and 10. UCI info depth, score and nodes.
-< info depth 4 score {score} nodes {nodes}
+# Rules 1 to 7 and 10. Black must play a6a7, then d8a5 is checkmate.
+# Python-chess counts 1, 39, 48 and 1923 nodes at plies 1 to 4.
+< info depth 4 score mate -1 nodes 2011
 # The only legal reply fails if the promotion creates a queen.
 < bestmove a6a7
 # The next move requires a knight on a8. A bishop cannot reach b6.
@@ -41,16 +46,16 @@
 < bestmove {legal}
 > position fen 8/P7/8/8/8/6q1/5k2/7K w - - 0 1
 > go
-# Rules 1 and 10. UCI info depth, score and nodes.
-< info depth 4 score {score} nodes {nodes}
+# Rules 1 to 7 and 10. White must promote on a8, then g3h3 is checkmate after any promotion.
+# Python-chess counts 4, 102, 848 and 20013 nodes at plies 1 to 4.
+< info depth 4 score mate -1 nodes 20967
 # UCI move format and bestmove. Every legal move has a promotion suffix.
 < bestmove {legal}
 > position fen 7k/8/5K1Q/8/8/8/8/8 b - - 0 1
 # The owner accepts an empty moves list as zero moves in fisher-l7f.7.
 > position startpos moves
 > go
-# Rules 1, 2, 5, 7 and 10. The published starting-position perft counts
-# in expectations/perft.epd sum to 206603. Python-chess confirms cp 0.
+# Rules 1 to 7 and 10. Published perft counts sum to 206603. See the header for cp 0.
 < info depth 4 score cp 0 nodes 206603
 # The starting position replaces the prior position, whose only move is h8g8.
 < bestmove {legal}
@@ -63,8 +68,7 @@
 < bestmove h8h7
 > position startpos
 > go
-# Rules 1, 2, 5, 7 and 10. The published starting-position perft counts
-# in expectations/perft.epd sum to 206603. Python-chess confirms cp 0.
+# Rules 1 to 7 and 10. Published perft counts sum to 206603. See the header for cp 0.
 < info depth 4 score cp 0 nodes 206603
 # The starting position replaces the prior position, whose only move is h8h7.
 < bestmove {legal}

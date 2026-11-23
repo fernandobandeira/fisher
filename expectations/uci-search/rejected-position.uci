@@ -1,8 +1,8 @@
-# Sources for searched replies: April 2006 UCI specification https://backscattering.de/chess/uci/
-# (info and bestmove), fisher-2aj rules 1, 7 and 10, and python-chess 1.11.2
-# for the independently checked exact values. Written 2026-11-23.
 # Sources: April 2006 UCI specification https://backscattering.de/chess/uci/
-# and fisher-l7f owner decisions. Written 2026-11-22.
+# and fisher-l7f owner decisions from 2026-11-22.
+# Search: fisher-2aj rules 1 to 7 and 10. Exact search values
+# were checked by exhaustive enumeration with python-chess 1.11.2.
+# Searched transcript written 2026-11-23.
 > position fen 7k/8/5K1Q/8/8/8/8/8 b - - 0 1
 > position fen 7k/8/5K1Q/8/8/8/8/7 b - - 0 1
 # Owner decision for rejected position: one diagnostic for malformed FEN.

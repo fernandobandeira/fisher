@@ -1,13 +1,15 @@
-# Sources for searched replies: April 2006 UCI specification https://backscattering.de/chess/uci/
-# (info and bestmove), fisher-2aj rules 1, 7 and 10, and python-chess 1.11.2
-# for the independently checked exact values. Written 2026-11-23.
 # Sources: April 2006 UCI specification https://backscattering.de/chess/uci/
-# and fisher-l7f owner decisions. Written 2026-11-22.
+# and fisher-l7f owner decisions from 2026-11-22.
+# Search: fisher-2aj rules 1 to 7, 9 and 10. Exact search values
+# were checked by exhaustive enumeration with python-chess 1.11.2.
+# Starting score: four-ply minimax with python-chess 1.11.2 followed rules
+# 1 to 7. An independent reviewer reproduced cp 0 and per-ply counts
+# 20/400/8902/197281 with their own minimax. See expectations/perft.epd.
+# Searched transcript written 2026-11-23.
 > position startpos
 > go infinite
 # Rule 9 sends info before the reply to isready. The move waits for stop.
-# Rules 1, 2, 5, 7 and 10. The published starting-position perft counts
-# in expectations/perft.epd sum to 206603. Python-chess confirms cp 0.
+# Rules 1 to 7 and 10. Published perft counts sum to 206603. See the header for cp 0.
 < info depth 4 score cp 0 nodes 206603
 > isready
 # UCI go infinite and isready. No bestmove precedes readyok.

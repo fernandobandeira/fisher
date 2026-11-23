@@ -52,9 +52,13 @@ will play them when fisher-2aj.4 adds search. Under rule 9, an accepted
 holds `bestmove` until `stop`. The terminal `info` lines are examples
 pending owner approval.
 
-| Expected line | Match |
-|---|---|
-| `< info depth 4 score {score} nodes {nodes}` | Match one line with these fields in order and no extra fields. The score is `cp` followed by a decimal integer or `mate` followed by a nonzero decimal integer. The node count is a nonnegative decimal integer. |
+The allowance `< info depth 4 score {score} nodes {nodes}` matches the
+entire output line, after removing its line ending, against this pattern
+with single spaces and nothing after the node count.
+
+```regex
+^info depth 4 score (cp (0|-?[1-9][0-9]*)|mate -?[1-9][0-9]*) nodes (0|[1-9][0-9]*)$
+```
 
 Use this allowance only when the score and node count have no outside
 expected values. The exact lines use the published starting-position
@@ -64,6 +68,8 @@ Run [equal-scores.uci](uci-search/equal-scores.uci) twice in fresh
 processes. Require each `bestmove` to match `{legal}` and compare the two
 actual UCI moves for equality, as required by rule 6. This comparison is
 part of running that transcript and uses the existing `{legal}` record.
+Run [material-zero.uci](uci-search/material-zero.uci) once to check the
+exact score for a position with no captures within four plies.
 
 ## Published perft
 

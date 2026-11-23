@@ -65,7 +65,10 @@ fn first_ten_published_mates_in_two() -> Result<(), Box<dyn Error>> {
 #[test]
 #[ignore = "run in release mode for every published mate-in-two position"]
 fn all_published_mates_in_two() -> Result<(), Box<dyn Error>> {
-    check_mate_in_two(records(MATE_IN_TWO))
+    let records: Vec<_> = records(MATE_IN_TWO).collect();
+    // The published table is documented as containing 100 positions.
+    assert_eq!(records.len(), 100);
+    check_mate_in_two(records.into_iter())
 }
 
 #[test]

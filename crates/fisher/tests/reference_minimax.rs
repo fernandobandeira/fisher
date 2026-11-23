@@ -98,3 +98,17 @@ fn free_knight_capture_keeps_the_remaining_material_after_a_reply() -> Result<()
     assert_eq!(minimax(&position, 2).1, 1_500);
     Ok(())
 }
+
+#[test]
+fn published_mate_in_two_scores_as_a_win() -> Result<(), Box<dyn Error>> {
+    // Lichess puzzle 000Zo is mate in two, three plies from this position.
+    let expected = 99_997;
+    let record = include_str!("../../../expectations/mate-in-two.tsv")
+        .lines()
+        .find_map(|line| line.strip_prefix("000Zo\t"))
+        .ok_or("missing puzzle 000Zo")?;
+    let (fen, _) = record.split_once('\t').ok_or("missing published move")?;
+
+    assert_eq!(minimax(&position(fen)?, 4).1, expected);
+    Ok(())
+}

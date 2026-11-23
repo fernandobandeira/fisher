@@ -49,8 +49,8 @@ bound reads and process exit to detect a hang.
 `uci-search/*.uci` holds the expected sessions for fisher-2aj. The runner
 will play them when fisher-2aj.4 adds search. Under rule 9, an accepted
 `go infinite` produces its `info` line before the reply to `isready` and
-holds `bestmove` until `stop`. The terminal `info` lines are examples
-pending owner approval.
+holds `bestmove` until `stop`. The owner approved both terminal `info`
+lines on 2026-11-23 in a comment on fisher-2aj.2.
 
 The allowance `< info depth 4 score {score} nodes {nodes}` matches the
 entire output line, after removing its line ending, against this pattern

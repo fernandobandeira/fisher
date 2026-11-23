@@ -61,6 +61,12 @@ impl Position {
             .filter(|piece| piece.color == self.side_to_move)
     }
 
+    #[must_use]
+    pub fn is_in_check(&self) -> bool {
+        self.king_square()
+            .is_some_and(|king| self.is_attacked(king, self.side_to_move.opposite()))
+    }
+
     fn king_square(&self) -> Option<Square> {
         Square::all().find(|&square| self.has_piece_at(square, self.side_to_move, PieceKind::King))
     }

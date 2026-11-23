@@ -34,6 +34,7 @@ name = "fisher"
 version = "0.1.0"
 dependencies = [
  "rules",
+ "search",
  "shakmaty",
  "uci",
 ]
@@ -93,6 +94,13 @@ name = "rules"
 version = "0.1.0"
 dependencies = [
  "shakmaty",
+]
+
+[[package]]
+name = "search"
+version = "0.1.0"
+dependencies = [
+ "rules",
 ]
 
 [[package]]

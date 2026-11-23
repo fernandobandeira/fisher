@@ -2,11 +2,13 @@ use std::{
     io::{self, BufRead, Write},
     sync::mpsc,
     thread,
-    time::{SystemTime, UNIX_EPOCH},
 };
 
-use rules::{Move, Position};
-use uci::{Command, Input, PositionCommand, PositionSource, Response, UciMove, parse_command};
+use rules::Position;
+use search::{Score, minimax};
+use uci::{
+    Command, Input, PositionCommand, PositionSource, Response, SearchScore, UciMove, parse_command,
+};
 
 fn main() -> io::Result<()> {
     let (sender, lines) = mpsc::channel();
@@ -24,7 +26,6 @@ fn answer_commands(
     output: &mut impl Write,
 ) -> io::Result<()> {
     let mut position = Position::starting();
-    let mut random = RandomMove::from_clock();
     let mut held_move = None;
     for line in lines {
         match parse_command(&line?) {
@@ -64,11 +65,25 @@ fn answer_commands(
             Input::Handled(Command::Go(parameters)) => {
                 // TODO(fisher-7vo): Obey the supplied search limits.
                 // TODO(fisher-2ha): Wait for ponderhit when pondering.
-                let moves = position.legal_moves();
-                let chosen = random
-                    .choose(&moves)
-                    .copied()
-                    .map_or(UciMove::Null, UciMove::from);
+                // TODO(fisher-2aj.5): Answer isready, stop and quit while a search runs.
+                const DEPTH: u8 = 4;
+                let (chosen, score, nodes) = minimax(&position, DEPTH);
+                let score = match score {
+                    Score::Centipawns(value) => SearchScore::Centipawns(value),
+                    Score::Mate { plies, winning } => {
+                        let moves = i32::from(plies.div_ceil(2));
+                        SearchScore::Mate(if winning { moves } else { -moves })
+                    }
+                };
+                send(
+                    output,
+                    &Response::SearchInfo {
+                        depth: if chosen.is_some() { DEPTH } else { 0 },
+                        score,
+                        nodes: chosen.map(|_| nodes),
+                    },
+                )?;
+                let chosen = chosen.map_or(UciMove::Null, UciMove::from);
                 if parameters.infinite {
                     held_move = Some(chosen);
                 } else {
@@ -141,28 +156,6 @@ fn read_input(
         let _sent = send_line(sender, &line);
     }
     Ok(())
-}
-
-struct RandomMove(u64);
-
-impl RandomMove {
-    fn from_clock() -> Self {
-        let elapsed = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default();
-        Self(elapsed.as_secs() ^ u64::from(elapsed.subsec_nanos()))
-    }
-
-    fn choose<'a>(&mut self, moves: &'a [Move]) -> Option<&'a Move> {
-        // TODO(fisher-2aj): Choose moves by search and evaluation and report search info.
-        let count = u64::try_from(moves.len()).ok()?;
-        self.0 = self.0.wrapping_add(0x9e37_79b9_7f4a_7c15);
-        let mut value = self.0;
-        value = (value ^ (value >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
-        value = (value ^ (value >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
-        let index = usize::try_from((value ^ (value >> 31)).checked_rem(count)?).ok()?;
-        moves.get(index)
-    }
 }
 
 fn send_line(sender: &mpsc::Sender<io::Result<String>>, line: &[u8]) -> bool {

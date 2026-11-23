@@ -39,67 +39,95 @@ fn end_of_input() -> io::Result<()> {
 
 #[test]
 fn startpos() -> io::Result<()> {
-    play_transcript("startpos")
+    play_searched_transcript("startpos")
 }
 
 #[test]
 fn new_game() -> io::Result<()> {
-    play_transcript("new-game")
+    play_searched_transcript("new-game")
 }
 
 #[test]
 fn position_moves() -> io::Result<()> {
-    play_transcript("position-moves")
+    play_searched_transcript("position-moves")
 }
 
 #[test]
 fn go_parameters() -> io::Result<()> {
-    play_transcript("go-parameters")
+    play_searched_transcript("go-parameters")
 }
 
 #[test]
 fn terminal_positions() -> io::Result<()> {
-    play_transcript("terminal-positions")
+    play_searched_transcript("terminal-positions")
 }
 
 #[test]
 fn halfmove_clock() -> io::Result<()> {
-    play_transcript("halfmove-clock")
+    play_searched_transcript("halfmove-clock")
 }
 
 #[test]
 fn rejected_position() -> io::Result<()> {
-    play_transcript("rejected-position")
+    play_searched_transcript("rejected-position")
 }
 
 #[test]
 fn rejected_position_opposite_check() -> io::Result<()> {
-    play_transcript("rejected-position-opposite-check")
+    play_searched_transcript("rejected-position-opposite-check")
 }
 
 #[test]
 fn go_infinite() -> io::Result<()> {
-    play_transcript("go-infinite")
+    play_searched_transcript("go-infinite")
 }
 
 #[test]
 fn go_infinite_terminal() -> io::Result<()> {
-    play_transcript("go-infinite-terminal")
+    play_searched_transcript("go-infinite-terminal")
 }
 
 #[test]
 fn quit_while_held() -> io::Result<()> {
-    play_transcript("quit-while-held")
+    play_searched_transcript("quit-while-held")
 }
 
 #[test]
 fn end_of_input_while_held() -> io::Result<()> {
-    play_transcript("end-of-input-while-held")
+    play_searched_transcript("end-of-input-while-held")
+}
+
+#[test]
+fn mate_in_one() -> io::Result<()> {
+    play_searched_transcript("mate-in-one")
+}
+
+#[test]
+fn material_zero() -> io::Result<()> {
+    play_searched_transcript("material-zero")
+}
+
+#[test]
+fn equal_scores() -> io::Result<()> {
+    let first = run_transcript("uci-search", "equal-scores")?;
+    let second = run_transcript("uci-search", "equal-scores")?;
+    assert_eq!(first.len(), 1);
+    assert_eq!(first, second);
+    Ok(())
 }
 
 fn play_transcript(name: &str) -> io::Result<()> {
+    run_transcript("uci", name).map(drop)
+}
+
+fn play_searched_transcript(name: &str) -> io::Result<()> {
+    run_transcript("uci-search", name).map(drop)
+}
+
+fn run_transcript(directory: &str, name: &str) -> io::Result<Vec<String>> {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../expectations/uci")
+        .join("../../expectations")
+        .join(directory)
         .join(format!("{name}.uci"));
     let transcript = fs::read_to_string(path)?;
     let mut session = Session::start()?;
@@ -119,7 +147,7 @@ fn play_transcript(name: &str) -> io::Result<()> {
     }
 
     if ended {
-        Ok(())
+        Ok(std::mem::take(&mut session.legal_replies))
     } else {
         Err(io::Error::other(format!("{name}.uci: missing ! exit")))
     }
@@ -225,6 +253,7 @@ fn reply_matches(expected: &str, actual: &str, position: &Chess) -> bool {
         "bestmove {legal}" => actual
             .strip_prefix("bestmove ")
             .is_some_and(|text| reference_move(position, text).is_some()),
+        "info depth 4 score {score} nodes {nodes}" => search_info_matches(actual),
         "info string {message}" => actual.starts_with("info string "),
         _ if let Some(required) = expected
             .strip_prefix("info string {message:")
@@ -238,11 +267,34 @@ fn reply_matches(expected: &str, actual: &str, position: &Chess) -> bool {
     }
 }
 
+fn search_info_matches(line: &str) -> bool {
+    let Some((score, nodes)) = line
+        .strip_prefix("info depth 4 score ")
+        .and_then(|line| line.split_once(" nodes "))
+    else {
+        return false;
+    };
+    let score_matches = if let Some(cp) = score.strip_prefix("cp ") {
+        cp == "0" || positive_decimal(cp.strip_prefix('-').unwrap_or(cp))
+    } else if let Some(mate) = score.strip_prefix("mate ") {
+        positive_decimal(mate.strip_prefix('-').unwrap_or(mate))
+    } else {
+        false
+    };
+    score_matches && (nodes == "0" || positive_decimal(nodes))
+}
+
+fn positive_decimal(text: &str) -> bool {
+    matches!(text.as_bytes().first(), Some(b'1'..=b'9'))
+        && text.bytes().all(|byte| byte.is_ascii_digit())
+}
+
 struct Session {
     child: Child,
     output: Receiver<io::Result<String>>,
     position: Chess,
     holding: bool,
+    legal_replies: Vec<String>,
 }
 
 impl Session {
@@ -257,6 +309,7 @@ impl Session {
             output,
             position: Chess::default(),
             holding: false,
+            legal_replies: Vec::new(),
         };
         let stdout = session
             .child
@@ -322,11 +375,14 @@ impl Session {
         }
     }
 
-    fn expect_reply(&self, expected: &str) -> io::Result<()> {
+    fn expect_reply(&mut self, expected: &str) -> io::Result<()> {
         let actual = self.next_reply()?.ok_or_else(|| {
             io::Error::other(format!("stdout closed while expecting {expected:?}"))
         })?;
         if reply_matches(expected, &actual, &self.position) {
+            if expected == "bestmove {legal}" {
+                self.legal_replies.push(actual);
+            }
             Ok(())
         } else {
             Err(io::Error::other(format!(

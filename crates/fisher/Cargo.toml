@@ -6,6 +6,7 @@ rust-version.workspace = true
 
 [dependencies]
 rules = { path = "../rules" }
+search = { path = "../search" }
 uci = { path = "../uci" }
 
 [dev-dependencies]

@@ -17,6 +17,17 @@ pub enum Response<'a> {
     ReadyOk,
     BestMove(UciMove),
     InfoString(&'a str),
+    SearchInfo {
+        depth: u8,
+        score: SearchScore,
+        nodes: Option<u64>,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SearchScore {
+    Centipawns(i32),
+    Mate(i32),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -38,6 +49,21 @@ impl fmt::Display for Response<'_> {
             Self::ReadyOk => output.write_str("readyok"),
             Self::BestMove(uci_move) => write!(output, "bestmove {uci_move}"),
             Self::InfoString(message) => write!(output, "info string {message}"),
+            Self::SearchInfo {
+                depth,
+                score,
+                nodes,
+            } => {
+                write!(output, "info depth {depth} score ")?;
+                match score {
+                    SearchScore::Centipawns(value) => write!(output, "cp {value}")?,
+                    SearchScore::Mate(moves) => write!(output, "mate {moves}")?,
+                }
+                if let Some(nodes) = nodes {
+                    write!(output, " nodes {nodes}")?;
+                }
+                Ok(())
+            }
         }
     }
 }

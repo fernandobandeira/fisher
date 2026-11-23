@@ -18,11 +18,15 @@ pub(super) struct Record {
 
 /// Returns the records in the order of the table, or an error naming the
 /// first data line that does not hold exactly three tab-separated fields.
+/// Trimming only recognises blank and comment lines. A data line is split
+/// with its tabs intact, so a trailing tab counts as a fourth field.
 pub(super) fn records() -> Result<Vec<Record>, String> {
     TABLE
         .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .filter(|line| {
+            let line = line.trim();
+            !line.is_empty() && !line.starts_with('#')
+        })
         .map(record)
         .collect()
 }

@@ -3,7 +3,10 @@ use std::{
     io::{self, BufRead, BufReader, Write},
     path::Path,
     process::{Child, Command, Stdio},
-    sync::mpsc::{self, Receiver},
+    sync::{
+        Mutex,
+        mpsc::{self, Receiver},
+    },
     thread,
     time::{Duration, Instant},
 };
@@ -299,10 +302,17 @@ struct Session {
 
 impl Session {
     fn start() -> io::Result<Self> {
-        let child = Command::new(env!("CARGO_BIN_EXE_fisher"))
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .spawn()?;
+        let child = {
+            // On macOS, concurrent spawns can inherit each other's pipes and delay EOF.
+            static SPAWN: Mutex<()> = Mutex::new(());
+            let _guard = SPAWN
+                .lock()
+                .map_err(|_| io::Error::other("fisher spawn lock is poisoned"))?;
+            Command::new(env!("CARGO_BIN_EXE_fisher"))
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .spawn()?
+        };
         let (sender, output) = mpsc::channel();
         let mut session = Self {
             child,

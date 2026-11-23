@@ -23,8 +23,20 @@ pub enum PieceKind {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Piece {
-    pub color: Color,
-    pub kind: PieceKind,
+    color: Color,
+    kind: PieceKind,
+}
+
+impl Piece {
+    #[must_use]
+    pub fn color(self) -> Color {
+        self.color
+    }
+
+    #[must_use]
+    pub fn kind(self) -> PieceKind {
+        self.kind
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

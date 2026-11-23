@@ -9,6 +9,7 @@ pub enum Score {
 }
 
 /// Searches every legal move to the given depth in plies.
+/// At depth zero the result has no chosen move, even if legal moves exist.
 /// The score is from the starting side to move, and nodes exclude the starting position.
 #[must_use]
 pub fn minimax(position: &Position, depth: u8) -> (Option<Move>, Score, u64) {
@@ -54,14 +55,18 @@ fn material(position: &Position) -> i32 {
     Square::all()
         .filter_map(|square| position.piece_at(square))
         .map(|piece| {
-            let value = match piece.kind {
+            let value = match piece.kind() {
                 PieceKind::Pawn => 100,
                 PieceKind::Knight | PieceKind::Bishop => 300,
                 PieceKind::Rook => 500,
                 PieceKind::Queen => 900,
                 PieceKind::King => 0,
             };
-            if piece.color == color { value } else { -value }
+            if piece.color() == color {
+                value
+            } else {
+                -value
+            }
         })
         .sum()
 }

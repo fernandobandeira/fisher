@@ -5,7 +5,7 @@ use std::error::Error;
 
 use rules::Position;
 use search::{Score, minimax};
-use shakmaty::{Chess, EnPassantMode, Position as _, fen::Fen};
+use shakmaty::{CastlingMode, Chess, EnPassantMode, Position as _, fen::Fen};
 use uci::UciMove;
 
 const PERFT: &str = include_str!("../../../expectations/perft.epd");
@@ -70,14 +70,33 @@ fn check_mate_in_two(records: impl Iterator<Item = &'static str>) -> Result<(), 
 }
 
 #[test]
-fn first_published_mate_in_two() -> Result<(), Box<dyn Error>> {
-    check_mate_in_two(records(MATE_IN_TWO).take(1))
+fn first_ten_published_mates_in_two() -> Result<(), Box<dyn Error>> {
+    check_mate_in_two(records(MATE_IN_TWO).take(10))
 }
 
 #[test]
 #[ignore = "run in release mode for every published mate-in-two position"]
 fn all_published_mates_in_two() -> Result<(), Box<dyn Error>> {
     check_mate_in_two(records(MATE_IN_TWO))
+}
+
+#[test]
+fn mate_on_the_horizon_scores_as_material() -> Result<(), Box<dyn Error>> {
+    for record in records(MATE_IN_TWO).take(10) {
+        let (_, fields) = record.split_once('\t').ok_or("missing puzzle ID")?;
+        let (fen, _) = fields.split_once('\t').ok_or("missing published move")?;
+        let position = fen.parse::<Fen>()?.into_position(CastlingMode::Standard)?;
+        assert_matches_reference(fen, &position, 3)?;
+    }
+    Ok(())
+}
+
+#[test]
+fn equal_scores_keep_the_first_legal_move() {
+    let position = Position::starting();
+    // None of the starting position's 20 legal moves changes the material.
+    let first = position.legal_moves().into_iter().next();
+    assert_eq!(minimax(&position, 1), (first, Score::Centipawns(0), 20));
 }
 
 #[test]
@@ -95,17 +114,22 @@ fn score_and_nodes_match_reference_on_random_reachable_positions() -> Result<(),
             position = position.play(chosen)?;
 
             let fen = Fen::from_position(&position, EnPassantMode::Always).to_string();
-            let (_, expected_score, expected_nodes) = reference::minimax(&position, 2);
-            let (_, score, nodes) = minimax(&Position::from_fen(&fen)?, 2);
-            let score = match score {
-                Score::Centipawns(value) => value,
-                Score::Mate { plies, winning } => {
-                    let value = 100_000 - i32::from(plies);
-                    if winning { value } else { -value }
-                }
-            };
-            assert_eq!((score, nodes), (expected_score, expected_nodes), "{fen}");
+            assert_matches_reference(&fen, &position, 2)?;
         }
     }
+    Ok(())
+}
+
+fn assert_matches_reference(fen: &str, position: &Chess, depth: u8) -> Result<(), Box<dyn Error>> {
+    let (_, expected_score, expected_nodes) = reference::minimax(position, depth);
+    let (_, score, nodes) = minimax(&Position::from_fen(fen)?, depth);
+    let score = match score {
+        Score::Centipawns(value) => value,
+        Score::Mate { plies, winning } => {
+            let value = 100_000 - i32::from(plies);
+            if winning { value } else { -value }
+        }
+    };
+    assert_eq!((score, nodes), (expected_score, expected_nodes), "{fen}");
     Ok(())
 }

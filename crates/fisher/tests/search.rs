@@ -1,3 +1,5 @@
+#[path = "support/mate_in_two.rs"]
+mod mate_in_two;
 #[path = "support/reference_minimax.rs"]
 mod reference;
 mod support;
@@ -9,13 +11,6 @@ use search::{Score, minimax};
 use shakmaty::{Chess, EnPassantMode, Position as _, fen::Fen};
 use support::{check_perft, reference_position};
 use uci::UciMove;
-
-const MATE_IN_TWO: &str = include_str!("../../../expectations/mate-in-two.tsv");
-
-fn records(data: &str) -> impl Iterator<Item = &str> {
-    data.lines()
-        .filter(|line| !line.trim().is_empty() && !line.starts_with('#'))
-}
 
 fn search_nodes(fen: &str, depth: u8) -> Result<u64, Box<dyn Error>> {
     Ok(minimax(&Position::from_fen(fen)?, depth).nodes)
@@ -32,26 +27,28 @@ fn node_count_matches_published_perft_at_four_plies() -> Result<(), Box<dyn Erro
     check_perft(4, search_nodes)
 }
 
-fn check_mate_in_two(records: impl Iterator<Item = &'static str>) -> Result<(), Box<dyn Error>> {
+fn check_mate_in_two(
+    records: impl IntoIterator<Item = mate_in_two::Record>,
+) -> Result<(), Box<dyn Error>> {
     for record in records {
-        let (id, fields) = record.split_once('\t').ok_or("missing puzzle ID")?;
-        let (fen, expected) = fields.split_once('\t').ok_or("missing published move")?;
-        let result = minimax(&Position::from_fen(fen)?, 4);
+        let result = minimax(&Position::from_fen(record.fen)?, 4);
         assert_eq!(
             result.score,
             Score::Mate {
                 plies: 3,
                 winning: true
             },
-            "{id}"
+            "{}",
+            record.id
         );
         assert_eq!(
             result
                 .chosen_move
                 .map(|movement| UciMove::from(movement).to_string())
                 .as_deref(),
-            Some(expected),
-            "{id}"
+            Some(record.published_move),
+            "{}",
+            record.id
         );
     }
     Ok(())
@@ -59,24 +56,22 @@ fn check_mate_in_two(records: impl Iterator<Item = &'static str>) -> Result<(), 
 
 #[test]
 fn first_ten_published_mates_in_two() -> Result<(), Box<dyn Error>> {
-    check_mate_in_two(records(MATE_IN_TWO).take(10))
+    check_mate_in_two(mate_in_two::records()?.into_iter().take(10))
 }
 
 #[test]
 #[ignore = "run in release mode for every published mate-in-two position"]
 fn all_published_mates_in_two() -> Result<(), Box<dyn Error>> {
-    let records: Vec<_> = records(MATE_IN_TWO).collect();
+    let records = mate_in_two::records()?;
     // The published table is documented as containing 100 positions.
     assert_eq!(records.len(), 100);
-    check_mate_in_two(records.into_iter())
+    check_mate_in_two(records)
 }
 
 #[test]
 fn mate_on_the_horizon_scores_as_material() -> Result<(), Box<dyn Error>> {
-    for record in records(MATE_IN_TWO).take(10) {
-        let (_, fields) = record.split_once('\t').ok_or("missing puzzle ID")?;
-        let (fen, _) = fields.split_once('\t').ok_or("missing published move")?;
-        let position = reference_position(fen)?;
+    for record in mate_in_two::records()?.into_iter().take(10) {
+        let position = reference_position(record.fen)?;
         assert_matches_reference(&position, 3)?;
     }
     Ok(())

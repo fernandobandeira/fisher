@@ -102,6 +102,19 @@ fn free_knight_capture_keeps_the_remaining_material_after_a_reply() -> Result<()
 }
 
 #[test]
+fn quiet_move_beats_a_capture_that_allows_a_recapture() -> Result<(), Box<dyn Error>> {
+    let position = position("7k/8/2p5/3p4/8/8/8/3Q3K w - - 0 1")?;
+    // White starts 900 - 200 = 700 centipawns ahead. Qxd5 is the only capture.
+    // At depth 1 it scores the material left, 900 - 100 = 800. At depth 2,
+    // cxd5 answers it and leaves Black a pawn ahead, -100. A quiet move such as
+    // Qd2 keeps the 700 lead: no black piece attacks the queen there, and no
+    // white move checkmates or stalemates Black.
+    assert_eq!(minimax(&position, 1).1, 800);
+    assert_eq!(minimax(&position, 2).1, 700);
+    Ok(())
+}
+
+#[test]
 fn published_mate_in_two_scores_as_a_win_with_the_published_move() -> Result<(), Box<dyn Error>> {
     // Lichess puzzle 000Zo is mate in two, three plies from this position, so
     // it scores 100_000 - 3. The README says exactly one legal move forces

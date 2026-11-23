@@ -13,10 +13,11 @@ For fisher-l7f, fisher-l7f.1 supplies the UCI transcripts before protocol code, 
 
 ## UCI transcripts
 
-Each `uci/*.uci` path is one session with a fresh fisher process. Read
-the records top to bottom. Blank lines and lines starting with `#` are
-comments. The header gives the sources and date. A comment above a command
-or reply names the passage or owner decision that supplies its expectation.
+All UCI transcripts live in `uci/`. Each `uci/*.uci` path describes one
+session with a fresh fisher process. Read the records top to bottom. Blank
+lines and lines starting with `#` are comments. The header gives the sources
+and date. A comment above a command or reply names the passage or owner
+decision that supplies its expectation.
 
 | Record | Meaning |
 |---|---|
@@ -47,11 +48,10 @@ bound reads and process exit to detect a hang.
 
 ### Searched moves
 
-`uci-search/*.uci` holds the expected sessions for fisher-2aj. The runner
-will play them when fisher-2aj.4 adds search. Under rule 9, an accepted
-`go infinite` produces its `info` line before the reply to `isready` and
-holds `bestmove` until `stop`. The owner approved both terminal `info`
-lines on 2026-11-23 in a comment on fisher-2aj.2.
+Under rule 9 of fisher-2aj, an accepted `go infinite` produces its `info`
+line before the reply to `isready` and holds `bestmove` until `stop`. The
+owner approved both terminal `info` lines on 2026-11-23 in a comment on
+fisher-2aj.2.
 
 The expected line `< info depth 4 score {score} nodes {nodes}` is an
 allowance. It matches the entire output line, after removing its line
@@ -66,11 +66,11 @@ Use this expected line only when the score has no outside expected value.
 The exact lines use the published starting-position
 perft counts and positions checked independently with python-chess.
 
-Run [equal-scores.uci](uci-search/equal-scores.uci) twice in fresh
+Run [equal-scores.uci](uci/equal-scores.uci) twice in fresh
 processes. Require each `bestmove` to match `{legal}` and compare the two
 actual UCI moves for equality, as required by rule 6. This comparison is
 part of running that transcript and uses the existing `{legal}` record.
-Run [material-zero.uci](uci-search/material-zero.uci) once to check the
+Run [material-zero.uci](uci/material-zero.uci) once to check the
 exact score for a position with no captures within four plies.
 
 ## Published perft

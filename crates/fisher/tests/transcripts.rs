@@ -43,95 +43,90 @@ fn end_of_input() -> io::Result<()> {
 
 #[test]
 fn startpos() -> io::Result<()> {
-    play_searched_transcript("startpos")
+    play_transcript("startpos")
 }
 
 #[test]
 fn new_game() -> io::Result<()> {
-    play_searched_transcript("new-game")
+    play_transcript("new-game")
 }
 
 #[test]
 fn position_moves() -> io::Result<()> {
-    play_searched_transcript("position-moves")
+    play_transcript("position-moves")
 }
 
 #[test]
 fn go_parameters() -> io::Result<()> {
-    play_searched_transcript("go-parameters")
+    play_transcript("go-parameters")
 }
 
 #[test]
 fn terminal_positions() -> io::Result<()> {
-    play_searched_transcript("terminal-positions")
+    play_transcript("terminal-positions")
 }
 
 #[test]
 fn halfmove_clock() -> io::Result<()> {
-    play_searched_transcript("halfmove-clock")
+    play_transcript("halfmove-clock")
 }
 
 #[test]
 fn rejected_position() -> io::Result<()> {
-    play_searched_transcript("rejected-position")
+    play_transcript("rejected-position")
 }
 
 #[test]
 fn rejected_position_opposite_check() -> io::Result<()> {
-    play_searched_transcript("rejected-position-opposite-check")
+    play_transcript("rejected-position-opposite-check")
 }
 
 #[test]
 fn go_infinite() -> io::Result<()> {
-    play_searched_transcript("go-infinite")
+    play_transcript("go-infinite")
 }
 
 #[test]
 fn go_infinite_terminal() -> io::Result<()> {
-    play_searched_transcript("go-infinite-terminal")
+    play_transcript("go-infinite-terminal")
 }
 
 #[test]
 fn quit_while_held() -> io::Result<()> {
-    play_searched_transcript("quit-while-held")
+    play_transcript("quit-while-held")
 }
 
 #[test]
 fn end_of_input_while_held() -> io::Result<()> {
-    play_searched_transcript("end-of-input-while-held")
+    play_transcript("end-of-input-while-held")
 }
 
 #[test]
 fn mate_in_one() -> io::Result<()> {
-    play_searched_transcript("mate-in-one")
+    play_transcript("mate-in-one")
 }
 
 #[test]
 fn material_zero() -> io::Result<()> {
-    play_searched_transcript("material-zero")
+    play_transcript("material-zero")
 }
 
 #[test]
 fn equal_scores() -> io::Result<()> {
-    let first = collect_legal_bestmove_replies("uci-search", "equal-scores")?;
-    let second = collect_legal_bestmove_replies("uci-search", "equal-scores")?;
+    let first = collect_legal_bestmove_replies("equal-scores")?;
+    let second = collect_legal_bestmove_replies("equal-scores")?;
     assert_eq!(first.len(), 1);
     assert_eq!(first, second);
     Ok(())
 }
 
 fn play_transcript(name: &str) -> io::Result<()> {
-    collect_legal_bestmove_replies("uci", name).map(drop)
+    collect_legal_bestmove_replies(name).map(drop)
 }
 
-fn play_searched_transcript(name: &str) -> io::Result<()> {
-    collect_legal_bestmove_replies("uci-search", name).map(drop)
-}
-
-fn collect_legal_bestmove_replies(directory: &str, name: &str) -> io::Result<Vec<String>> {
+fn collect_legal_bestmove_replies(name: &str) -> io::Result<Vec<String>> {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../expectations")
-        .join(directory)
+        .join("../../expectations/uci")
         .join(format!("{name}.uci"));
     let transcript = fs::read_to_string(path)?;
     let mut session = Session::start()?;

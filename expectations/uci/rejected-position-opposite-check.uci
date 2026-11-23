@@ -1,8 +1,9 @@
-# Sources: April 2006 UCI specification https://backscattering.de/chess/uci/,
-# the owner decision of 2026-11-23 that a FEN in which the color that is not
-# the side to move is in check is rejected, and shakmaty 0.30.3, which rejects
-# the second FEN below as an illegal position (OPPOSITE_CHECK).
-# Written 2026-11-23. The expected values were chosen by the owner.
+# Sources: April 2006 UCI specification https://backscattering.de/chess/uci/
+# and the owner decision of 2026-11-23 to reject opposite check with one
+# diagnostic. Shakmaty 0.30.3 independently rejects the second FEN.
+# Search: fisher-2aj rules 1 to 7 and 10. Exact search values
+# were checked by exhaustive enumeration with python-chess 1.11.2.
+# Searched transcript written 2026-11-23.
 > position fen 7k/8/5K1Q/8/8/8/8/8 b - - 0 1
 # White to move while the black king on e8 is attacked by the rook on e1.
 > position fen 4k3/8/8/8/8/8/8/4RK2 w - - 0 1
@@ -12,6 +13,9 @@
 # UCI isready/readyok.
 < readyok
 > go
+# Rules 4, 5, 7 and 10. Black must play h8g8, then h6g7 is checkmate.
+# Python-chess counts 1, 21, 30 and 730 nodes at plies 1 to 4.
+< info depth 4 score mate -1 nodes 782
 # Owner-approved example: the original position still has its sole legal move.
 < bestmove h8g8
 # UCI quit.

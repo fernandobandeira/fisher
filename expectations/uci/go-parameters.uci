@@ -38,7 +38,7 @@
 > position fen 7k/8/5K1Q/8/8/8/8/8 b - - 0 1
 > go
 < bestmove h8g8
-> unknown position fen 7k/8/5K2/6Q1/8/8/8/8 b - - 0 1
+> \xff unknown position fen 7k/8/5K2/6Q1/8/8/8/8 b - - 0 1
 > go
 < bestmove h8h7
 # The ignored command consumes its arguments, including position.

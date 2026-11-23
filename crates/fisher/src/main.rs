@@ -6,7 +6,7 @@ use std::{
 };
 
 use rules::{Move, Position};
-use uci::{Command, Input, Response, UciMove, parse_command};
+use uci::{Command, Input, PositionCommand, PositionSource, Response, UciMove, parse_command};
 
 fn main() -> io::Result<()> {
     let (sender, lines) = mpsc::channel();
@@ -36,22 +36,47 @@ fn answer_commands(
                 send(output, &Response::UciOk)?;
             }
             Input::Handled(Command::IsReady) => send(output, &Response::ReadyOk)?,
-            Input::Handled(Command::StartPosition) => position = Position::starting(),
-            Input::Handled(Command::UnsupportedPosition) => {
-                // TODO(fisher-l7f.7): Accept FEN and move lists in position commands.
-                send(output, &Response::InfoString("expected position startpos"))?;
-            }
-            Input::Handled(Command::Go) => {
-                let moves = position.legal_moves();
-                if let Some(chosen) = random.choose(&moves) {
-                    send(output, &Response::BestMove(UciMove::from(*chosen)))?;
+            Input::Handled(Command::Position(command)) => {
+                if let Some(next) = command.ok().and_then(setup_position) {
+                    position = next;
+                } else {
+                    send(output, &Response::InfoString("position rejected"))?;
                 }
             }
+            Input::Handled(Command::Go(_)) => {
+                // TODO(fisher-7vo): Obey the supplied search limits.
+                // TODO(fisher-2ha): Wait for ponderhit when pondering.
+                let moves = position.legal_moves();
+                let chosen = random
+                    .choose(&moves)
+                    .copied()
+                    .map_or(UciMove::Null, UciMove::from);
+                send(output, &Response::BestMove(chosen))?;
+            }
             Input::Handled(Command::Quit) => break,
-            Input::Ignored | Input::Unknown => {}
+            Input::Handled(Command::UciNewGame) | Input::Ignored | Input::Unknown => {}
         }
     }
     Ok(())
+}
+
+fn setup_position(command: PositionCommand) -> Option<Position> {
+    let mut position = match command.source {
+        PositionSource::Startpos => Position::starting(),
+        PositionSource::Fen(fen) => Position::from_fen(&fen).ok()?,
+    };
+    for uci_move in command.moves {
+        let UciMove::Normal {
+            from,
+            to,
+            promotion,
+        } = uci_move
+        else {
+            return None;
+        };
+        position = position.legal_move(from, to, promotion)?.play();
+    }
+    Some(position)
 }
 
 fn read_input(

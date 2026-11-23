@@ -1,10 +1,12 @@
+#[path = "support/mate_in_two.rs"]
+mod mate_in_two;
 #[path = "support/reference_minimax.rs"]
 mod reference;
 
 use std::error::Error;
 
 use reference::minimax;
-use shakmaty::{CastlingMode, Chess, Position as _, fen::Fen};
+use shakmaty::{CastlingMode, Chess, Position as _, fen::Fen, uci::UciMove};
 
 const PERFT: &str = include_str!("../../../expectations/perft.epd");
 
@@ -100,15 +102,21 @@ fn free_knight_capture_keeps_the_remaining_material_after_a_reply() -> Result<()
 }
 
 #[test]
-fn published_mate_in_two_scores_as_a_win() -> Result<(), Box<dyn Error>> {
-    // Lichess puzzle 000Zo is mate in two, three plies from this position.
-    let expected = 99_997;
-    let record = include_str!("../../../expectations/mate-in-two.tsv")
-        .lines()
-        .find_map(|line| line.strip_prefix("000Zo\t"))
+fn published_mate_in_two_scores_as_a_win_with_the_published_move() -> Result<(), Box<dyn Error>> {
+    // Lichess puzzle 000Zo is mate in two, three plies from this position, so
+    // it scores 100_000 - 3. The README says exactly one legal move forces
+    // that checkmate, so the first best move is the published move, e8e1.
+    let expected_score = 99_997;
+    let records = mate_in_two::records()?;
+    let record = records
+        .iter()
+        .find(|record| record.id == "000Zo")
         .ok_or("missing puzzle 000Zo")?;
-    let (fen, _) = record.split_once('\t').ok_or("missing published move")?;
 
-    assert_eq!(minimax(&position(fen)?, 4).1, expected);
+    let (best_move, score, _) = minimax(&position(record.fen)?, 4);
+
+    assert_eq!(score, expected_score);
+    let best_move = best_move.map(|movement| UciMove::from_standard(movement).to_string());
+    assert_eq!(best_move.as_deref(), Some(record.published_move));
     Ok(())
 }

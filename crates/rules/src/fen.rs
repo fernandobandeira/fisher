@@ -57,26 +57,14 @@ impl Position {
     /// Writes the canonical FEN, including an en passant square even without a legal capture.
     #[must_use]
     pub fn to_fen(&self) -> String {
-        let pieces = self.write_pieces();
-        let color = match self.side_to_move {
-            Color::White => 'w',
-            Color::Black => 'b',
-        };
-        let mut castling = String::new();
-        for (letter, color, castle) in CASTLING_RIGHTS {
-            if self.castling_rights.has(color, castle) {
-                castling.push(letter);
-            }
-        }
-        if castling.is_empty() {
-            castling.push('-');
-        }
-        let en_passant = self
-            .en_passant
-            .map_or_else(|| "-".to_owned(), |square| square.to_string());
         format!(
-            "{pieces} {color} {castling} {en_passant} {} {}",
-            self.halfmove_clock, self.fullmove_number
+            "{} {} {} {} {} {}",
+            self.write_pieces(),
+            write_side_to_move(self.side_to_move),
+            write_castling_rights(self.castling_rights),
+            write_en_passant(self.en_passant),
+            self.halfmove_clock,
+            self.fullmove_number,
         )
     }
 
@@ -116,26 +104,27 @@ impl Position {
     fn write_pieces(&self) -> String {
         let mut text = String::new();
         for rank in (0..8).rev() {
-            if rank != 7 {
+            if !text.is_empty() {
                 text.push('/');
             }
-            let mut empty = 0;
-            for file in 0..8 {
-                if let Some(piece) = self.piece_at(Square::new(file, rank)) {
-                    if empty > 0 {
-                        text.push(char::from(b'0' + empty));
-                        empty = 0;
-                    }
-                    text.push(piece_letter(piece));
-                } else {
-                    empty += 1;
-                }
-            }
-            if empty > 0 {
-                text.push(char::from(b'0' + empty));
-            }
+            self.write_rank(rank, &mut text);
         }
         text
+    }
+
+    // A rank with only a white pawn on the e-file reads as 4P3.
+    fn write_rank(&self, rank: u8, text: &mut String) {
+        let mut empty_squares = 0;
+        for file in 0..8 {
+            let Some(piece) = self.piece_at(Square::new(file, rank)) else {
+                empty_squares += 1;
+                continue;
+            };
+            write_empty_squares(empty_squares, text);
+            text.push(piece_letter(piece));
+            empty_squares = 0;
+        }
+        write_empty_squares(empty_squares, text);
     }
 
     fn check_pieces(&self) -> Result<(), FenError> {
@@ -207,6 +196,39 @@ impl Position {
                 Color::Black => "FEN must have exactly one king for Black",
             }))
         }
+    }
+}
+
+fn write_empty_squares(count: u8, text: &mut String) {
+    if count > 0 {
+        text.push(char::from(b'0' + count));
+    }
+}
+
+const fn write_side_to_move(color: Color) -> char {
+    match color {
+        Color::White => 'w',
+        Color::Black => 'b',
+    }
+}
+
+fn write_castling_rights(rights: CastlingRights) -> String {
+    let mut text = String::new();
+    for (letter, color, castle) in CASTLING_RIGHTS {
+        if rights.has(color, castle) {
+            text.push(letter);
+        }
+    }
+    if text.is_empty() {
+        text.push('-');
+    }
+    text
+}
+
+fn write_en_passant(target: Option<Square>) -> String {
+    match target {
+        Some(square) => square.to_string(),
+        None => "-".to_owned(),
     }
 }
 

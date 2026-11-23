@@ -9,7 +9,9 @@ Expected values that came from outside the implementer: published perft counts, 
 - The agent implementing a ticket does not edit this directory. If a value looks wrong, it stops and says why.
 - This directory is a protected path: a commit that touches it needs a `Guard-Change:` line, and the human reads it.
 
-For fisher-l7f, fisher-l7f.1 supplies the UCI transcripts before protocol code, and fisher-l7f.2 supplies the published perft counts before move generation.
+fisher-l7f.1 supplied the original UCI transcripts before protocol code, and
+fisher-l7f.2 supplied the published perft counts before move generation.
+The 15 searched transcripts that expect an `info` line come from fisher-2aj.2.
 
 ## UCI transcripts
 

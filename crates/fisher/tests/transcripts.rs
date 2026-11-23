@@ -73,8 +73,8 @@ fn rejected_position() -> io::Result<()> {
 }
 
 #[test]
-fn rejected_position_other_king_in_check() -> io::Result<()> {
-    play_transcript("rejected-position-other-king-in-check")
+fn rejected_position_opposite_check() -> io::Result<()> {
+    play_transcript("rejected-position-opposite-check")
 }
 
 #[test]

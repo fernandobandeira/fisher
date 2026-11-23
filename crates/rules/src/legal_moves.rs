@@ -284,7 +284,7 @@ impl Position {
         }
     }
 
-    fn is_attacked(&self, target: Square, attacker: Color) -> bool {
+    pub(super) fn is_attacked(&self, target: Square, attacker: Color) -> bool {
         let pawn_rank = -attacker.pawn_advance();
         self.attacked_at_offsets(
             target,
@@ -408,8 +408,9 @@ impl Promotion {
 
 impl Piece {
     fn can_be_captured_by(self, color: Color) -> bool {
-        // Accepted FENs can leave the opposing king under attack. Move generation still excludes king captures.
-        self.color != color && self.kind != PieceKind::King
+        // A king is never a target: Position::from_fen rejects a FEN in which the color that is not
+        // the side to move is in check, and no legal move leaves the mover's own king in check.
+        self.color != color
     }
 }
 

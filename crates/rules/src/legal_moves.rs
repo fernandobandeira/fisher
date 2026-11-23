@@ -170,25 +170,30 @@ impl Position {
         for castle in CASTLES {
             if self.castling_rights.has(color, castle)
                 && self.has_piece_at(castle.rook_home(color), color, PieceKind::Rook)
-                && castle
-                    .between_files()
-                    .iter()
-                    .all(|&file| self.piece_at(Square::new(file, from.rank.0)).is_none())
+                && self.squares_between_king_and_rook_are_empty(color, castle)
+                && self.king_can_cross(from, castle.king_transit_square(color), king)
             {
-                // The king crosses the rook's destination.
-                // legal_from_pseudo_legal checks the final square.
-                let transit = castle.rook_destination(color);
-                let mut during_castling = *self;
-                during_castling.set_piece(from, None);
-                during_castling.put(transit, king);
-                if !during_castling.is_attacked(transit, color.opposite()) {
-                    moves.push(PseudoLegalMove {
-                        to: castle.king_destination(color),
-                        kind: MoveKind::Castling(castle),
-                    });
-                }
+                // legal_from_pseudo_legal checks the destination after both pieces move.
+                moves.push(PseudoLegalMove {
+                    to: castle.king_destination(color),
+                    kind: MoveKind::Castling(castle),
+                });
             }
         }
+    }
+
+    fn squares_between_king_and_rook_are_empty(&self, color: Color, castle: Castle) -> bool {
+        castle.between_files().iter().all(|&file| {
+            self.piece_at(Square::new(file, color.home_rank()))
+                .is_none()
+        })
+    }
+
+    fn king_can_cross(&self, from: Square, transit: Square, king: Piece) -> bool {
+        let mut during_castling = *self;
+        during_castling.set_piece(from, None);
+        during_castling.put(transit, king);
+        !during_castling.is_attacked(transit, king.color.opposite())
     }
 
     fn legal_from_pseudo_legal(
@@ -289,8 +294,18 @@ impl Position {
         ) || self.attacked_at_offsets(target, attacker, PieceKind::Knight, &KNIGHT_OFFSETS)
             || self.attacked_at_offsets(target, attacker, PieceKind::King, &DIAGONALS)
             || self.attacked_at_offsets(target, attacker, PieceKind::King, &ORTHOGONALS)
-            || self.attacked_along(target, attacker, &DIAGONALS, PieceKind::Bishop)
-            || self.attacked_along(target, attacker, &ORTHOGONALS, PieceKind::Rook)
+            || self.attacked_along(
+                target,
+                attacker,
+                &DIAGONALS,
+                [PieceKind::Bishop, PieceKind::Queen],
+            )
+            || self.attacked_along(
+                target,
+                attacker,
+                &ORTHOGONALS,
+                [PieceKind::Rook, PieceKind::Queen],
+            )
     }
 
     fn attacked_at_offsets(
@@ -312,15 +327,13 @@ impl Position {
         target: Square,
         attacker: Color,
         directions: &[(i8, i8)],
-        slider: PieceKind,
+        attacking_kinds: [PieceKind; 2],
     ) -> bool {
         for &(file, rank) in directions {
             let mut square = target;
             while let Some(source) = square.offset(file, rank) {
                 if let Some(piece) = self.piece_at(source) {
-                    if piece.color == attacker
-                        && (piece.kind == slider || piece.kind == PieceKind::Queen)
-                    {
+                    if piece.color == attacker && attacking_kinds.contains(&piece.kind) {
                         return true;
                     }
                     break;
@@ -440,6 +453,10 @@ impl Castle {
     }
 
     const fn rook_destination(self, color: Color) -> Square {
+        self.king_transit_square(color)
+    }
+
+    const fn king_transit_square(self, color: Color) -> Square {
         let file = match self {
             Self::Kingside => 5,
             Self::Queenside => 3,

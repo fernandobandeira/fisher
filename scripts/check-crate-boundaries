@@ -1,0 +1,151 @@
+#!/usr/bin/env python3
+"""Check the workspace's declared direct crate dependencies."""
+
+import argparse
+import json
+from pathlib import Path
+import subprocess
+import sys
+
+ALLOWED = {
+    "fisher": {"rules", "uci"},
+    "uci": {"rules"},
+    "rules": set(),
+    "xtask": set(),
+}
+
+
+def violations(metadata):
+    workspace_ids = set(metadata["workspace_members"])
+    members = [
+        package for package in metadata["packages"] if package["id"] in workspace_ids
+    ]
+    members_by_path = {
+        Path(package["manifest_path"]).resolve().parent: package["name"]
+        for package in members
+    }
+    crates_dir = Path(metadata["workspace_root"]).resolve() / "crates"
+    library_kinds = {"lib", "rlib", "dylib", "cdylib", "staticlib", "proc-macro"}
+    problems = []
+    for package in members:
+        name = package["name"]
+        if name not in ALLOWED:
+            problems.append(
+                f"{name}: register its allowed workspace dependencies in "
+                "scripts/check-crate-boundaries."
+            )
+            continue
+        crate_dir = Path(package["manifest_path"]).resolve().parent
+        for target in package["targets"]:
+            if library_kinds.isdisjoint(target["kind"]):
+                continue
+            entry = Path(target["src_path"]).resolve()
+            if crate_dir.parent != crates_dir or entry != crate_dir / "src/lib.rs":
+                problems.append(
+                    f"{name}: keep the library entry point at crates/<crate>/src/lib.rs."
+                )
+        for dependency in package["dependencies"]:
+            kind = dependency["kind"] or "normal"
+            alias = f" as {dependency['rename']}" if dependency["rename"] else ""
+            platform = f" for {dependency['target']}" if dependency["target"] else ""
+            declaration = f"{kind} dependency{alias}{platform}"
+
+            # Shakmaty supplies independent expected values in tests.
+            if dependency["name"] == "shakmaty" and kind != "dev":
+                problems.append(
+                    f"{name} -> shakmaty ({declaration}) is forbidden. "
+                    "Declare shakmaty as a development dependency for tests."
+                )
+
+            path = dependency.get("path")
+            if path is None:
+                continue
+            target = members_by_path.get(Path(path).resolve())
+            if target is None or target in ALLOWED[name]:
+                continue
+            allowed = ", ".join(sorted(ALLOWED[name])) or "none"
+            problems.append(
+                f"{name} -> {target} ({declaration}) is forbidden. "
+                f"Allowed workspace dependencies for {name}: {allowed}. "
+                "Keep the dependency in its owning crate or propose a boundary change."
+            )
+    return sorted(problems)
+
+
+def self_test():
+    def package(name, dependencies):
+        return {
+            "id": name,
+            "name": name,
+            "manifest_path": f"/workspace/crates/{name}/Cargo.toml",
+            "dependencies": dependencies,
+            "targets": [{"kind": ["lib"], "src_path": f"/workspace/crates/{name}/src/lib.rs"}],
+        }
+
+    rules = dict(
+        name="rules", path="/workspace/crates/rules", kind=None, rename=None, target=None
+    )
+    uci = dict(rules, name="uci", path="/workspace/crates/uci")
+    shakmaty = dict(name="shakmaty", kind="dev", rename=None, target=None)
+    metadata = {
+        "workspace_root": "/workspace",
+        "workspace_members": ["fisher", "uci", "rules", "xtask"],
+        "packages": [
+            package("fisher", [rules, uci]),
+            package("uci", [dict(rules, kind="dev", rename="chess", target="cfg(unix)")]),
+            package("rules", [dict(uci, path="/other/crates/uci"), shakmaty]),
+            package("xtask", []),
+        ],
+    }
+    if problems := violations(metadata):
+        raise AssertionError(f"authorized dependencies rejected: {problems}")
+
+    metadata["workspace_members"].append("new-crate")
+    metadata["packages"].append(package("new-crate", []))
+    metadata["packages"][3]["dependencies"] = [
+        rules,
+        dict(rules, kind="build"),
+        dict(rules, kind="dev", rename="chess", target="cfg(unix)"),
+        dict(shakmaty, kind=None, rename="oracle", optional=True),
+    ]
+    metadata["packages"][1]["targets"][0]["src_path"] = "/workspace/crates/uci/unchecked.rs"
+    expected = [
+        "uci: keep the library entry point",
+        "new-crate: register its allowed workspace dependencies",
+        "xtask -> rules (build dependency) is forbidden.",
+        "xtask -> rules (dev dependency as chess for cfg(unix)) is forbidden.",
+        "xtask -> rules (normal dependency) is forbidden.",
+        "xtask -> shakmaty (normal dependency as oracle) is forbidden.",
+    ]
+    actual = violations(metadata)
+    if len(actual) != len(expected) or any(
+        not problem.startswith(prefix) for problem, prefix in zip(actual, sorted(expected))
+    ):
+        raise AssertionError(f"unexpected reports: {actual}")
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--self-test", action="store_true")
+    if parser.parse_args().self_test:
+        self_test()
+        return 0
+
+    root = Path(__file__).resolve().parent.parent
+    try:
+        metadata = subprocess.check_output(
+            ["cargo", "metadata", "--locked", "--format-version", "1", "--no-deps"],
+            cwd=root,
+        )
+    except (OSError, subprocess.CalledProcessError) as error:
+        print(f"Could not read Cargo workspace metadata: {error}", file=sys.stderr)
+        return 1
+    problems = violations(json.loads(metadata))
+    if problems:
+        print("\n".join(problems), file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -31,9 +31,21 @@ crates_inherit_lints() {
     return "$missing"
 }
 
+cargo_deny_version=0.22.0
+if [ "$(cargo deny --version 2>/dev/null)" != "cargo-deny $cargo_deny_version" ]; then
+    echo "Install the CI version with: cargo install cargo-deny --version $cargo_deny_version --locked" >&2
+    exit 1
+fi
+
 check Format 'cargo fmt --all' cargo fmt --all -- --check
 check Lints 'scripts/check' crates_inherit_lints
-check Clippy 'cargo clippy --locked --workspace --all-targets -- -D warnings' \
-    cargo clippy --locked --workspace --all-targets -- -D warnings
+check 'Crate boundary fixtures' 'scripts/check-crate-boundaries --self-test' \
+    scripts/check-crate-boundaries --self-test
+check 'Crate boundaries' 'scripts/check-crate-boundaries' scripts/check-crate-boundaries
+check Clippy 'cargo clippy --locked --workspace --all-targets --all-features -- -D warnings' \
+    cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 check Tests 'cargo test --locked --workspace' cargo test --locked --workspace
 check Glossary 'cargo xtask glossary' cargo xtask glossary
+check 'Crate interfaces' 'cargo xtask interfaces' cargo xtask interfaces
+check 'Dependency advisories and sources' 'cargo deny --locked check -D warnings advisories sources' \
+    cargo deny --locked check -D warnings advisories sources

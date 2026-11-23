@@ -6,6 +6,10 @@ Most of the standards are not written here. They are the formatter, the lints in
 
 A rule lands here only while it waits for a check, or because it cannot be one.
 
+### Rust compilation and lints
+
+`scripts/check` uses `cargo clippy --locked --workspace --all-targets --all-features -- -D warnings` for the compile and lint gate. It checks libraries, binaries and test targets with optional features enabled. The test step also exercises the default feature configuration. Workspace crates deny compiler warnings in both configurations.
+
 ### Crate interfaces
 
 A deep module gives callers a small interface for a complete job. In Fisher, `Position::legal_moves` lets a caller ask what it can play. The rules crate owns board storage, castling rights and checks for an attacked king. A change to any of those details belongs together in `rules`. [Matt Pocock on deep modules](https://www.youtube.com/watch?v=uC44zFz7JSM)
@@ -14,6 +18,14 @@ A deep module gives callers a small interface for a complete job. In Fisher, `Po
 - Start types, fields and helpers private. Use the narrowest visibility that reaches the caller. When proposing an export, name the external caller and the job it needs to do, or the agreed ticket that will need it. Revisit an export when its last caller disappears.
 - Keep each capability with its owner. Before adding a crate dependency, identify the operation the caller needs. Keep shared work behind that operation so callers can use it without assembling the same internal steps themselves.
 - Exercise public behavior through the same interface the application uses. An integration test alone is insufficient reason to export an implementation detail. Private tests can live beside the code.
+
+`scripts/check-crate-boundaries` checks declared workspace dependencies, including build, test, optional and target-specific ones. The permitted directions are `fisher → uci`, `fisher → rules` and `uci → rules`. The independent reference, `shakmaty`, is a development dependency only. When proposing a new direction, change the dependency table and its `--self-test` fixtures in the same script.
+
+`cargo xtask interfaces` checks library roots for public module declarations. Rust also checks unnecessarily public items inside private modules with `unreachable_pub`. Review macro-generated exports and re-exports for exposed implementation modules. A reviewer checks that each public item has a caller.
+
+### Dependency sources and advisories
+
+`cargo deny --locked check -D warnings advisories sources` checks dependencies with all workspace features enabled, including development dependencies. Warnings fail the dependency check. Resolve a new advisory by updating or removing the affected dependency. Any exception needs human review of the reason and the protected `deny.toml` change.
 
 ### Deferred work
 

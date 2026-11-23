@@ -2,6 +2,8 @@ use std::{iter::Peekable, str::SplitWhitespace};
 
 use crate::UciMove;
 
+const MOVES: &str = "moves";
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum Command {
     Uci,
@@ -84,20 +86,13 @@ fn parse_position(tokens: SplitWhitespace<'_>) -> Result<PositionCommand, Positi
     let mut tokens = tokens.peekable();
     let source = match tokens.next() {
         Some("startpos") => PositionSource::Startpos,
-        Some("fen") => {
-            let fields: Vec<_> =
-                std::iter::from_fn(|| tokens.next_if(|token| *token != "moves")).collect();
-            if fields.is_empty() {
-                return Err(PositionSyntaxError(PositionSyntaxCause::MissingFen));
-            }
-            PositionSource::Fen(fields.join(" "))
-        }
+        Some("fen") => PositionSource::Fen(read_fen_until_moves(&mut tokens)?),
         _ => return Err(PositionSyntaxError(PositionSyntaxCause::ExpectedSource)),
     };
 
     let moves = match tokens.next() {
         None => Vec::new(),
-        Some("moves") => tokens
+        Some(MOVES) => tokens
             .map(|token| {
                 UciMove::parse(token).ok_or_else(|| {
                     PositionSyntaxError(PositionSyntaxCause::InvalidMove(token.to_owned()))
@@ -107,6 +102,19 @@ fn parse_position(tokens: SplitWhitespace<'_>) -> Result<PositionCommand, Positi
         Some(_) => return Err(PositionSyntaxError(PositionSyntaxCause::ExpectedMoves)),
     };
     Ok(PositionCommand { source, moves })
+}
+
+fn read_fen_until_moves(
+    tokens: &mut Peekable<SplitWhitespace<'_>>,
+) -> Result<String, PositionSyntaxError> {
+    let mut fields = Vec::new();
+    while let Some(field) = tokens.next_if(|token| *token != MOVES) {
+        fields.push(field);
+    }
+    if fields.is_empty() {
+        return Err(PositionSyntaxError(PositionSyntaxCause::MissingFen));
+    }
+    Ok(fields.join(" "))
 }
 
 fn parse_go(tokens: SplitWhitespace<'_>) -> GoParameters {

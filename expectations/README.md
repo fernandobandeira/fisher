@@ -37,6 +37,7 @@ The following expected lines have special meanings. All other replies are exact.
 | `< info string {message}` | Match one `info string` line with any message. |
 | `< info string {message:fragment}` | Match one `info string` line whose message contains the case-sensitive fragment. |
 | `< bestmove {legal}` | Match one `bestmove` carrying a UCI move that an independent implementation lists as legal in the current position. |
+| `< info depth 4 score {score} nodes {nodes}` | Match one `info` line against the [allowance pattern](#searched-moves) under Searched moves. |
 
 For `{legal}`, the reference starts at the starting position and follows
 accepted `position` commands and their move lists. A `bestmove` reply does
@@ -52,15 +53,16 @@ will play them when fisher-2aj.4 adds search. Under rule 9, an accepted
 holds `bestmove` until `stop`. The owner approved both terminal `info`
 lines on 2026-11-23 in a comment on fisher-2aj.2.
 
-The allowance `< info depth 4 score {score} nodes {nodes}` matches the
-entire output line, after removing its line ending, against this pattern
-with single spaces and nothing after the node count.
+The expected line `< info depth 4 score {score} nodes {nodes}` is an
+allowance. It matches the entire output line, after removing its line
+ending, against this pattern with single spaces and nothing after the node
+count.
 
 ```regex
 ^info depth 4 score (cp (0|-?[1-9][0-9]*)|mate -?[1-9][0-9]*) nodes (0|[1-9][0-9]*)$
 ```
 
-Use this allowance only when the score has no outside expected value.
+Use this expected line only when the score has no outside expected value.
 The exact lines use the published starting-position
 perft counts and positions checked independently with python-chess.
 

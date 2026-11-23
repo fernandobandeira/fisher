@@ -1,18 +1,23 @@
 # Sources: April 2006 UCI specification https://backscattering.de/chess/uci/
 # and fisher-l7f owner decisions. Written 2026-11-22.
 > position fen 7k/8/5K1Q/8/8/8/8/8 b - - 0 1
+> go depth infinite
+> isready
+< readyok
+> stop
+< bestmove h8g8
 > unknown go infinite
 > isready
 # UCI go infinite and isready. No bestmove precedes readyok.
 < readyok
 > go
 # The owner rejects a second go while there is a held move.
-< info string {message}
+< info string {message:waiting for stop}
 # The ignored command consumes its stop argument.
 > setoption name Path value stop
 > position fen 7k/8/5K2/6Q1/8/8/8/8 b - - 0 1
 # The owner rejects a replacement position while there is a held move.
-< info string {message}
+< info string {message:waiting for stop}
 > unknown stop
 # UCI stop/bestmove releases the held move.
 < bestmove h8g8

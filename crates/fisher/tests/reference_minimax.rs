@@ -89,3 +89,12 @@ fn equal_scores_keep_the_first_legal_move() {
     let first = position.legal_moves().into_iter().next();
     assert_eq!(minimax(&position, 1).0, first);
 }
+
+#[test]
+fn free_knight_capture_keeps_the_remaining_material_after_a_reply() -> Result<(), Box<dyn Error>> {
+    let position = position("7k/n7/6r1/8/8/8/8/RNBQ3K w - - 0 1")?;
+    // Rxa7 wins the knight. Black has legal replies but cannot capture any
+    // white piece. The rooks cancel, leaving 300 + 300 + 900 centipawns.
+    assert_eq!(minimax(&position, 2).1, 1_500);
+    Ok(())
+}

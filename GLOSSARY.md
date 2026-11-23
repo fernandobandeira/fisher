@@ -82,6 +82,18 @@ _Avoid_: half-move (except in the name halfmove clock), level
 The number of leaf nodes in the tree of legal moves to a fixed depth from a position, used to check move generation against published counts.
 _Avoid_: move count, node test
 
+### The book
+
+**Book**:
+A table that lists, for each position it knows, the moves to play there without searching. It is keyed by position, not by the moves that led there, so it holds no opening lines.
+_Avoid_: opening book, opening database, repertoire
+
+**Book move**:
+A move the book lists for a position, together with a weight that says how strongly the book prefers it.
+
+**Out of book**:
+Said of a position for which the book lists no book move.
+
 ### The protocol
 
 **UCI**:

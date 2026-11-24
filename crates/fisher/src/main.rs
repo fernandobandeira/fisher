@@ -73,7 +73,7 @@ fn answer_commands(
                 let started = now();
                 let result = minimax(&position, DEPTH);
                 let elapsed = now().saturating_sub(started);
-                let time_ms = u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX);
+                let time_ms = u64::try_from(elapsed.as_millis().max(1)).unwrap_or(u64::MAX);
                 let pv: Vec<_> = result
                     .principal_variation
                     .iter()
@@ -128,9 +128,8 @@ fn search_info<'a>(
 }
 
 fn nodes_per_second(nodes: u64, time_ms: u64) -> u64 {
-    (u128::from(nodes) * 1000)
-        .checked_div(u128::from(time_ms))
-        .map_or(0, |rate| u64::try_from(rate).unwrap_or(u64::MAX))
+    let rate = u128::from(nodes) * 1000 / u128::from(time_ms);
+    u64::try_from(rate).unwrap_or(u64::MAX)
 }
 
 fn setup_position(command: PositionCommand) -> Result<Position, String> {
@@ -208,7 +207,6 @@ mod tests {
 
     #[test]
     fn node_rate_uses_reported_milliseconds() {
-        assert_eq!(nodes_per_second(10, 0), 0);
         assert_eq!(nodes_per_second(10, 2), 5000);
         assert_eq!(nodes_per_second(10, 3), 3333);
         assert_eq!(nodes_per_second(u64::MAX, 1000), u64::MAX);
@@ -217,8 +215,17 @@ mod tests {
 
     #[test]
     fn search_info_uses_elapsed_time_from_the_clock() -> io::Result<()> {
+        assert_search_info_time(7250, 3, 68_867_666)
+    }
+
+    #[test]
+    fn search_info_reports_one_millisecond_for_submillisecond_search() -> io::Result<()> {
+        assert_search_info_time(4250, 1, 206_603_000)
+    }
+
+    fn assert_search_info_time(end_micros: u64, time: u64, nps: u64) -> io::Result<()> {
         // The starting position visits 206603 nodes (sum of published perft counts).
-        let readings = std::cell::Cell::new([4000, 7250].into_iter());
+        let readings = std::cell::Cell::new([4000, end_micros].into_iter());
         let now = || {
             let mut remaining = readings.take();
             let micros = remaining
@@ -236,7 +243,9 @@ mod tests {
         assert!(readings.take().next().is_none());
         let text = String::from_utf8(output).map_err(io::Error::other)?;
         assert!(
-            text.starts_with("info depth 4 score cp 0 time 3 nodes 206603 nps 68867666 pv "),
+            text.starts_with(&format!(
+                "info depth 4 multipv 1 score cp 0 nodes 206603 nps {nps} time {time} pv "
+            )),
             "{text}"
         );
         Ok(())

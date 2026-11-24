@@ -60,7 +60,11 @@ impl fmt::Display for Response<'_> {
                 nps,
                 pv,
             } => {
-                write!(output, "info depth {depth} score ")?;
+                write!(output, "info depth {depth}")?;
+                if *depth > 0 {
+                    output.write_str(" multipv 1")?;
+                }
+                output.write_str(" score ")?;
                 match score {
                     SearchScore::Centipawns(value) => write!(output, "cp {value}")?,
                     SearchScore::Mate { plies, winning } => {
@@ -69,14 +73,14 @@ impl fmt::Display for Response<'_> {
                         write!(output, "mate {moves}")?;
                     }
                 }
-                if let Some(time_ms) = time_ms {
-                    write!(output, " time {time_ms}")?;
-                }
                 if let Some(nodes) = nodes {
                     write!(output, " nodes {nodes}")?;
                 }
                 if let Some(nps) = nps {
                     write!(output, " nps {nps}")?;
+                }
+                if let Some(time_ms) = time_ms {
+                    write!(output, " time {time_ms}")?;
                 }
                 if !pv.is_empty() {
                     output.write_str(" pv")?;
@@ -162,9 +166,9 @@ mod tests {
     #[test]
     fn search_info_reports_mate_in_signed_moves() {
         for (plies, winning, expected) in [
-            (1, true, "info depth 4 score mate 1 nodes 20"),
-            (2, false, "info depth 4 score mate -1 nodes 20"),
-            (3, true, "info depth 4 score mate 2 nodes 20"),
+            (1, true, "info depth 4 multipv 1 score mate 1 nodes 20"),
+            (2, false, "info depth 4 multipv 1 score mate -1 nodes 20"),
+            (3, true, "info depth 4 multipv 1 score mate 2 nodes 20"),
         ] {
             let response = Response::SearchInfo {
                 depth: 4,

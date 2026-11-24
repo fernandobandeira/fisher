@@ -133,14 +133,12 @@ fn play_transcript(name: &str) -> io::Result<()> {
 
 fn collect_legal_bestmove_replies(name: &str) -> io::Result<Vec<String>> {
     let expectations = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../expectations");
-    let prospective = expectations
-        .join("uci-principal-variation")
-        .join(format!("{name}.uci"));
-    let path = if prospective.is_file() {
-        prospective
-    } else {
-        expectations.join("uci").join(format!("{name}.uci"))
-    };
+    let file = format!("{name}.uci");
+    let path = ["uci-stockfish-spelling", "uci-principal-variation"]
+        .into_iter()
+        .map(|directory| expectations.join(directory).join(&file))
+        .find(|path| path.is_file())
+        .unwrap_or_else(|| expectations.join("uci").join(file));
     let transcript = fs::read_to_string(path)?;
     run_transcript(name, &transcript, Engine::start)
 }
@@ -358,8 +356,8 @@ fn single_replies_keep_allowances_to_depth_four() {
             "info depth 3 score cp 0 nodes 8902",
         ),
         (
-            "info depth 7 score {score} time {time} nodes {nodes} nps {nps} pv {pv}",
-            "info depth 7 score cp 0 time 1 nodes 1 nps 1000 pv e2e4",
+            "info depth 7 multipv 1 score {score} nodes {nodes} nps {nps} time {time} pv {pv}",
+            "info depth 7 multipv 1 score cp 0 nodes 1 nps 1000 time 1 pv e2e4",
         ),
     ];
     for (expected, actual) in cases {
@@ -377,37 +375,38 @@ fn single_replies_keep_allowances_to_depth_four() {
 
 #[test]
 fn info_allowance_matches_the_documented_grammar() {
-    let expected = "info depth 4 score {score} time {time} nodes {nodes} nps {nps} pv {pv}";
+    let expected =
+        "info depth 4 multipv 1 score {score} nodes {nodes} nps {nps} time {time} pv {pv}";
     // The allowance pattern in expectations/README.md sets these results.
     let cases = [
-        ("cp 0 time 0 nodes 0 nps 0 pv a7a8q", true),
+        ("cp 0 nodes 0 nps 0 time 1 pv a7a8q", true),
         (
-            "cp 100 time 1 nodes 197281 nps 197281000 pv b1a3 b8a6",
+            "cp 100 nodes 197281 nps 197281000 time 1 pv b1a3 b8a6",
             true,
         ),
-        ("cp -100 time 1 nodes 20 nps 20000 pv b1a3", true),
-        ("mate 2 time 1 nodes 20 nps 20000 pv b1a3", true),
+        ("cp -100 nodes 20 nps 20000 time 1 pv b1a3", true),
+        ("mate 2 nodes 20 nps 20000 time 1 pv b1a3", true),
         (
-            "mate -2 time 1 nodes 20 nps 20000 pv b1a3 b8a6 g1f3 g8f6",
+            "mate -2 nodes 20 nps 20000 time 1 pv b1a3 b8a6 g1f3 g8f6",
             true,
         ),
-        ("cp 0 time 1 nodes 020 nps 20000 pv b1a3", false),
-        ("cp +-100 time 1 nodes 20 nps 20000 pv b1a3", false),
-        ("mate 0 time 1 nodes 20 nps 20000 pv b1a3", false),
-        ("cp 0 time 01 nodes 20 nps 20000 pv b1a3", false),
-        ("cp 0 time 1 nodes 20 nps -1 pv b1a3", false),
-        ("cp 0 time 1 nodes 20 nps 20000 pv 0000", false),
-        ("cp 0 time 1 nodes 20 nps 20000 pv a7a8K", false),
-        ("cp 0 time 1 nodes 20 nps 20000 pv b1a3 ", false),
-        ("cp 0 time 1 nodes 20 nps 20000 pv b1a3  b8a6", false),
+        ("cp 0 nodes 020 nps 20000 time 1 pv b1a3", false),
+        ("cp +-100 nodes 20 nps 20000 time 1 pv b1a3", false),
+        ("mate 0 nodes 20 nps 20000 time 1 pv b1a3", false),
+        ("cp 0 nodes 20 nps 20000 time 01 pv b1a3", false),
+        ("cp 0 nodes 20 nps -1 time 1 pv b1a3", false),
+        ("cp 0 nodes 20 nps 20000 time 1 pv 0000", false),
+        ("cp 0 nodes 20 nps 20000 time 1 pv a7a8K", false),
+        ("cp 0 nodes 20 nps 20000 time 1 pv b1a3 ", false),
+        ("cp 0 nodes 20 nps 20000 time 1 pv b1a3  b8a6", false),
         (
-            "cp 0 time 1 nodes 20 nps 20000 pv b1a3 b8a6 g1f3 g8f6 a2a3",
+            "cp 0 nodes 20 nps 20000 time 1 pv b1a3 b8a6 g1f3 g8f6 a2a3",
             false,
         ),
     ];
 
     for (suffix, matches) in cases {
-        let actual = format!("info depth 4 score {suffix}");
+        let actual = format!("info depth 4 multipv 1 score {suffix}");
         assert_eq!(search_info_matches(expected, &actual), matches, "{actual}");
     }
 }
@@ -427,24 +426,39 @@ struct FullSearchInfo<'a> {
 
 fn search_info(text: &str) -> Option<SearchInfo<'_>> {
     let (depth, rest) = text.strip_prefix("info depth ")?.split_once(" score ")?;
-    let (score_and_time, rest) = rest.split_once(" nodes ")?;
-    if let Some((score, time)) = score_and_time.split_once(" time ") {
+    let (score, rest) = rest.split_once(" nodes ")?;
+    let (depth, nodes, full) = if let Some(depth) = depth.strip_suffix(" multipv 1") {
         let (nodes, rest) = rest.split_once(" nps ")?;
-        let (nps, pv) = rest.split_once(" pv ")?;
-        Some(SearchInfo {
-            depth,
-            score,
-            nodes,
-            full: Some(FullSearchInfo { time, nps, pv }),
-        })
+        let (nps, rest) = rest.split_once(" time ")?;
+        let (time, pv) = rest.split_once(" pv ")?;
+        (depth, nodes, Some(FullSearchInfo { time, nps, pv }))
     } else {
-        Some(SearchInfo {
-            depth,
-            score: score_and_time,
-            nodes: rest,
-            full: None,
-        })
+        (depth, rest, None)
+    };
+    Some(SearchInfo {
+        depth,
+        score,
+        nodes,
+        full,
+    })
+}
+
+fn verify_node_rate(info: &SearchInfo<'_>) -> io::Result<()> {
+    let Some(full) = &info.full else {
+        return Ok(());
+    };
+    let nodes = info.nodes.parse::<u64>().map_err(io::Error::other)?;
+    let time = full.time.parse::<u64>().map_err(io::Error::other)?;
+    let nps = full.nps.parse::<u64>().map_err(io::Error::other)?;
+    let expected = (u128::from(nodes) * 1000)
+        .checked_div(u128::from(time))
+        .ok_or_else(|| io::Error::other("searched info reported time 0"))?;
+    if u128::from(nps) != expected {
+        return Err(io::Error::other(format!(
+            "reported nps {nps}, expected {expected} from nodes {nodes} and time {time}"
+        )));
     }
+    Ok(())
 }
 
 impl SearchInfo<'_> {
@@ -454,7 +468,7 @@ impl SearchInfo<'_> {
             && (slot(self.score, "{score}") || score_matches(self.score))
             && (slot(self.nodes, "{nodes}") || nonnegative_decimal(self.nodes))
             && self.full.as_ref().is_none_or(|full| {
-                (slot(full.time, "{time}") || nonnegative_decimal(full.time))
+                (slot(full.time, "{time}") || positive_decimal(full.time))
                     && (slot(full.nps, "{nps}") || nonnegative_decimal(full.nps))
                     && (slot(full.pv, "{pv}")
                         || (full.pv.split(' ').all(uci_move_matches)
@@ -701,10 +715,14 @@ impl<I: TranscriptIo> Session<I> {
         let deadline = self.io.now() + TIMEOUT;
         let actual = loop {
             let actual = self.io.read_reply(deadline)?;
-            if let Some((pattern, info)) = pattern.zip(actual.as_deref().and_then(search_info))
-                && pattern.matches(&info)
+            let info = actual.as_deref().and_then(search_info);
+            if let Some(info) = &info {
+                verify_node_rate(info)?;
+            }
+            if let Some((pattern, info)) = pattern.zip(info.as_ref())
+                && pattern.matches(info)
             {
-                self.verify_search_info(pattern.score, &info)?;
+                self.verify_search_info(pattern.score, info)?;
             } else {
                 break actual;
             }

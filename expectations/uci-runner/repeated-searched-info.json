@@ -1,5 +1,5 @@
 {
-  "source": "Independent examples from fisher-5sg.1, fisher-r6y D15, and fisher-5sg decision 1 (owner approval 2026-11-24), with the fuller spelling from fisher-8hc.1. The depth-dependent principal variation bound is proposed.",
+  "source": "Independent examples from fisher-5sg.1, fisher-r6y D15, and fisher-5sg decision 1 (owner approval 2026-11-24). The full spelling follows fisher-r6y D41 and Stockfish sf_19 (edb0d9d), read 2026-11-24: UCIEngine::on_update_full in src/uci.cpp and SearchManager::output_pv in src/search.cpp. Under fisher-r6y D5, the principal variation is as long as the depth searched, shorter only when it ends in checkmate or stalemate.",
   "cases": [
     {
       "name": "zero-matches",
@@ -141,9 +141,9 @@
     },
     {
       "name": "full-spelling",
-      "transcript": ["> go infinite", "> isready", "<* info depth {depth} score {score} time {time} nodes {nodes} nps {nps} pv {pv}", "# Compare the first nonmatch.", "", "< readyok", "> stop", "< bestmove e2e4", "> quit", "! exit"],
+      "transcript": ["> go infinite", "> isready", "<* info depth {depth} multipv 1 score {score} nodes {nodes} nps {nps} time {time} pv {pv}", "# Compare the first nonmatch.", "", "< readyok", "> stop", "< bestmove e2e4", "> quit", "! exit"],
       "script": [
-        {"after_send": 2, "events": [[0, "stdout", "info depth 1 score cp 0 time 0 nodes 20 nps 0 pv e2e4"], [0, "stdout", "info depth 5 score cp -10 time 20 nodes 1200 nps 60000 pv e2e4 e7e5 g1f3 b8c6 f1b5"], [0, "stdout", "readyok"]]},
+        {"after_send": 2, "events": [[0, "stdout", "info depth 1 multipv 1 score cp 0 nodes 20 nps 20000 time 1 pv e2e4"], [0, "stdout", "info depth 5 multipv 1 score cp -10 nodes 1200 nps 60000 time 20 pv e2e4 e7e5 g1f3 b8c6 f1b5"], [0, "stdout", "readyok"]]},
         {"after_send": 3, "events": [[0, "stdout", "bestmove e2e4"]]},
         {"after_send": 4, "events": [[0, "eof", null], [0, "exit", 0]]}
       ],
@@ -151,9 +151,9 @@
     },
     {
       "name": "full-spelling-literals",
-      "transcript": ["> go infinite", "> isready", "<* info depth {depth} score {score} time 1 nodes {nodes} nps 420000 pv e2e4 e7e5", "# Compare the first nonmatch.", "", "< readyok", "> stop", "< bestmove e2e4", "> quit", "! exit"],
+      "transcript": ["> go infinite", "> isready", "<* info depth {depth} multipv 1 score {score} nodes {nodes} nps 420000 time 1 pv e2e4 e7e5", "# Compare the first nonmatch.", "", "< readyok", "> stop", "< bestmove e2e4", "> quit", "! exit"],
       "script": [
-        {"after_send": 2, "events": [[0, "stdout", "info depth 2 score cp 0 time 1 nodes 420 nps 420000 pv e2e4 e7e5"], [0, "stdout", "readyok"]]},
+        {"after_send": 2, "events": [[0, "stdout", "info depth 2 multipv 1 score cp 0 nodes 420 nps 420000 time 1 pv e2e4 e7e5"], [0, "stdout", "readyok"]]},
         {"after_send": 3, "events": [[0, "stdout", "bestmove e2e4"]]},
         {"after_send": 4, "events": [[0, "eof", null], [0, "exit", 0]]}
       ],
@@ -161,9 +161,9 @@
     },
     {
       "name": "principal-variation-too-long",
-      "transcript": ["> go infinite", "> isready", "<* info depth {depth} score {score} time {time} nodes {nodes} nps {nps} pv {pv}", "# Compare the first nonmatch.", "", "< readyok", "> stop", "< bestmove e2e4", "> quit", "! exit"],
+      "transcript": ["> go infinite", "> isready", "<* info depth {depth} multipv 1 score {score} nodes {nodes} nps {nps} time {time} pv {pv}", "# Compare the first nonmatch.", "", "< readyok", "> stop", "< bestmove e2e4", "> quit", "! exit"],
       "script": [
-        {"after_send": 2, "events": [[0, "stdout", "info depth 1 score cp 0 time 0 nodes 20 nps 0 pv e2e4 e7e5"], [0, "stdout", "readyok"]]},
+        {"after_send": 2, "events": [[0, "stdout", "info depth 1 multipv 1 score cp 0 nodes 20 nps 20000 time 1 pv e2e4 e7e5"], [0, "stdout", "readyok"]]},
         {"after_send": 3, "events": [[0, "stdout", "bestmove e2e4"]]},
         {"after_send": 4, "events": [[0, "eof", null], [0, "exit", 0]]}
       ],
@@ -171,13 +171,63 @@
     },
     {
       "name": "spelling-mismatch",
-      "transcript": ["> go infinite", "> isready", "<* info depth {depth} score {score} time {time} nodes {nodes} nps {nps} pv {pv}", "# Compare the first nonmatch.", "", "< readyok", "> stop", "< bestmove e2e4", "> quit", "! exit"],
+      "transcript": ["> go infinite", "> isready", "<* info depth {depth} multipv 1 score {score} nodes {nodes} nps {nps} time {time} pv {pv}", "# Compare the first nonmatch.", "", "< readyok", "> stop", "< bestmove e2e4", "> quit", "! exit"],
       "script": [
         {"after_send": 2, "events": [[0, "stdout", "info depth 1 score cp 0 nodes 20"], [0, "stdout", "readyok"]]},
         {"after_send": 3, "events": [[0, "stdout", "bestmove e2e4"]]},
         {"after_send": 4, "events": [[0, "eof", null], [0, "exit", 0]]}
       ],
-      "expected": {"verdict": "run-reject", "reason": "The full spelling requires time, nps, and pv."}
+      "expected": {"verdict": "run-reject", "reason": "The full spelling requires multipv, nps, time, and pv."}
+    },
+    {
+      "name": "time-zero",
+      "transcript": ["> go infinite", "> isready", "<* info depth {depth} multipv 1 score {score} nodes {nodes} nps {nps} time {time} pv {pv}", "# Compare the first nonmatch.", "", "< readyok", "> stop", "< bestmove e2e4", "> quit", "! exit"],
+      "script": [
+        {"after_send": 2, "events": [[0, "stdout", "info depth 1 multipv 1 score cp 0 nodes 20 nps 20000 time 0 pv e2e4"], [0, "stdout", "readyok"]]},
+        {"after_send": 3, "events": [[0, "stdout", "bestmove e2e4"]]},
+        {"after_send": 4, "events": [[0, "eof", null], [0, "exit", 0]]}
+      ],
+      "expected": {"verdict": "run-reject", "reason": "The full spelling requires a time of at least 1."}
+    },
+    {
+      "name": "missing-multipv",
+      "transcript": ["> go infinite", "> isready", "<* info depth {depth} multipv 1 score {score} nodes {nodes} nps {nps} time {time} pv {pv}", "# Compare the first nonmatch.", "", "< readyok", "> stop", "< bestmove e2e4", "> quit", "! exit"],
+      "script": [
+        {"after_send": 2, "events": [[0, "stdout", "info depth 1 score cp 0 nodes 20 nps 20000 time 1 pv e2e4"], [0, "stdout", "readyok"]]},
+        {"after_send": 3, "events": [[0, "stdout", "bestmove e2e4"]]},
+        {"after_send": 4, "events": [[0, "eof", null], [0, "exit", 0]]}
+      ],
+      "expected": {"verdict": "run-reject", "reason": "The full spelling requires multipv after depth."}
+    },
+    {
+      "name": "multipv-two",
+      "transcript": ["> go infinite", "> isready", "<* info depth {depth} multipv 1 score {score} nodes {nodes} nps {nps} time {time} pv {pv}", "# Compare the first nonmatch.", "", "< readyok", "> stop", "< bestmove e2e4", "> quit", "! exit"],
+      "script": [
+        {"after_send": 2, "events": [[0, "stdout", "info depth 1 multipv 2 score cp 0 nodes 20 nps 20000 time 1 pv e2e4"], [0, "stdout", "readyok"]]},
+        {"after_send": 3, "events": [[0, "stdout", "bestmove e2e4"]]},
+        {"after_send": 4, "events": [[0, "eof", null], [0, "exit", 0]]}
+      ],
+      "expected": {"verdict": "run-reject", "reason": "The full spelling requires multipv to be the literal 1."}
+    },
+    {
+      "name": "old-order",
+      "transcript": ["> go infinite", "> isready", "<* info depth {depth} multipv 1 score {score} nodes {nodes} nps {nps} time {time} pv {pv}", "# Compare the first nonmatch.", "", "< readyok", "> stop", "< bestmove e2e4", "> quit", "! exit"],
+      "script": [
+        {"after_send": 2, "events": [[0, "stdout", "info depth 1 multipv 1 score cp 0 time 1 nodes 20 nps 20000 pv e2e4"], [0, "stdout", "readyok"]]},
+        {"after_send": 3, "events": [[0, "stdout", "bestmove e2e4"]]},
+        {"after_send": 4, "events": [[0, "eof", null], [0, "exit", 0]]}
+      ],
+      "expected": {"verdict": "run-reject", "reason": "The full spelling requires nodes, nps and time in Stockfish's order."}
+    },
+    {
+      "name": "nps-mismatch",
+      "transcript": ["> go infinite", "> isready", "<* info depth {depth} multipv 1 score {score} nodes {nodes} nps {nps} time {time} pv {pv}", "# Compare the first nonmatch.", "", "< readyok", "> stop", "< bestmove e2e4", "> quit", "! exit"],
+      "script": [
+        {"after_send": 2, "events": [[0, "stdout", "info depth 1 multipv 1 score cp 0 nodes 20 nps 20001 time 1 pv e2e4"], [0, "stdout", "readyok"]]},
+        {"after_send": 3, "events": [[0, "stdout", "bestmove e2e4"]]},
+        {"after_send": 4, "events": [[0, "eof", null], [0, "exit", 0]]}
+      ],
+      "expected": {"verdict": "run-reject", "reason": "The nps is not 1000 times the nodes divided by the time, rounded down."}
     },
     {
       "name": "delimiter-at-4900ms",
@@ -415,7 +465,7 @@
     },
     {
       "name": "literal-variation-too-long",
-      "transcript": ["> go infinite", "> isready", "<* info depth 1 score cp 0 time 0 nodes 20 nps 0 pv e2e4 e7e5", "< readyok", "> stop", "< bestmove e2e4", "> quit", "! exit"],
+      "transcript": ["> go infinite", "> isready", "<* info depth 1 multipv 1 score cp 0 nodes 20 nps 20000 time 1 pv e2e4 e7e5", "< readyok", "> stop", "< bestmove e2e4", "> quit", "! exit"],
       "script": [
         {"after_send": 2, "events": [[0, "stdout", "readyok"]]},
         {"after_send": 3, "events": [[0, "stdout", "bestmove e2e4"]]},

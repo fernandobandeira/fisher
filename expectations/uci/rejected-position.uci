@@ -1,3 +1,9 @@
+# Four-ply info spelling from Stockfish sf_19 (edb0d9d), read 2026-11-24:
+# UCIEngine::on_update_full in src/uci.cpp and SearchManager::output_pv in src/search.cpp.
+# fisher-r6y D41 sets this spelling; fisher-8hc.6 committed these sessions.
+# D3-D6 supply the
+# existing principal variation and allowances, with time at least one under D41.
+# The fisher-2aj.2 sources below supply the retained scores, node counts and response order.
 # Sources: April 2006 UCI specification https://backscattering.de/chess/uci/
 # and fisher-l7f owner decisions from 2026-11-22.
 # Search: fisher-2aj rules 1 to 7 and 10. Exact search values
@@ -17,7 +23,7 @@
 < readyok
 > go
 # Rules 4, 5, 7 and 10. See the header for mate -1 nodes 782.
-< info depth 4 score mate -1 nodes 782
+< info depth 4 multipv 1 score mate -1 nodes 782 nps {nps} time {time} pv {pv}
 # Owner-approved example: the original position still has its sole legal move.
 < bestmove h8g8
 > position startpos moves e2e4 e7e5 e4e6
@@ -28,7 +34,7 @@
 < readyok
 > go
 # Rules 4, 5, 7 and 10. See the header for mate -1 nodes 782.
-< info depth 4 score mate -1 nodes 782
+< info depth 4 multipv 1 score mate -1 nodes 782 nps {nps} time {time} pv {pv}
 # Owner-approved example: the original position still has its sole legal move.
 < bestmove h8g8
 > position startpos moves e2e4 e7e9
@@ -39,7 +45,7 @@
 < readyok
 > go
 # Rules 4, 5, 7 and 10. See the header for mate -1 nodes 782.
-< info depth 4 score mate -1 nodes 782
+< info depth 4 multipv 1 score mate -1 nodes 782 nps {nps} time {time} pv {pv}
 # Owner-approved example: the original position still has its sole legal move.
 < bestmove h8g8
 > position fen
@@ -50,7 +56,7 @@
 < readyok
 > go
 # Rules 4, 5, 7 and 10. See the header for mate -1 nodes 782.
-< info depth 4 score mate -1 nodes 782
+< info depth 4 multipv 1 score mate -1 nodes 782 nps {nps} time {time} pv {pv}
 # Owner-approved example: the original position still has its sole legal move.
 < bestmove h8g8
 > position
@@ -59,7 +65,7 @@
 < readyok
 > go
 # Rules 4, 5, 7 and 10. See the header for mate -1 nodes 782.
-< info depth 4 score mate -1 nodes 782
+< info depth 4 multipv 1 score mate -1 nodes 782 nps {nps} time {time} pv {pv}
 < bestmove h8g8
 > position startpos e2e4
 < info string {message:expected moves}
@@ -67,7 +73,7 @@
 < readyok
 > go
 # Rules 4, 5, 7 and 10. See the header for mate -1 nodes 782.
-< info depth 4 score mate -1 nodes 782
+< info depth 4 multipv 1 score mate -1 nodes 782 nps {nps} time {time} pv {pv}
 < bestmove h8g8
 > position startpos moves e2e4 0000
 < info string {message:null move}
@@ -75,7 +81,7 @@
 < readyok
 > go
 # Rules 4, 5, 7 and 10. See the header for mate -1 nodes 782.
-< info depth 4 score mate -1 nodes 782
+< info depth 4 multipv 1 score mate -1 nodes 782 nps {nps} time {time} pv {pv}
 < bestmove h8g8
 # UCI quit.
 > quit

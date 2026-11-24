@@ -36,6 +36,17 @@ If it is red and you cannot fix it, say so plainly with the output. Do not weake
 - Stay inside the crates your ticket names. If the work needs a change outside them, say so in your report instead of making it quietly.
 - Design each library crate as a deep module. Other crates enter through its root exports in `lib.rs`. Keep implementation modules private. Follow the [crate interface rules](CODING_STANDARDS.md#crate-interfaces) when adding a dependency, export or cross-crate test.
 - A change to a crate's public interface is a decision for the human. Propose it, do not slip it in.
+- Put logic in a library crate. `fisher` is [the binary](CODING_STANDARDS.md#the-binary): its `main.rs` only wires the other crates together.
+
+## Pull requests
+
+Squash-merge. A pull request that builds on another one not merged yet goes in a GitHub stack, through `gh stack`. [docs/process.md](docs/process.md#pull-requests) has the commands.
+
+## The owner's attention
+
+Bring the owner what only the owner can decide: what fisher does for the person using it, which claims matter, what a crate is for and what it exports, a guard, and anything hard to reverse.
+
+Decide implementation details yourself: how the code inside a crate is arranged, how a check is built, and small points the UCI specification leaves open. For those, do what Stockfish does, or another established engine where Stockfish is silent. Record the choice and the revision you read in the ticket.
 
 ## Vocabulary
 

@@ -86,6 +86,14 @@ _Avoid_: half-move (except in the name halfmove clock), level
 The number of leaf nodes in the tree of legal moves to a fixed depth from a position, used to check move generation against published counts.
 _Avoid_: move count, node test
 
+**Search**:
+What fisher does between accepting a `go` and sending its `bestmove`: the work of choosing a move, and any wait for `stop` after it.
+_Avoid_: thinking, calculation
+
+**Node**:
+A position the search reaches by playing a move. The position it starts from is not a node.
+_Avoid_: visit, child
+
 **Variation**:
 A sequence of moves from a position, each one legal after the one before.
 _Avoid_: line, continuation, sequence
@@ -93,6 +101,26 @@ _Avoid_: line, continuation, sequence
 **Principal variation**:
 The moves the search expects both colors to play from the position it searched, starting with the move it chose.
 _Avoid_: best line, main line, expected line
+
+**Iterative deepening**:
+Searching a position to depth 1, then to depth 2, and so on, each time from the start, and keeping the result of the last finished depth.
+_Avoid_: progressive deepening, incremental search
+
+**Finished depth**:
+A depth at which every node was searched. Only a finished depth has a score and a principal variation.
+_Avoid_: completed depth, complete depth, iteration
+
+**Limit**:
+A bound the GUI puts on a search in its `go`: a depth, a number of nodes, a time for the move, or the clocks.
+_Avoid_: budget, allowance, ceiling
+
+**Depth cap**:
+The greatest depth fisher searches to, whatever the GUI asks. It is not a limit: a search under `go infinite` that reaches it waits for `stop`.
+_Avoid_: maximum depth, cap on its own
+
+**Interrupt**:
+To end the work of a search before the depth in hand has finished. A `stop`, a limit, `quit` and the end of input all interrupt, and the unfinished depth is thrown away.
+_Avoid_: cancel, abort, stop (which names only the UCI command)
 
 ### The book
 
@@ -115,6 +143,10 @@ _Avoid_: chess interface, chess engine protocol
 **GUI**:
 The program at the other end of UCI, which starts the engine and tells it what to search, whether or not it has a window. A match runner is a GUI. The name is the one the UCI specification gives it.
 _Avoid_: host, client, front end, chess app
+
+**Session**:
+One run of fisher, from the start of the process to `quit` or the end of standard input. A position carries over from one search to the next within it.
+_Avoid_: connection, game
 
 **UCI move**:
 A move as UCI writes it: the square a piece leaves, the square it reaches, and a piece kind when a pawn promotes, such as e7e8q. It does not say whether it castles or captures; only a position can turn it into a move.

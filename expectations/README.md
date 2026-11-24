@@ -135,6 +135,16 @@ depth searched therefore reads as material: the mate-in-one position
 reports `cp 900` at depth 1 and `mate 1` from depth 2. Stockfish would
 report `mate 1` at depth 1.
 
+### Staged search that deepens until stop
+
+fisher-5sg.3 staged [these successors and controlled schedules](uci-deepen-until-stop/)
+on 2026-11-24 for fisher-5sg.4. The current runner reads only `uci/`.
+The four paths with active names succeed those sessions. The new
+`quit-while-deepening.uci` and `end-of-input-while-deepening.uci` add
+searches that may report progress before exit. Adopt the
+`go-infinite.uci` in this directory as the single successor. It folds in
+the bare searches staged by fisher-5sg.13.
+
 ### Repeated searched info
 
 Source: fisher-r6y D15 and fisher-5sg decision 1, approved by the owner on

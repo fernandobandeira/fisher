@@ -1,0 +1,93 @@
+# Staged by fisher-5sg.3 on 2026-11-24.
+# Sources: April 2006 UCI specification https://backscattering.de/chess/uci/,
+# fisher-8ie session rules, and fisher-r6y D9–D11, D15, D20, D24, D25 and D28.
+# Full searched info: D41 and Stockfish sf_19 (edb0d9d), 2026-11-24.
+# See UCIEngine::on_update_full and SearchManager::output_pv.
+# Shakmaty 0.30.3 reference minimax, 2026-11-24, confirms the
+# python-chess 1.11.2 enumeration on fisher-5sg.13.
+# Per-ply nodes: 1/21/30/730 and 1/25/45/1228. At depths 1 and 2
+# the horizon sees a queen deficit (cp -900). At depths 3 and 4 both
+# searches see mate -1. The only legal moves are h8g8 and h8h7.
+# Totals add work from all finished depths of this go (fisher-5sg decision 10).
+> position fen 7k/8/5K1Q/8/8/8/8/8 b - - 0 1
+# The nonnumeric depth leaves infinite in force (fisher-5sg).
+> go depth infinite
+< info depth 1 multipv 1 score cp -900 nodes 1 nps {nps} time {time} pv {pv}
+< info depth 2 multipv 1 score cp -900 nodes 23 nps {nps} time {time} pv {pv}
+> isready
+<* info depth {depth} multipv 1 score {score} nodes {nodes} nps {nps} time {time} pv {pv}
+< readyok
+> stop
+<* info depth {depth} multipv 1 score {score} nodes {nodes} nps {nps} time {time} pv {pv}
+< bestmove h8g8
+# No further output from the stopped search may precede readyok.
+> isready
+< readyok
+
+# Unknown words before a command are skipped under UCI.
+> unknown go infinite
+< info depth 1 multipv 1 score cp -900 nodes 1 nps {nps} time {time} pv {pv}
+< info depth 2 multipv 1 score cp -900 nodes 23 nps {nps} time {time} pv {pv}
+> isready
+<* info depth {depth} multipv 1 score {score} nodes {nodes} nps {nps} time {time} pv {pv}
+< readyok
+# Rule 8 rejects both commands and keeps the original position.
+> go
+<* info depth {depth} multipv 1 score {score} nodes {nodes} nps {nps} time {time} pv {pv}
+< info string {message:go rejected: waiting for stop}
+# The ignored command consumes its stop argument.
+> setoption name Path value stop
+> position fen 7k/8/5K2/6Q1/8/8/8/8 b - - 0 1
+<* info depth {depth} multipv 1 score {score} nodes {nodes} nps {nps} time {time} pv {pv}
+< info string {message:position rejected: waiting for stop}
+> unknown stop
+<* info depth {depth} multipv 1 score {score} nodes {nodes} nps {nps} time {time} pv {pv}
+< bestmove h8g8
+# No further output from the stopped search may precede readyok.
+> isready
+< readyok
+
+> go
+# Rules 4, 5, 7 and 10. See the header for the per-ply counts.
+# Rules 2 and 3 score the horizon by material, so depths before the mate show material.
+< info depth 1 multipv 1 score cp -900 nodes 1 nps {nps} time {time} pv {pv}
+< info depth 2 multipv 1 score cp -900 nodes 23 nps {nps} time {time} pv {pv}
+< info depth 3 multipv 1 score mate -1 nodes 75 nps {nps} time {time} pv {pv}
+< info depth 4 multipv 1 score mate -1 nodes 857 nps {nps} time {time} pv {pv}
+# The owner keeps the original position, whose only legal move is h8g8.
+< bestmove h8g8
+> go
+# Rules 4, 5, 7 and 10. See the header for the per-ply counts.
+# Rules 2 and 3 score the horizon by material, so depths before the mate show material.
+< info depth 1 multipv 1 score cp -900 nodes 1 nps {nps} time {time} pv {pv}
+< info depth 2 multipv 1 score cp -900 nodes 23 nps {nps} time {time} pv {pv}
+< info depth 3 multipv 1 score mate -1 nodes 75 nps {nps} time {time} pv {pv}
+< info depth 4 multipv 1 score mate -1 nodes 857 nps {nps} time {time} pv {pv}
+# The reference also kept the original position.
+< bestmove {legal}
+# The prefixed stop allows the engine and reference to follow the next position.
+> position fen 7k/8/5K2/6Q1/8/8/8/8 b - - 0 1
+> go
+# Rules 4, 5, 7 and 10. See the header for the per-ply counts.
+# Rules 2 and 3 score the horizon by material, so depths before the mate show material.
+< info depth 1 multipv 1 score cp -900 nodes 1 nps {nps} time {time} pv {pv}
+< info depth 2 multipv 1 score cp -900 nodes 27 nps {nps} time {time} pv {pv}
+< info depth 3 multipv 1 score mate -1 nodes 98 nps {nps} time {time} pv {pv}
+< info depth 4 multipv 1 score mate -1 nodes 1397 nps {nps} time {time} pv {pv}
+# Black's only legal move in the replacement position is h8h7.
+< bestmove h8h7
+> go
+# Rules 4, 5, 7 and 10. See the header for the per-ply counts.
+# Rules 2 and 3 score the horizon by material, so depths before the mate show material.
+< info depth 1 multipv 1 score cp -900 nodes 1 nps {nps} time {time} pv {pv}
+< info depth 2 multipv 1 score cp -900 nodes 27 nps {nps} time {time} pv {pv}
+< info depth 3 multipv 1 score mate -1 nodes 98 nps {nps} time {time} pv {pv}
+< info depth 4 multipv 1 score mate -1 nodes 1397 nps {nps} time {time} pv {pv}
+< bestmove {legal}
+> stop
+> isready
+# UCI ignores an idle stop and replies to isready.
+< readyok
+# UCI quit.
+> quit
+! exit

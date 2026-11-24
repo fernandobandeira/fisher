@@ -27,7 +27,7 @@ A deep module gives callers a small interface for a complete job. In Fisher, `Po
 
 `fisher` is the binary, and it holds no logic. Its `main.rs` wires the library crates together: it hands standard input, standard output and the search to the crate that runs the session, and returns what that crate returns. Whatever parses, decides, searches or formats lives in a library crate, where the build enforces its boundary and its tests reach it through the interface the binary uses.
 
-`main.rs` still holds the command handler. It moves into `uci` before the search gets its own thread (fisher-2aj.5). This rule waits for a check.
+`main.rs` still holds the command handler. fisher-5sg.11 moves it into `uci`, before the search gets its own thread (fisher-2aj.5). This rule waits for a check (fisher-u8o).
 
 ### Dependency sources and advisories
 

@@ -101,8 +101,8 @@ The three other sessions cover
 the commands after `stop` under D24 and an immediate `quit` or end of input.
 The held-move transcripts read the last `info` line before the next command.
 The scripted histories can also observe the search reporting `Ended`.
-The two held-move sessions and `stop-position-go.uci` each assume one
-depth-4 search and will be restaged when fisher-5sg.4 lands.
+The two held-move sessions and `stop-position-go.uci` have staged
+successors for fisher-5sg.4 in [`uci-deepen-until-stop/`](uci-deepen-until-stop/).
 
 ### Staged iterative deepening transcripts
 
@@ -134,6 +134,19 @@ without asking whether it has a legal move. A mate one ply beyond the
 depth searched therefore reads as material: the mate-in-one position
 reports `cp 900` at depth 1 and `mate 1` from depth 2. Stockfish would
 report `mate 1` at depth 1.
+
+### Staged search that deepens until stop
+
+fisher-5sg.3 staged [these successors and controlled schedules](uci-deepen-until-stop/)
+on 2026-11-24 for fisher-5sg.4. The current runner reads only `uci/`.
+
+| Staged session | What it covers |
+|---|---|
+| [`go-infinite.uci`](uci-deepen-until-stop/go-infinite.uci) | Succeeds the active session and folds in the bare searches staged by fisher-5sg.13. |
+| [`go-infinite-terminal.uci`](uci-deepen-until-stop/go-infinite-terminal.uci) | Succeeds the active session for a terminal position. |
+| [`stop-position-go.uci`](uci-deepen-until-stop/stop-position-go.uci) | Succeeds the active D24 session and checks that a rejected position leaves the root unchanged. |
+| [`quit-while-held.uci`](uci-deepen-until-stop/quit-while-held.uci) and [`end-of-input-while-held.uci`](uci-deepen-until-stop/end-of-input-while-held.uci) | Succeed the active sessions for exit with a held move. |
+| [`quit-while-deepening.uci`](uci-deepen-until-stop/quit-while-deepening.uci) and [`end-of-input-while-deepening.uci`](uci-deepen-until-stop/end-of-input-while-deepening.uci) | Add searches that may report progress before exit. |
 
 ### Repeated searched info
 

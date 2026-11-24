@@ -1,0 +1,14 @@
+# Staged by fisher-5sg.3 on 2026-11-24.
+# Sources: April 2006 UCI specification https://backscattering.de/chess/uci/,
+# fisher-8ie session rules, and fisher-r6y D9–D11, D15, D20, D24, D25 and D28.
+# Full searched info: D41 and Stockfish sf_19 (edb0d9d), 2026-11-24.
+# See UCIEngine::on_update_full and SearchManager::output_pv.
+# D25 permits zero or more finished-depth reports before the legal move.
+# Starting-position legal moves: shakmaty 0.30.3, checked 2026-11-24.
+# The controlled schedule in README.md fixes the interruption boundary.
+> position startpos
+> go infinite
+> quit
+<* info depth {depth} multipv 1 score {score} nodes {nodes} nps {nps} time {time} pv {pv}
+< bestmove {legal}
+! exit

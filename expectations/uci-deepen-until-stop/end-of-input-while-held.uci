@@ -1,0 +1,13 @@
+# Staged by fisher-5sg.3 on 2026-11-24.
+# Sources: April 2006 UCI specification https://backscattering.de/chess/uci/,
+# fisher-8ie session rules, and fisher-r6y D9–D11, D15, D20, D24, D25 and D28.
+# Terminal reply: owner approval on fisher-2aj.2, 2026-11-23.
+# Shakmaty 0.30.3, 2026-11-24: no legal moves and Black is not in check.
+> position fen 7k/5K2/6Q1/8/8/8/8/8 b - - 0 1
+> go infinite
+< info depth 0 score cp 0
+> isready
+< readyok
+! eof
+< bestmove 0000
+! exit

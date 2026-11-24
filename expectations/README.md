@@ -90,6 +90,29 @@ and an optional lowercase promotion suffix. The move pattern excludes
 per second from the reported nodes and time and checks the principal
 variation under D5.
 
+### Staged iterative deepening transcripts
+
+fisher-5sg.13 staged the [successors in `uci-iterative-deepening/`](uci-iterative-deepening/)
+on 2026-11-24 for fisher-5sg.4. The current runner reads only `uci/`.
+Each staged file with the same name succeeds its active file. The `go depth`,
+`go nodes` and `go movetime` cases of `go-parameters.uci` each start a fresh
+session in `go-depth.uci`, `go-nodes.uci` and `go-movetime.uci`. They use
+the default depth of four until their limits are implemented.
+
+Each completed depth has its own required reply with a literal depth.
+For depth D, the node total adds the counts of every search from depth 1
+through D. Each individual search counts the nodes at plies 1 through its
+depth. For example, the starting position reports 20, 440, 9762 and 216365
+nodes. The three score allowances in `position-moves.uci` retain `{score}`
+at every depth and use independently enumerated node totals. The derivation
+script and its results are on fisher-5sg.13.
+
+Keep the two fresh processes and compare their moves when adopting
+`equal-scores.uci`. The `terminal-positions.uci` successor retains one
+depth-zero line for each position. The `go-infinite.uci` successor stages
+the bare searches in that session and retains the held searches for
+fisher-5sg.4 to handle under the separate `go infinite` rules.
+
 ### Repeated searched info
 
 Source: fisher-r6y D15 and fisher-5sg decision 1, approved by the owner on

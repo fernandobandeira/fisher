@@ -1,0 +1,27 @@
+# Staged by fisher-5sg.13 on 2026-11-24. Both owner-approved replies still apply.
+# Sources: April 2006 UCI specification https://backscattering.de/chess/uci/
+# and fisher-l7f owner decisions from 2026-11-22.
+# Search: fisher-2aj rules 1, 4 and 10, with owner-approved terminal replies
+# based on the Stockfish examples cited in fisher-2aj.2.
+# Searched transcript written 2026-11-23.
+> position fen 7k/6Q1/5K2/8/8/8/8/8 b - - 0 1
+> go
+# The owner approved this line on 2026-11-23 in a comment on fisher-2aj.2.
+# The ticket cites Stockfish as a witness for checkmate.
+# This line departs from rule 10 by omitting the node count and from
+# rule 1 by reporting depth 0 instead of 4.
+< info depth 0 score mate 0
+# Owner-approved example for checkmate. UCI move format spells the null move 0000.
+< bestmove 0000
+> position fen 7k/5K2/6Q1/8/8/8/8/8 b - - 0 1
+> go
+# The owner approved this line on 2026-11-23 in a comment on fisher-2aj.2.
+# The ticket cites Stockfish as a witness for stalemate.
+# This line departs from rule 10 by omitting the node count and from
+# rule 1 by reporting depth 0 instead of 4.
+< info depth 0 score cp 0
+# Owner-approved example for stalemate. UCI move format spells the null move 0000.
+< bestmove 0000
+# UCI quit.
+> quit
+! exit

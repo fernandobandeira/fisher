@@ -321,9 +321,15 @@ fn reply_matches(expected: &str, actual: &str, position: &Chess) -> bool {
         LEGAL_BESTMOVE => actual
             .strip_prefix("bestmove ")
             .is_some_and(|text| reference_move(position, text).is_some()),
-        // The README makes only the two depth-4 spellings special for a single
-        // `< ` record; `{depth}` and other depths belong to `<* ` alone.
-        _ if search_info(expected).is_some_and(|info| info.depth == "4" && info.valid(true)) => {
+        // The README makes the full spelling special for a single `< ` record at
+        // any literal positive depth, and the short spelling at depth 4 only;
+        // `{depth}` belongs to `<* ` alone.
+        _ if search_info(expected).is_some_and(|info| {
+            info.valid(true)
+                && positive_decimal(info.depth)
+                && (info.full.is_some() || info.depth == "4")
+        }) =>
+        {
             search_info_matches(expected, actual)
         }
         "info string {message}" => actual.starts_with("info string "),
@@ -339,8 +345,11 @@ fn reply_matches(expected: &str, actual: &str, position: &Chess) -> bool {
     }
 }
 
+/// The deepest search the reference minimax checks; it prunes nothing.
+const REFERENCE_DEPTH: u8 = 4;
+
 #[test]
-fn single_replies_keep_allowances_to_depth_four() {
+fn single_replies_keep_allowances_to_literal_depths() {
     let position = Chess::default();
     let cases = [
         (
@@ -352,8 +361,8 @@ fn single_replies_keep_allowances_to_depth_four() {
             "info depth 3 score cp 0 nodes 8902",
         ),
         (
-            "info depth 7 multipv 1 score {score} nodes {nodes} nps {nps} time {time} pv {pv}",
-            "info depth 7 multipv 1 score cp 0 nodes 1 nps 1000 time 1 pv e2e4",
+            "info depth {depth} multipv 1 score {score} nodes {nodes} nps {nps} time {time} pv {pv}",
+            "info depth 1 multipv 1 score cp 0 nodes 20 nps 20000 time 1 pv e2e4",
         ),
     ];
     for (expected, actual) in cases {
@@ -367,6 +376,21 @@ fn single_replies_keep_allowances_to_depth_four() {
         "info depth 4 score cp 0 nodes 206603",
         &position
     ));
+    for (expected, actual) in [
+        (
+            "info depth 1 multipv 1 score cp 0 nodes 20 nps {nps} time {time} pv {pv}",
+            "info depth 1 multipv 1 score cp 0 nodes 20 nps 20000 time 1 pv g1h3",
+        ),
+        (
+            "info depth 7 multipv 1 score {score} nodes {nodes} nps {nps} time {time} pv {pv}",
+            "info depth 7 multipv 1 score cp 0 nodes 1 nps 1000 time 1 pv e2e4",
+        ),
+    ] {
+        assert!(
+            reply_matches(expected, actual, &position),
+            "{expected:?} must accept {actual:?}"
+        );
+    }
 }
 
 #[test]
@@ -778,22 +802,28 @@ impl<I: TranscriptIo> Session<I> {
         expected_score: &str,
         info: &SearchInfo<'_>,
     ) -> io::Result<()> {
-        // The static four-ply search has an independent minimax and replay check.
-        // Other depths in this record have the documented spelling and length checks.
-        let Some(full) = info.full.as_ref().filter(|_| info.depth == "4") else {
+        // Depths 1 to 4 have an independent minimax and replay check. Deeper
+        // lines have the documented spelling and length checks only, because
+        // the reference minimax prunes nothing.
+        let Some((full, depth)) = info.full.as_ref().zip(
+            info.depth
+                .parse::<u8>()
+                .ok()
+                .filter(|depth| (1..=REFERENCE_DEPTH).contains(depth)),
+        ) else {
             self.first_variation_move = None;
             return Ok(());
         };
         let score = reported_score(info.score)?;
         if expected_score == "{score}" {
-            let best = reference::minimax(&self.position, 4).score;
+            let best = reference::minimax(&self.position, depth).score;
             if score != best {
                 return Err(io::Error::other(format!(
                     "reported score {score} differs from reference {best}"
                 )));
             }
         }
-        principal_variation::verify(&self.position, 4, score, full.pv.split(' '))
+        principal_variation::verify(&self.position, depth, score, full.pv.split(' '))
             .map_err(io::Error::other)?;
         self.first_variation_move = full.pv.split(' ').next().map(str::to_owned);
         Ok(())

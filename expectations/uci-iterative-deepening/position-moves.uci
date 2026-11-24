@@ -10,7 +10,8 @@
 # fisher-r6y D41 sets this spelling; fisher-8hc.6 committed these sessions.
 # D3-D6 supply the
 # existing principal variation and allowances, with time at least one under D41.
-# The fisher-2aj.2 sources below supply the retained scores, node counts and response order.
+# The fisher-2aj.2 sources below supply the retained scores and response order;
+# fisher-5sg.13 derived the node totals.
 # Sources: April 2006 UCI specification https://backscattering.de/chess/uci/
 # and fisher-l7f owner decisions from 2026-11-22.
 # Search: fisher-2aj rules 1 to 7 and 10. Exact search values
@@ -97,6 +98,7 @@
 > position fen 7k/8/5K2/6Q1/8/8/8/8 b - - 0 1 moves
 > go
 # Rules 4, 5, 7 and 10. Black must play h8h7, then g5g7 is checkmate.
+# Rules 2 and 3 score the horizon by material, so depths before the mate show material.
 # Python-chess counts 1, 25, 45 and 1228 nodes at plies 1 to 4.
 < info depth 1 multipv 1 score cp -900 nodes 1 nps {nps} time {time} pv {pv}
 < info depth 2 multipv 1 score cp -900 nodes 27 nps {nps} time {time} pv {pv}

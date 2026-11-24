@@ -10,7 +10,8 @@
 # fisher-r6y D41 sets this spelling; fisher-8hc.6 committed these sessions.
 # D3-D6 supply the
 # existing principal variation and allowances, with time at least one under D41.
-# The fisher-2aj.2 sources below supply the retained scores, node counts and response order.
+# The fisher-2aj.2 sources below supply the retained scores and response order;
+# fisher-5sg.13 derived the node totals.
 # Sources: April 2006 UCI specification https://backscattering.de/chess/uci/
 # and the owner decision of 2026-11-23 to reject opposite check with one
 # diagnostic. Shakmaty 0.30.3 independently rejects the second FEN.
@@ -27,6 +28,7 @@
 < readyok
 > go
 # Rules 4, 5, 7 and 10. Black must play h8g8, then h6g7 is checkmate.
+# Rules 2 and 3 score the horizon by material, so depths before the mate show material.
 # Python-chess counts 1, 21, 30 and 730 nodes at plies 1 to 4.
 < info depth 1 multipv 1 score cp -900 nodes 1 nps {nps} time {time} pv {pv}
 < info depth 2 multipv 1 score cp -900 nodes 23 nps {nps} time {time} pv {pv}

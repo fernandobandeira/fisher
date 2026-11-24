@@ -18,11 +18,6 @@ ALLOWED = {
 }
 
 
-# The binary retains its pre-existing minimax reference tests.
-# TODO(fisher-0as): Remove this exception when the minimax tests move to search.
-TEST_ONLY = {"fisher": {"rules", "search"}}
-
-
 def violations(metadata):
     workspace_ids = set(metadata["workspace_members"])
     members = [
@@ -70,8 +65,6 @@ def violations(metadata):
                 continue
             target = members_by_path.get(Path(path).resolve())
             permitted = ALLOWED[name]
-            if kind == "dev":
-                permitted = permitted | TEST_ONLY.get(name, set())
             if target is None or target in permitted:
                 continue
             allowed = ", ".join(sorted(permitted)) or "none"
@@ -106,12 +99,12 @@ def self_test():
         "workspace_members": ["fisher", "uci", "rules", "xtask", "search", "bench", "deepening"],
         "packages": [
             package("fisher", [
-                bench, deepening, uci, dict(rules, kind="dev"), dict(search, kind="dev")
+                bench, deepening, uci, shakmaty
             ]),
             package("uci", [deepening, dict(rules, kind="dev", rename="chess", target="cfg(unix)")]),
             package("rules", [dict(uci, path="/other/crates/uci"), shakmaty]),
             package("xtask", []),
-            package("search", [rules]),
+            package("search", [rules, shakmaty]),
             package("bench", [rules, search]),
             package("deepening", [rules, search]),
         ],
@@ -121,7 +114,7 @@ def self_test():
 
     metadata["workspace_members"].append("new-crate")
     metadata["packages"].append(package("new-crate", []))
-    metadata["packages"][0]["dependencies"].extend([rules, search])
+    metadata["packages"][0]["dependencies"].extend([rules, search, dict(rules, kind="dev"), dict(search, kind="dev")])
     metadata["packages"][1]["dependencies"].append(search)
     metadata["packages"][6]["dependencies"].append(uci)
     metadata["packages"][3]["dependencies"] = [
@@ -136,6 +129,8 @@ def self_test():
     expected = [
         "bench -> uci (normal dependency) is forbidden.",
         "deepening -> uci (normal dependency) is forbidden.",
+        "fisher -> rules (dev dependency) is forbidden.",
+        "fisher -> search (dev dependency) is forbidden.",
         "fisher -> rules (normal dependency) is forbidden.",
         "fisher -> search (normal dependency) is forbidden.",
         "uci -> search (normal dependency) is forbidden.",

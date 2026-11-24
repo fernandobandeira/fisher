@@ -10,8 +10,6 @@ deepening = { path = "../deepening" }
 uci = { path = "../uci" }
 
 [dev-dependencies]
-rules = { path = "../rules" }
-search = { path = "../search" }
 shakmaty = "0.30.3"
 
 [lints]

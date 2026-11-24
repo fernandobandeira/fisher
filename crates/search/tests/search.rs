@@ -1,4 +1,3 @@
-// TODO(fisher-0as): Move these minimax tests into crates/search/tests.
 #[path = "support/mate_in_two.rs"]
 mod mate_in_two;
 #[path = "support/principal_variation.rs"]

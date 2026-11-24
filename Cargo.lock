@@ -51,8 +51,6 @@ version = "0.1.0"
 dependencies = [
  "bench",
  "deepening",
- "rules",
- "search",
  "shakmaty",
  "uci",
 ]
@@ -119,6 +117,7 @@ name = "search"
 version = "0.1.0"
 dependencies = [
  "rules",
+ "shakmaty",
 ]
 
 [[package]]

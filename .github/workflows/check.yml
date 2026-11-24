@@ -21,3 +21,25 @@ jobs:
           tool: cargo-deny@0.22.0
           fallback: none
       - run: scripts/check
+
+  mutation:
+    if: github.event_name == 'pull_request' || github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2.90.8
+        with:
+          tool: cargo-mutants@27.1.0
+          fallback: none
+      - run: scripts/check-mutants --self-test
+      - if: github.event_name == 'pull_request'
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: scripts/check-mutants --in-diff "$BASE"
+      - if: github.event_name == 'schedule'
+        run: scripts/check-mutants

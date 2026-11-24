@@ -1,0 +1,202 @@
+#!/usr/bin/env python3
+"""Run cargo-mutants and check survivors against reviewed equivalents."""
+
+import argparse
+from collections import Counter, defaultdict
+import json
+from pathlib import Path
+import subprocess
+import sys
+from tempfile import TemporaryDirectory
+
+ROOT = Path(__file__).resolve().parent.parent
+CONFIG = ".cargo/mutation-gate.json"
+VERSION = "27.1.0"
+OUTCOMES = {
+    "CaughtMutant": "caught",
+    "Unviable": "unviable",
+    "MissedMutant": "surviving",
+    "Timeout": "timeout",
+}
+
+
+def key(mutant, site):
+    return mutant["file"], mutant["function"], mutant["replacement"], tuple(site)
+
+
+def reviewed_entries(entries):
+    reviewed = {}
+    for entry in entries:
+        identity = key(entry, entry["site"])
+        if identity in reviewed or not entry["proof"].strip() or not identity[-1]:
+            raise ValueError(f"Give each equivalent mutant one distinct site and a proof: {identity}")
+        reviewed[identity] = entry["proof"]
+    return reviewed
+
+
+def mutation_site(diff):
+    # Ignore hunk coordinates and unchanged context. Keep the mutation marker so
+    # two replacements on the same source line can still be distinguished.
+    return tuple(
+        line[0] + line[1:].strip()
+        for line in diff.splitlines()[2:]
+        if line.startswith(("-", "+"))
+    )
+
+
+def reconcile(results, reviewed, full, log_directory="mutants.out/log"):
+    counts = defaultdict(Counter)
+    seen = Counter()
+    listed_survivors = set()
+    problems = []
+    for mutant, outcome, site in results:
+        identity = key(mutant, site)
+        seen[identity] += 1
+        crate = mutant["package"]
+        counts[crate][outcome] += 1
+        if outcome == "timeout":
+            problems.append(
+                f"{mutant['name']} timed out. Inspect its log in {log_directory} "
+                "and add a test that rejects the mutation without hanging."
+            )
+        if outcome != "surviving":
+            continue
+        if identity in reviewed:
+            counts[crate]["equivalent"] += 1
+            listed_survivors.add(identity)
+        else:
+            problems.append(
+                f"{mutant['name']} survived. Add a test that catches it, or propose a proof "
+                f"of equivalence in {CONFIG}.\n  Site: {json.dumps(site)}"
+            )
+    for identity in listed_survivors:
+        if seen[identity] != 1:
+            problems.append(f"Ambiguous equivalent mutant {identity}. Give it a distinct site.")
+    if full:
+        for identity in reviewed.keys() - listed_survivors:
+            reason = "no longer survives" if identity in seen else "no longer exists"
+            problems.append(f"Reviewed mutant {identity} {reason}. Update {CONFIG}.")
+    return counts, sorted(problems)
+
+
+def read_results(output, status):
+    planned = json.loads((output / "mutants.json").read_text())
+    if not planned and status == 0:
+        return
+    report = json.loads((output / "outcomes.json").read_text())
+    results = [item for item in report["outcomes"] if item["scenario"] != "Baseline"]
+    if not report["end_time"] or len(results) != len(planned):
+        raise ValueError("Mutation results are incomplete. Rerun scripts/check-mutants.")
+    for item in results:
+        mutant = item["scenario"]["Mutant"]
+        function = mutant["function"]
+        mutant["function"] = function["function_name"] if function else None
+        site = mutation_site((output / item["diff_path"]).read_text())
+        yield mutant, OUTCOMES[item["summary"]], site
+
+
+def self_test():
+    mutant = {
+        "file": "crates/search/src/lib.rs",
+        "function": "score",
+        "replacement": ">=",
+        "package": "search",
+        "name": "replace > with >=",
+    }
+    diff = "--- before\n+++ after\n@@ -10,2 +10,2 @@\n-    score > 0\n+    score >= 0\n"
+    site = mutation_site(diff)
+    shifted = mutation_site(diff.replace("-10,2 +10,2", "-90,2 +90,2"))
+    assert site == shifted == ("-score > 0", "+score >= 0")
+    reviewed = reviewed_entries([{**mutant, "site": site, "proof": "Score cannot be zero here."}])
+
+    counts, problems = reconcile([(mutant, "surviving", shifted)], reviewed, full=True)
+    assert not problems and counts["search"]["equivalent"] == 1
+    assert "survived" in reconcile([(mutant, "surviving", site)], {}, full=False)[1][0]
+    other = ("-nodes > 0", "+nodes >= 0")
+    assert "survived" in reconcile([(mutant, "surviving", other)], reviewed, full=False)[1][0]
+    assert "Ambiguous" in reconcile([(mutant, "surviving", site)] * 2, reviewed, full=True)[1][0]
+    assert "no longer survives" in reconcile([(mutant, "caught", site)], reviewed, full=True)[1][0]
+    assert "no longer exists" in reconcile([], reviewed, full=True)[1][0]
+    assert not reconcile([], reviewed, full=False)[1]
+    assert any("timed out" in problem for problem in
+               reconcile([(mutant, "timeout", site)], reviewed, full=True)[1])
+
+
+def run(args):
+    install = f"Install cargo-mutants with `cargo install cargo-mutants --version {VERSION} --locked`."
+    version = subprocess.run(["cargo", "mutants", "--version"], cwd=ROOT, capture_output=True, text=True)
+    if version.returncode or version.stdout.strip() != f"cargo-mutants {VERSION}":
+        raise ValueError(install)
+
+    config = json.loads((ROOT / CONFIG).read_text())
+    crates = config["crates"]
+    if not crates or len(crates) != len(set(crates)):
+        raise ValueError(f"List each crate in scope once in {CONFIG}.")
+    reviewed = reviewed_entries(config["equivalent"])
+    output = args.output.resolve()
+    output.mkdir(parents=True, exist_ok=True)
+    command = [
+        "cargo", "mutants", "--test-workspace=true", "--cap-lints=true",
+        "--minimum-test-timeout", "120", "--annotations=none", "--copy-target=false", "--cargo-arg=--locked",
+        "--output", str(output), "--jobs", str(args.jobs),
+    ]
+    for crate in crates:
+        command.extend(["--package", crate])
+
+    with TemporaryDirectory(prefix="fisher-mutants-", dir=output) as temporary:
+        if args.in_diff is not None:
+            base = subprocess.check_output(
+                ["git", "rev-parse", "--verify", "--end-of-options", f"{args.in_diff}^{{commit}}"],
+                cwd=ROOT, text=True,
+            ).strip()
+            patch = Path(temporary) / "base.diff"
+            with patch.open("wb") as destination:
+                subprocess.run(
+                    ["git", "diff", "--no-ext-diff", "--no-textconv", "--no-color",
+                     "--no-renames", f"{base}...HEAD", "--", "crates/"],
+                    cwd=ROOT, stdout=destination, check=True,
+                )
+            if not patch.stat().st_size:
+                print("No changed crate paths to mutate.")
+                return 0
+            command.extend(["--in-diff", str(patch)])
+        status = subprocess.run(command, cwd=ROOT).returncode
+
+    if status not in {0, 2, 3}:
+        raise ValueError(f"cargo-mutants exited {status}. Fix the error above and rerun scripts/check-mutants.")
+
+    results = read_results(output / "mutants.out", status)
+    counts, problems = reconcile(
+        results, reviewed, full=args.in_diff is None, log_directory=output / "mutants.out/log",
+    )
+    if args.in_diff is None:
+        for crate in sorted(set(crates) - counts.keys()):
+            problems.append(f"{crate}: no mutants ran. Check the crate scope in {CONFIG}.")
+    for crate in sorted(counts):
+        summary = ", ".join(f"{counts[crate][name]} {name}" for name in
+                            ("caught", "unviable", "surviving", "equivalent", "timeout"))
+        print(f"{crate}: {summary}")
+    for problem in problems:
+        print(problem, file=sys.stderr)
+    return int(bool(problems) or status == 3)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--in-diff", metavar="BASE", help="test mutations in changes from BASE to HEAD")
+    parser.add_argument("--jobs", type=int, default=4)
+    parser.add_argument("--output", type=Path, default=ROOT / "target/mutation")
+    parser.add_argument("--self-test", action="store_true")
+    args = parser.parse_args()
+    if args.self_test:
+        self_test()
+        return 0
+    try:
+        return run(args)
+    except (OSError, subprocess.CalledProcessError, ValueError, KeyError) as error:
+        print(f"Could not check mutants: {error}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

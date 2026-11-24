@@ -10,6 +10,16 @@
         "+winning: score >= /* ~ changed by cargo-mutants ~ */ 0,"
       ],
       "proof": "The mate branch requires 100000 - abs(score) to fit in u8 and be no greater than depth. At score zero this difference is 100000, so the conversion fails and neither comparison is evaluated."
+    },
+    {
+      "file": "crates/xtask/src/interfaces.rs",
+      "function": "public_modules",
+      "replacement": "-",
+      "site": [
+        "-let mut line = 1 + shebang.matches('\\n').count();",
+        "+let mut line = 1 - /* ~ changed by cargo-mutants ~ */ shebang.matches('\\n').count();"
+      ],
+      "proof": "In ra-ap-rustc_lexer 0.186.0, strip_shebang returns None or 2 + input_tail.lines().next().unwrap_or_default().len(). The stripped prefix is empty or excludes the first newline, so its newline count is zero. Both operators initialize the line to 1, and tokenization counts any remaining newline."
     }
   ]
 }

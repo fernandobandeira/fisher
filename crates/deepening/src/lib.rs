@@ -67,9 +67,7 @@ pub enum SearchReport {
     reason = "The worker owns the request and the current fixed-depth search only borrows it"
 )]
 pub fn search(request: SearchRequest, report: &mut dyn FnMut(SearchReport)) {
-    search_with_clock(&request, report, &Instant::now, &mut || {
-        is_interrupted(&request)
-    });
+    search_with_clock(&request, report, &Instant::now, &mut || {});
 }
 
 fn is_interrupted(request: &SearchRequest) -> bool {
@@ -80,7 +78,7 @@ fn search_with_clock(
     request: &SearchRequest,
     report: &mut dyn FnMut(SearchReport),
     now: &dyn Fn() -> Instant,
-    interrupted: &mut dyn FnMut() -> bool,
+    before_node: &mut dyn FnMut(),
 ) {
     // TODO(fisher-5sg.4): Deepen under the limits of the go.
     // TODO(fisher-5sg.10): Use the clocks and moves to go to set the time limit.
@@ -88,7 +86,10 @@ fn search_with_clock(
     let result = if request.stop.load(Ordering::Relaxed) {
         None
     } else {
-        minimax_until_interrupted(&request.position, DEPTH, interrupted)
+        minimax_until_interrupted(&request.position, DEPTH, || {
+            before_node();
+            is_interrupted(request)
+        })
     };
     let Some(result) = result else {
         report(SearchReport::Ended(

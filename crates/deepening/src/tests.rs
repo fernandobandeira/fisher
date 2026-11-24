@@ -29,7 +29,6 @@ fn interrupt_inside_the_depth_discards_it() -> std::io::Result<()> {
                     assert!(at_node.send(()).is_ok());
                     assert!(may_resume.recv_timeout(Duration::from_secs(5)).is_ok());
                 }
-                is_interrupted(&request)
             },
         );
         (interrupt_checks, reports)
@@ -62,7 +61,7 @@ fn reports_elapsed_time_from_the_clock() -> std::io::Result<()> {
         &request,
         &mut |report| reports.push(report),
         &|| origin + Duration::from_micros(3250),
-        &mut || false,
+        &mut || {},
     );
 
     let [

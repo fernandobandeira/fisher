@@ -140,27 +140,81 @@ fn collect_legal_bestmove_replies(name: &str) -> io::Result<Vec<String>> {
         expectations.join("uci").join(format!("{name}.uci"))
     };
     let transcript = fs::read_to_string(path)?;
-    let mut session = Session::start()?;
-    let mut ended = false;
+    let records = load_transcript(name, &transcript)?;
+    Session::new(Engine::start()?).play(name, records)
+}
 
-    for (line_index, line) in transcript.lines().enumerate() {
-        if line.is_empty() || line.starts_with('#') {
-            continue;
+enum Delimiter<'a> {
+    Reply(&'a str),
+    Exit,
+}
+
+impl<'a> Delimiter<'a> {
+    fn parse(line: &'a str) -> Option<Self> {
+        match line {
+            "! exit" => Some(Self::Exit),
+            _ => line.strip_prefix("< ").map(Self::Reply),
         }
+    }
+}
 
-        ended = if ended {
-            Err(io::Error::other("record after ! exit"))
+enum Record<'a> {
+    Send(Vec<u8>),
+    CloseInput,
+    Observe(Option<SearchInfo<'a>>, Delimiter<'a>),
+}
+
+fn record_error(name: &str, index: usize, error: impl std::fmt::Display) -> io::Error {
+    io::Error::other(format!("{name}.uci:{}: {error}", index + 1))
+}
+
+fn load_transcript<'a>(name: &str, transcript: &'a str) -> io::Result<Vec<(usize, Record<'a>)>> {
+    let mut lines = transcript
+        .lines()
+        .enumerate()
+        .filter(|&(_, line)| !line.is_empty() && !line.starts_with('#'));
+    let mut records = Vec::new();
+    while let Some((index, line)) = lines.next() {
+        let error = |message: &str| record_error(name, index, message);
+        let record = if let Some(pattern) = line.strip_prefix("<* ") {
+            let pattern = search_info(pattern)
+                .filter(|info| info.valid(true))
+                .ok_or_else(|| error("invalid repeated searched info pattern"))?;
+            let delimiter = lines
+                .next()
+                .and_then(|(_, line)| Delimiter::parse(line))
+                .ok_or_else(|| error("repeated searched info requires a reply or ! exit"))?;
+            Record::Observe(Some(pattern), delimiter)
+        } else if let Some(delimiter) = Delimiter::parse(line) {
+            Record::Observe(None, delimiter)
+        } else if let Some((command, ending)) = line
+            .strip_prefix("> ")
+            .map(|command| (command, b'\n'))
+            .or_else(|| line.strip_prefix(">CR ").map(|command| (command, b'\r')))
+        {
+            let mut command =
+                decode_command(command).map_err(|error| record_error(name, index, error))?;
+            command.push(ending);
+            Record::Send(command)
+        } else if line == "! eof" {
+            Record::CloseInput
         } else {
-            session.play_record(line)
+            return Err(record_error(
+                name,
+                index,
+                format!("unknown record {line:?}"),
+            ));
+        };
+        let exit = matches!(record, Record::Observe(_, Delimiter::Exit));
+        records.push((index, record));
+        if exit {
+            return match lines.next() {
+                Some((index, _)) => Err(record_error(name, index, "record after ! exit")),
+                None => Ok(records),
+            };
         }
-        .map_err(|error| io::Error::other(format!("{name}.uci:{}: {error}", line_index + 1)))?;
     }
-
-    if ended {
-        Ok(std::mem::take(&mut session.legal_bestmove_replies))
-    } else {
-        Err(io::Error::other(format!("{name}.uci: missing ! exit")))
-    }
+    Err(io::Error::other(format!("{name}.uci: missing ! exit")))
 }
 
 fn decode_command(command: &str) -> io::Result<Vec<u8>> {
@@ -263,7 +317,9 @@ fn reply_matches(expected: &str, actual: &str, position: &Chess) -> bool {
         LEGAL_BESTMOVE => actual
             .strip_prefix("bestmove ")
             .is_some_and(|text| reference_move(position, text).is_some()),
-        _ if expected.starts_with("info depth 4 score ") => search_info_matches(expected, actual),
+        _ if search_info(expected).is_some_and(|info| info.valid(true)) => {
+            search_info_matches(expected, actual)
+        }
         "info string {message}" => actual.starts_with("info string "),
         _ if let Some(required) = expected
             .strip_prefix("info string {message:")
@@ -315,48 +371,92 @@ fn info_allowance_matches_the_documented_grammar() {
 }
 
 struct SearchInfo<'a> {
+    depth: &'a str,
     score: &'a str,
-    time: &'a str,
     nodes: &'a str,
+    full: Option<FullSearchInfo<'a>>,
+}
+
+struct FullSearchInfo<'a> {
+    time: &'a str,
     nps: &'a str,
     pv: &'a str,
 }
 
 fn search_info(text: &str) -> Option<SearchInfo<'_>> {
-    let (score, rest) = text
-        .strip_prefix("info depth 4 score ")?
-        .split_once(" time ")?;
-    let (time, rest) = rest.split_once(" nodes ")?;
-    let (nodes, rest) = rest.split_once(" nps ")?;
-    let (nps, pv) = rest.split_once(" pv ")?;
-    Some(SearchInfo {
-        score,
-        time,
-        nodes,
-        nps,
-        pv,
-    })
+    let (depth, rest) = text.strip_prefix("info depth ")?.split_once(" score ")?;
+    let (score_and_time, rest) = rest.split_once(" nodes ")?;
+    if let Some((score, time)) = score_and_time.split_once(" time ") {
+        let (nodes, rest) = rest.split_once(" nps ")?;
+        let (nps, pv) = rest.split_once(" pv ")?;
+        Some(SearchInfo {
+            depth,
+            score,
+            nodes,
+            full: Some(FullSearchInfo { time, nps, pv }),
+        })
+    } else {
+        Some(SearchInfo {
+            depth,
+            score: score_and_time,
+            nodes: rest,
+            full: None,
+        })
+    }
+}
+
+impl SearchInfo<'_> {
+    fn valid(&self, pattern: bool) -> bool {
+        let slot = |text, allowance| pattern && text == allowance;
+        (slot(self.depth, "{depth}") || positive_decimal(self.depth))
+            && (slot(self.score, "{score}") || score_matches(self.score))
+            && (slot(self.nodes, "{nodes}") || nonnegative_decimal(self.nodes))
+            && self.full.as_ref().is_none_or(|full| {
+                (slot(full.time, "{time}") || nonnegative_decimal(full.time))
+                    && (slot(full.nps, "{nps}") || nonnegative_decimal(full.nps))
+                    && (slot(full.pv, "{pv}")
+                        || (full.pv.split(' ').all(uci_move_matches)
+                            && full.pv.split(' ').count()
+                                <= self.depth.parse().unwrap_or(usize::MAX)))
+            })
+    }
+
+    fn matches(&self, actual: &Self) -> bool {
+        let slot = |expected, allowance, actual| expected == allowance || expected == actual;
+        actual.valid(false)
+            && slot(self.depth, "{depth}", actual.depth)
+            && slot(self.score, "{score}", actual.score)
+            && slot(self.nodes, "{nodes}", actual.nodes)
+            && match (&self.full, &actual.full) {
+                (None, None) => true,
+                (Some(expected), Some(actual)) => {
+                    slot(expected.time, "{time}", actual.time)
+                        && slot(expected.nps, "{nps}", actual.nps)
+                        && slot(expected.pv, "{pv}", actual.pv)
+                }
+                _ => false,
+            }
+    }
 }
 
 fn search_info_matches(expected: &str, actual: &str) -> bool {
-    let (Some(expected), Some(actual)) = (search_info(expected), search_info(actual)) else {
-        return false;
-    };
-    let score_matches = if let Some(cp) = actual.score.strip_prefix("cp ") {
-        cp == "0" || positive_decimal(cp.strip_prefix('-').unwrap_or(cp))
-    } else if let Some(mate) = actual.score.strip_prefix("mate ") {
+    search_info(expected)
+        .zip(search_info(actual))
+        .is_some_and(|(expected, actual)| expected.matches(&actual))
+}
+
+fn score_matches(score: &str) -> bool {
+    if let Some(cp) = score.strip_prefix("cp ") {
+        nonnegative_decimal(cp) || positive_decimal(cp.strip_prefix('-').unwrap_or(cp))
+    } else if let Some(mate) = score.strip_prefix("mate ") {
         positive_decimal(mate.strip_prefix('-').unwrap_or(mate))
     } else {
         false
-    };
-    score_matches
-        && (expected.score == "{score}" || expected.score == actual.score)
-        && (expected.nodes == "{nodes}" || expected.nodes == actual.nodes)
-        && [actual.time, actual.nodes, actual.nps]
-            .into_iter()
-            .all(|text| text == "0" || positive_decimal(text))
-        && actual.pv.split(' ').count() <= 4
-        && actual.pv.split(' ').all(uci_move_matches)
+    }
+}
+
+fn nonnegative_decimal(text: &str) -> bool {
+    text == "0" || positive_decimal(text)
 }
 
 fn uci_move_matches(text: &str) -> bool {
@@ -401,16 +501,20 @@ fn positive_decimal(text: &str) -> bool {
         && text.bytes().all(|byte| byte.is_ascii_digit())
 }
 
-struct Session {
-    child: Child,
-    output: Receiver<io::Result<String>>,
-    position: Chess,
-    holding: bool,
-    first_variation_move: Option<String>,
-    legal_bestmove_replies: Vec<String>,
+trait TranscriptIo {
+    fn send(&mut self, command: &[u8]) -> io::Result<()>;
+    fn close_input(&mut self);
+    fn now(&self) -> Instant;
+    fn read_reply(&mut self, deadline: Instant) -> io::Result<Option<String>>;
+    fn wait_for_success(&mut self, deadline: Instant) -> io::Result<()>;
 }
 
-impl Session {
+struct Engine {
+    child: Child,
+    output: Receiver<io::Result<String>>,
+}
+
+impl Engine {
     fn start() -> io::Result<Self> {
         let child = {
             // On macOS, concurrent spawns can inherit each other's pipes and delay EOF.
@@ -424,15 +528,8 @@ impl Session {
                 .spawn()?
         };
         let (sender, output) = mpsc::channel();
-        let mut session = Self {
-            child,
-            output,
-            position: Chess::default(),
-            holding: false,
-            first_variation_move: None,
-            legal_bestmove_replies: Vec::new(),
-        };
-        let stdout = session
+        let mut engine = Self { child, output };
+        let stdout = engine
             .child
             .stdout
             .take()
@@ -446,39 +543,140 @@ impl Session {
             }
         })?;
 
-        Ok(session)
+        Ok(engine)
     }
+}
 
-    fn play_record(&mut self, line: &str) -> io::Result<bool> {
-        if let Some(command) = line.strip_prefix("> ") {
-            self.send(command, b'\n')?;
-        } else if let Some(command) = line.strip_prefix(">CR ") {
-            self.send(command, b'\r')?;
-        } else if let Some(expected) = line.strip_prefix("< ") {
-            self.expect_reply(expected)?;
-        } else if line == "! eof" {
-            drop(self.child.stdin.take());
-        } else if line == "! exit" {
-            self.expect_exit()?;
-            return Ok(true);
-        } else {
-            return Err(io::Error::other(format!("unknown record {line:?}")));
-        }
-        Ok(false)
-    }
-
-    fn send(&mut self, command: &str, ending: u8) -> io::Result<()> {
+impl TranscriptIo for Engine {
+    fn send(&mut self, command: &[u8]) -> io::Result<()> {
         let stdin = self
             .child
             .stdin
             .as_mut()
             .ok_or_else(|| io::Error::other("fisher stdin is closed"))?;
-        let command = decode_command(command)?;
-        stdin.write_all(&command)?;
-        stdin.write_all(&[ending])?;
-        stdin.flush()?;
-        self.track_reference_command(&command);
-        Ok(())
+        stdin.write_all(command)?;
+        stdin.flush()
+    }
+
+    fn close_input(&mut self) {
+        drop(self.child.stdin.take());
+    }
+
+    fn now(&self) -> Instant {
+        Instant::now()
+    }
+
+    fn read_reply(&mut self, deadline: Instant) -> io::Result<Option<String>> {
+        let remaining = deadline.saturating_duration_since(self.now());
+        if remaining.is_zero() {
+            return Err(read_timeout());
+        }
+        let result = self.output.recv_timeout(remaining);
+        if self.now() >= deadline {
+            return Err(read_timeout());
+        }
+        match result {
+            Ok(line) => line.map(Some),
+            Err(mpsc::RecvTimeoutError::Disconnected) => Ok(None),
+            Err(mpsc::RecvTimeoutError::Timeout) => Err(read_timeout()),
+        }
+    }
+
+    fn wait_for_success(&mut self, deadline: Instant) -> io::Result<()> {
+        while self.now() < deadline {
+            if let Some(status) = self.child.try_wait()? {
+                return if status.success() {
+                    Ok(())
+                } else {
+                    Err(io::Error::other(format!("fisher exited with {status}")))
+                };
+            }
+            thread::sleep(Duration::from_millis(5));
+        }
+        Err(exit_timeout())
+    }
+}
+
+fn read_timeout() -> io::Error {
+    io::Error::new(io::ErrorKind::TimedOut, "timed out reading fisher stdout")
+}
+
+fn exit_timeout() -> io::Error {
+    io::Error::new(
+        io::ErrorKind::TimedOut,
+        "timed out waiting for fisher to exit",
+    )
+}
+
+struct Session<I> {
+    io: I,
+    position: Chess,
+    holding: bool,
+    first_variation_move: Option<String>,
+    legal_bestmove_replies: Vec<String>,
+}
+
+impl<I: TranscriptIo> Session<I> {
+    fn new(io: I) -> Self {
+        Self {
+            io,
+            position: Chess::default(),
+            holding: false,
+            first_variation_move: None,
+            legal_bestmove_replies: Vec::new(),
+        }
+    }
+
+    fn play(&mut self, name: &str, records: Vec<(usize, Record<'_>)>) -> io::Result<Vec<String>> {
+        for (index, record) in records {
+            self.play_record(record).map_err(|error| {
+                io::Error::new(error.kind(), format!("{name}.uci:{}: {error}", index + 1))
+            })?;
+        }
+        Ok(std::mem::take(&mut self.legal_bestmove_replies))
+    }
+
+    fn play_record(&mut self, record: Record<'_>) -> io::Result<()> {
+        match record {
+            Record::Send(command) => {
+                self.io.send(&command)?;
+                self.track_reference_command(&command);
+                Ok(())
+            }
+            Record::CloseInput => {
+                self.io.close_input();
+                Ok(())
+            }
+            Record::Observe(pattern, delimiter) => self.observe(pattern.as_ref(), delimiter),
+        }
+    }
+
+    fn observe(
+        &mut self,
+        pattern: Option<&SearchInfo<'_>>,
+        delimiter: Delimiter<'_>,
+    ) -> io::Result<()> {
+        let deadline = self.io.now() + TIMEOUT;
+        let actual = loop {
+            let actual = self.io.read_reply(deadline)?;
+            if let Some((pattern, info)) = pattern.zip(actual.as_deref().and_then(search_info))
+                && pattern.matches(&info)
+            {
+                self.verify_search_info(pattern.score, &info)?;
+            } else {
+                break actual;
+            }
+        };
+        match (delimiter, actual) {
+            (Delimiter::Reply(expected), Some(actual)) => self.expect_reply(expected, actual),
+            (Delimiter::Reply(expected), None) => Err(io::Error::other(format!(
+                "stdout closed while expecting {expected:?}"
+            ))),
+            (Delimiter::Exit, Some(extra)) => {
+                Err(io::Error::other(format!("unexpected output {extra:?}")))
+            }
+            (Delimiter::Exit, None) => self.io.wait_for_success(self.io.now() + TIMEOUT),
+        }
     }
 
     fn track_reference_command(&mut self, command: &[u8]) {
@@ -496,74 +694,57 @@ impl Session {
         }
     }
 
-    fn expect_reply(&mut self, expected: &str) -> io::Result<()> {
-        let actual = self.next_reply()?.ok_or_else(|| {
-            io::Error::other(format!("stdout closed while expecting {expected:?}"))
-        })?;
-        if reply_matches(expected, &actual, &self.position) {
-            if let Some(info) = search_info(&actual) {
-                let score = reported_score(info.score)?;
-                if expected.starts_with("info depth 4 score {score}") {
-                    let best = reference::minimax(&self.position, 4).score;
-                    if score != best {
-                        return Err(io::Error::other(format!(
-                            "reported score {score} differs from reference {best}"
-                        )));
-                    }
-                }
-                principal_variation::verify(&self.position, 4, score, info.pv.split(' '))
-                    .map_err(io::Error::other)?;
-                self.first_variation_move = info.pv.split(' ').next().map(str::to_owned);
-            }
-            if let Some(bestmove) = actual.strip_prefix("bestmove ")
-                && let Some(first) = self.first_variation_move.take()
-                && first != bestmove
-            {
+    fn expect_reply(&mut self, expected: &str, actual: String) -> io::Result<()> {
+        if !reply_matches(expected, &actual, &self.position) {
+            return Err(io::Error::other(format!(
+                "expected {expected:?}, got {actual:?}"
+            )));
+        }
+        if let Some((pattern, info)) = search_info(expected).zip(search_info(&actual)) {
+            self.verify_search_info(pattern.score, &info)?;
+        }
+        if let Some(bestmove) = actual.strip_prefix("bestmove ")
+            && let Some(first) = self.first_variation_move.take()
+            && first != bestmove
+        {
+            return Err(io::Error::other(format!(
+                "principal variation starts with {first}, got bestmove {bestmove}"
+            )));
+        }
+        if expected == LEGAL_BESTMOVE {
+            self.legal_bestmove_replies.push(actual);
+        }
+        Ok(())
+    }
+
+    fn verify_search_info(
+        &mut self,
+        expected_score: &str,
+        info: &SearchInfo<'_>,
+    ) -> io::Result<()> {
+        // The static four-ply search has an independent minimax and replay check.
+        // Other depths in this record have the documented spelling and length checks.
+        let Some(full) = info.full.as_ref().filter(|_| info.depth == "4") else {
+            self.first_variation_move = None;
+            return Ok(());
+        };
+        let score = reported_score(info.score)?;
+        if expected_score == "{score}" {
+            let best = reference::minimax(&self.position, 4).score;
+            if score != best {
                 return Err(io::Error::other(format!(
-                    "principal variation starts with {first}, got bestmove {bestmove}"
+                    "reported score {score} differs from reference {best}"
                 )));
             }
-            if expected == LEGAL_BESTMOVE {
-                self.legal_bestmove_replies.push(actual);
-            }
-            Ok(())
-        } else {
-            Err(io::Error::other(format!(
-                "expected {expected:?}, got {actual:?}"
-            )))
         }
-    }
-
-    fn next_reply(&self) -> io::Result<Option<String>> {
-        match self.output.recv_timeout(TIMEOUT) {
-            Ok(line) => line.map(Some),
-            Err(mpsc::RecvTimeoutError::Disconnected) => Ok(None),
-            Err(error @ mpsc::RecvTimeoutError::Timeout) => Err(io::Error::other(error)),
-        }
-    }
-
-    fn expect_exit(&mut self) -> io::Result<()> {
-        if let Some(extra) = self.next_reply()? {
-            return Err(io::Error::other(format!("unexpected output {extra:?}")));
-        }
-        let deadline = Instant::now() + TIMEOUT;
-        loop {
-            if let Some(status) = self.child.try_wait()? {
-                return if status.success() {
-                    Ok(())
-                } else {
-                    Err(io::Error::other(format!("fisher exited with {status}")))
-                };
-            }
-            if Instant::now() >= deadline {
-                return Err(io::Error::other("timed out waiting for fisher to exit"));
-            }
-            thread::sleep(Duration::from_millis(5));
-        }
+        principal_variation::verify(&self.position, 4, score, full.pv.split(' '))
+            .map_err(io::Error::other)?;
+        self.first_variation_move = full.pv.split(' ').next().map(str::to_owned);
+        Ok(())
     }
 }
 
-impl Drop for Session {
+impl Drop for Engine {
     fn drop(&mut self) {
         drop(self.child.kill());
         drop(self.child.wait());

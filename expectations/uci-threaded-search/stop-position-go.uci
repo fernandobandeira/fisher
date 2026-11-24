@@ -6,7 +6,7 @@
 < info depth 4 multipv 1 score mate -1 nodes 782 nps {nps} time {time} pv {pv}
 > isready
 < readyok
-# Send all three commands without waiting for a reply between them.
+# Send all three commands without waiting for a response between them.
 > stop
 > position fen 7k/8/5K2/6Q1/8/8/8/8 b - - 0 1
 > go

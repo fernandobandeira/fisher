@@ -101,8 +101,8 @@ succeed their active files under D25. The three other sessions cover
 the commands after `stop` under D24 and an immediate `quit` or end of input.
 The held-move transcripts read the last `info` line before the next command.
 The scripted histories can also observe the search reporting `Ended`.
-The three searched sessions assume one depth-4 search and will be
-restaged when fisher-5sg.4 lands.
+The two held-move sessions and `stop-position-go.uci` each assume one
+depth-4 search and will be restaged when fisher-5sg.4 lands.
 
 ### Staged iterative deepening transcripts
 

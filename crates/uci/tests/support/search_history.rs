@@ -2,19 +2,87 @@
 //! Source: April 2006 UCI, <https://backscattering.de/chess/uci/>.
 //! Record commands in input order, reports in report order, and responses
 //! at the writer, including each newline. Finish recording when the session
-//! returns successfully. A command's arrival need not be its handling time.
-//! A finite search can finish or handle more input after Ended while its
-//! bestmove is still outstanding (fisher-8ie rules 6–8).
+//! returns successfully. Before stepping a scripted finished depth or Ended,
+//! wait until every earlier recorded command has reached the ordered command
+//! channel. Use `scripted_input` to wait for the reader to ask for the next
+//! line, after it has enqueued the one just sent.
+//! Commands recorded before Ended are handled before it, subject to the stop
+//! barrier. After finite Ended, commands may be handled on either side of
+//! bestmove in input order (fisher-8ie rules 6–8).
 //! This checker reads fisher-2aj.5's "until that search has reported" and
 //! the `SearchReport` seam as requiring `Ended` before `bestmove`. Infinite work
 //! also needs stop or exit (rule 2 and D25).
 //! Commands use ordinary UCI spelling. A report belongs to the one
 //! accepted search in progress.
 
-use std::collections::VecDeque;
+use std::{
+    collections::VecDeque,
+    io::{self, Cursor, Read},
+    sync::mpsc,
+    time::Duration,
+};
 
 use deepening::{FinishedDepth, Score, SearchReport};
 use shakmaty::{CastlingMode, Chess, Position as _, fen::Fen, uci::UciMove};
+
+pub(super) struct ScriptedInput {
+    lines: mpsc::Sender<String>,
+    next_read: mpsc::Receiver<()>,
+}
+
+impl ScriptedInput {
+    /// Send one complete line and wait until the reader asks for another.
+    pub(super) fn send_line(&self, line: &str) -> io::Result<()> {
+        assert!(!line.contains(['\r', '\n']), "send exactly one command");
+        self.lines
+            .send(format!("{line}\n"))
+            .map_err(io::Error::other)?;
+
+        self.next_read
+            .recv_timeout(Duration::from_secs(5))
+            .map_err(io::Error::other)
+    }
+}
+
+/// The reader signals when it asks for more input after reading a line.
+pub(super) fn scripted_input() -> (impl Read + Send + 'static, ScriptedInput) {
+    let (lines, input) = mpsc::channel();
+    let (ready, next_read) = mpsc::channel();
+    (
+        ChannelReader {
+            input,
+            ready,
+            pending: Cursor::new(String::new()),
+        },
+        ScriptedInput { lines, next_read },
+    )
+}
+
+struct ChannelReader {
+    input: mpsc::Receiver<String>,
+    ready: mpsc::Sender<()>,
+    pending: Cursor<String>,
+}
+
+impl Read for ChannelReader {
+    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        if buffer.is_empty() {
+            return Ok(0);
+        }
+        let read = self.pending.read(buffer)?;
+        if read != 0 {
+            return Ok(read);
+        }
+        if !self.pending.get_ref().is_empty() && self.ready.send(()).is_err() {
+            return Ok(0);
+        }
+        let Ok(line) = self.input.recv() else {
+            return Ok(0);
+        };
+        self.pending = Cursor::new(line);
+        self.pending.read(buffer)
+    }
+}
 
 #[derive(Clone, Debug)]
 pub(super) enum Event<'a> {
@@ -340,8 +408,15 @@ impl<'a> Session<'a> {
                 (2, "go infinite released its move before stop or exit")
             });
         }
-        if self.exiting && !self.command_responses.is_empty() {
-            return Err((9, "exit bestmove preceded an outstanding command response"));
+        if let Some(response) = self.command_responses.front() {
+            let rule = match response {
+                CommandResponse::Ready => 6,
+                CommandResponse::PositionRejected
+                | CommandResponse::InvalidPosition
+                | CommandResponse::GoRejected => 8,
+                CommandResponse::IdName | CommandResponse::IdAuthor | CommandResponse::UciOk => 10,
+            };
+            return Err((rule, "bestmove preceded an outstanding command response"));
         }
         if !legal(&self.position, text) {
             if self

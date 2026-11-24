@@ -5,15 +5,16 @@
 #[path = "support/search_history.rs"]
 mod search_history;
 
-use std::time::Duration;
+use std::{io, time::Duration};
 
 use deepening::{FinishedDepth, Score, SearchReport};
-use search_history::{Event, Event::*, check};
+use search_history::{Event, Event::*, check, scripted_input};
 
 const A: &str = "7k/8/5K1Q/8/8/8/8/8 b - - 0 1";
 const B: &str = "7k/8/5K2/6Q1/8/8/8/8 b - - 0 1";
 const POSITION_A: Event<'_> = Command("position fen 7k/8/5K1Q/8/8/8/8/8 b - - 0 1");
 const POSITION_B: Event<'_> = Command("position fen 7k/8/5K2/6Q1/8/8/8/8 b - - 0 1");
+const INVALID_POSITION: Event<'_> = Command("position fen 8/8/8/8/8/8/8/8 w - - 0 1");
 const GO: Event<'_> = Command("go");
 const INFINITE: Event<'_> = Command("go infinite");
 const STOP: Event<'_> = Command("stop");
@@ -575,7 +576,12 @@ fn invalid_idle_position_is_reported() {
 #[test]
 fn readiness_on_either_side_of_finite_bestmove() {
     accepts(&[POSITION_A, GO, ended(A), READY, READY_OK, MOVE_A, QUIT]);
-    accepts(&[POSITION_A, GO, READY, ended(A), MOVE_A, READY_OK, QUIT]);
+    accepts(&[POSITION_A, GO, ended(A), READY, MOVE_A, READY_OK, QUIT]);
+    rejects(
+        6,
+        "isready before finite Ended must be answered before bestmove",
+        &[POSITION_A, GO, READY, ended(A), MOVE_A, READY_OK, QUIT],
+    );
 }
 
 #[test]
@@ -653,4 +659,626 @@ fn empty_principal_variation_omits_pv() {
             QUIT,
         ],
     );
+}
+
+#[test]
+fn command_responses_precede_bestmove() {
+    for (rule, name, history) in [
+        (
+            8,
+            "B1: late rejection for position recorded after Ended",
+            vec![
+                POSITION_A,
+                GO,
+                ended(A),
+                POSITION_B,
+                MOVE_A,
+                REJECT_POSITION,
+                QUIT,
+            ],
+        ),
+        (
+            8,
+            "B2: rejection for position recorded after bestmove",
+            vec![
+                POSITION_A,
+                GO,
+                ended(A),
+                MOVE_A,
+                POSITION_B,
+                REJECT_POSITION,
+                QUIT,
+            ],
+        ),
+        (
+            8,
+            "B3: late rejection for position recorded before Ended",
+            vec![
+                POSITION_A,
+                GO,
+                POSITION_B,
+                ended(A),
+                MOVE_A,
+                REJECT_POSITION,
+                QUIT,
+            ],
+        ),
+        (
+            8,
+            "B4: late rejection for position recorded before stop",
+            vec![
+                POSITION_A,
+                INFINITE,
+                POSITION_B,
+                STOP,
+                ended(A),
+                MOVE_A,
+                REJECT_POSITION,
+                QUIT,
+            ],
+        ),
+        (
+            6,
+            "B5: late readyok for isready recorded before stop",
+            vec![
+                POSITION_A,
+                INFINITE,
+                READY,
+                STOP,
+                ended(A),
+                MOVE_A,
+                READY_OK,
+                QUIT,
+            ],
+        ),
+        (
+            8,
+            "B6: late rejection for go recorded before stop",
+            vec![
+                POSITION_A,
+                INFINITE,
+                GO,
+                STOP,
+                ended(A),
+                MOVE_A,
+                REJECT_GO,
+                QUIT,
+            ],
+        ),
+        (
+            8,
+            "B31: late waiting-for-stop rejection for invalid FEN",
+            vec![
+                POSITION_A,
+                GO,
+                ended(A),
+                INVALID_POSITION,
+                MOVE_A,
+                REJECT_POSITION,
+                QUIT,
+            ],
+        ),
+    ] {
+        rejects(rule, name, &history);
+    }
+    for exit in [QUIT, EndOfInput] {
+        rejects(
+            6,
+            "exit bestmove overtook readyok for an earlier isready",
+            &[
+                POSITION_A,
+                INFINITE,
+                READY,
+                exit,
+                ended(A),
+                MOVE_A,
+                READY_OK,
+            ],
+        );
+    }
+}
+
+#[test]
+fn scripted_input_enqueues_commands_before_ended() -> io::Result<()> {
+    let (input, commands) = scripted_input();
+    let Command(position) = POSITION_A else {
+        unreachable!()
+    };
+    let depth = FinishedDepth {
+        depth: 1,
+        score: Score::Centipawns(-900),
+        nodes: 1,
+        elapsed: Duration::from_millis(1),
+        principal_variation: vec![forced_move(A)],
+    };
+    let chosen = depth.principal_variation.first().copied();
+    let mut output = Vec::new();
+    std::thread::scope(|scope| -> io::Result<()> {
+        let (controller, commands_for_search) = std::sync::mpsc::channel();
+        let feeder = scope.spawn(move || -> io::Result<()> {
+            commands.send_line(position)?;
+            commands.send_line("go infinite")?;
+            controller
+                .send(commands)
+                .map_err(|_| io::Error::other("search did not start"))
+        });
+        uci::run_session(input, &mut output, "test", move |request, report| {
+            assert!(request.limits.infinite);
+            let commands = commands_for_search
+                .recv_timeout(Duration::from_secs(5))
+                .unwrap();
+            commands.send_line("isready").unwrap();
+            report(SearchReport::FinishedDepth(depth.clone()));
+            commands.send_line("stop").unwrap();
+            report(SearchReport::Ended(chosen));
+            commands.send_line("quit").unwrap();
+        })?;
+        feeder.join().unwrap()
+    })?;
+
+    let text = std::str::from_utf8(&output).map_err(io::Error::other)?;
+    let mut history = vec![
+        POSITION_A,
+        INFINITE,
+        READY,
+        finished_depth(),
+        STOP,
+        ended(A),
+        QUIT,
+    ];
+    history.extend(text.split_inclusive('\n').map(Response));
+    accepts(&history);
+    Ok(())
+}
+
+// The fix-check review model uses a single handler, a reader, and a worker.
+// Enumerate their schedules independently of the checker. A script is bounded
+// by input and report actions. Delivery and handling do not spend that budget.
+mod model {
+    use std::collections::{HashSet, VecDeque};
+
+    use super::*;
+
+    const MAX_ACTIONS: usize = 4;
+    const STOP_ACTIONS: usize = 5;
+    const INPUTS: [Action; 8] = [
+        Action::Position,
+        Action::Invalid,
+        Action::Go,
+        Action::Infinite,
+        Action::Stop,
+        Action::Ready,
+        Action::Quit,
+        Action::Eof,
+    ];
+
+    #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+    enum Action {
+        Position,
+        Invalid,
+        Go,
+        Infinite,
+        Stop,
+        Ready,
+        Quit,
+        Eof,
+    }
+
+    #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+    enum Root {
+        #[default]
+        A,
+        B,
+    }
+
+    #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+    enum ReportKind {
+        Depth,
+        Ended,
+    }
+
+    #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+    enum Message {
+        Input(Action),
+        Report(ReportKind, Root),
+    }
+
+    #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+    enum Line {
+        Info(Root),
+        Bestmove(Root),
+        Ready,
+        PositionRejected,
+        InvalidPosition,
+        GoRejected,
+    }
+
+    #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+    enum Observation {
+        Message(Message),
+        Line(Line),
+    }
+
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    enum Engine {
+        Correct,
+        LateRejection,
+        LateReady,
+        IdleStopRepeats,
+        QuitDropsMove,
+        ReadyReleasesMove,
+        NoStopBarrier,
+        ReadyAfterQuit,
+    }
+
+    #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+    enum Phase {
+        Working,
+        Held,
+        Stopping,
+        Exiting,
+    }
+
+    #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+    struct Work {
+        root: Root,
+        infinite: bool,
+        phase: Phase,
+        depth_reported: bool,
+        ended_reported: bool,
+    }
+
+    #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+    enum InputState {
+        #[default]
+        Open,
+        QuitRecorded,
+        Closed,
+    }
+
+    #[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
+    struct Schedule {
+        actions: usize,
+        history: Vec<Observation>,
+        input: InputState,
+        stop_during_search: bool,
+        worker: VecDeque<Message>,
+        channel: VecDeque<Message>,
+        deferred: VecDeque<Action>,
+        late: Vec<Line>,
+        root: Root,
+        previous_move: Option<Root>,
+        work: Option<Work>,
+        exited: bool,
+    }
+
+    impl Schedule {
+        fn record(&mut self, message: Message) {
+            self.actions += 1;
+            self.history.push(Observation::Message(message));
+        }
+
+        fn write(&mut self, line: Line) {
+            self.history.push(Observation::Line(line));
+        }
+
+        fn answer(&mut self, engine: Engine, line: Line) {
+            let delay = match line {
+                Line::Ready => engine == Engine::LateReady,
+                Line::PositionRejected | Line::GoRejected => engine == Engine::LateRejection,
+                Line::Info(_) | Line::Bestmove(_) | Line::InvalidPosition => false,
+            };
+            if delay && self.work.is_some() {
+                self.late.push(line);
+            } else {
+                self.write(line);
+            }
+        }
+
+        fn release(&mut self, engine: Engine, work: Work) {
+            self.write(Line::Bestmove(work.root));
+            self.previous_move = Some(work.root);
+            self.work = None;
+            self.history
+                .extend(self.late.drain(..).map(Observation::Line));
+            self.exited = work.phase == Phase::Exiting;
+            while !self.exited
+                && !self
+                    .work
+                    .is_some_and(|work| matches!(work.phase, Phase::Stopping | Phase::Exiting))
+            {
+                let Some(command) = self.deferred.pop_front() else {
+                    break;
+                };
+                self.handle(engine, Message::Input(command));
+            }
+        }
+
+        fn handle(&mut self, engine: Engine, message: Message) {
+            match message {
+                Message::Input(command) => self.command(engine, command),
+                Message::Report(ReportKind::Depth, root) => self.write(Line::Info(root)),
+                Message::Report(ReportKind::Ended, _) => {
+                    let Some(mut work) = self.work else {
+                        unreachable!()
+                    };
+                    if work.infinite && work.phase == Phase::Working {
+                        work.phase = Phase::Held;
+                        self.work = Some(work);
+                    } else {
+                        self.release(engine, work);
+                    }
+                }
+            }
+        }
+
+        fn command(&mut self, engine: Engine, command: Action) {
+            if self.exited {
+                if engine == Engine::ReadyAfterQuit && command == Action::Ready {
+                    self.write(Line::Ready);
+                }
+                return;
+            }
+            if let Some(mut work) = self.work {
+                if work.phase == Phase::Exiting
+                    || (work.phase == Phase::Stopping && engine != Engine::NoStopBarrier)
+                {
+                    self.deferred.push_back(command);
+                    return;
+                }
+                match command {
+                    Action::Position | Action::Invalid => {
+                        self.answer(engine, Line::PositionRejected)
+                    }
+                    Action::Go | Action::Infinite => self.answer(engine, Line::GoRejected),
+                    Action::Ready => {
+                        self.answer(engine, Line::Ready);
+                        if engine == Engine::ReadyReleasesMove && work.phase == Phase::Held {
+                            self.release(engine, work);
+                        }
+                    }
+                    Action::Quit | Action::Eof if engine == Engine::QuitDropsMove => {
+                        self.exited = true;
+                    }
+                    Action::Stop | Action::Quit | Action::Eof => {
+                        let held = work.phase == Phase::Held;
+                        work.phase = if command == Action::Stop {
+                            Phase::Stopping
+                        } else {
+                            Phase::Exiting
+                        };
+                        if held {
+                            self.release(engine, work);
+                        } else {
+                            self.work = Some(work);
+                        }
+                    }
+                }
+            } else {
+                match command {
+                    Action::Position => self.root = Root::B,
+                    Action::Invalid => self.write(Line::InvalidPosition),
+                    Action::Go | Action::Infinite => {
+                        self.work = Some(Work {
+                            root: self.root,
+                            infinite: command == Action::Infinite,
+                            phase: Phase::Working,
+                            depth_reported: false,
+                            ended_reported: false,
+                        });
+                    }
+                    Action::Ready => self.write(Line::Ready),
+                    Action::Quit | Action::Eof => self.exited = true,
+                    Action::Stop if engine == Engine::IdleStopRepeats => {
+                        if let Some(root) = self.previous_move {
+                            self.write(Line::Bestmove(root));
+                        }
+                    }
+                    Action::Stop => {}
+                }
+            }
+        }
+
+        fn record_input(&mut self, command: Action) {
+            self.record(Message::Input(command));
+            match command {
+                Action::Quit => self.input = InputState::QuitRecorded,
+                Action::Eof => self.input = InputState::Closed,
+                Action::Position
+                | Action::Invalid
+                | Action::Go
+                | Action::Infinite
+                | Action::Stop
+                | Action::Ready => {}
+            }
+            self.stop_during_search |=
+                command == Action::Stop && self.work.is_some_and(|work| !work.ended_reported);
+            self.channel.push_back(Message::Input(command));
+        }
+
+        fn record_report(&mut self, kind: ReportKind, mut work: Work) {
+            let message = Message::Report(kind, work.root);
+            self.record(message);
+            self.worker.push_back(message);
+            match kind {
+                ReportKind::Depth => work.depth_reported = true,
+                ReportKind::Ended => work.ended_reported = true,
+            }
+            self.work = Some(work);
+        }
+    }
+
+    type Histories = HashSet<Vec<Observation>>;
+
+    fn explore(
+        engine: Engine,
+        schedule: Schedule,
+        seen: &mut HashSet<Schedule>,
+        histories: &mut Histories,
+    ) {
+        if !seen.insert(schedule.clone()) {
+            return;
+        }
+
+        // D24 needs one more action to observe a command after stop
+        // before the worker ends, followed by exit.
+        let limit = if schedule.stop_during_search {
+            STOP_ACTIONS
+        } else {
+            MAX_ACTIONS
+        };
+        if schedule.actions < limit {
+            if schedule.input != InputState::Closed {
+                for command in INPUTS {
+                    if schedule.actions + 1 < limit
+                        || schedule.input != InputState::Open
+                        || matches!(command, Action::Quit | Action::Eof)
+                    {
+                        let mut next = schedule.clone();
+                        next.record_input(command);
+                        explore(engine, next, seen, histories);
+                    }
+                }
+            }
+            if !schedule.exited
+                && (schedule.actions + 1 < limit || schedule.input != InputState::Open)
+                && let Some(work) = schedule.work.filter(|work| !work.ended_reported)
+            {
+                for kind in [ReportKind::Depth, ReportKind::Ended] {
+                    if kind == ReportKind::Ended || !work.depth_reported {
+                        let mut next = schedule.clone();
+                        next.record_report(kind, work);
+                        explore(engine, next, seen, histories);
+                    }
+                }
+            }
+        }
+        // Delivery is unobservable. Delivering Ended just before or just
+        // after recording a command enumerates both channel orders. Commands
+        // already recorded when the worker reports are already enqueued.
+        if !schedule.worker.is_empty() {
+            let mut next = schedule.clone();
+            if let Some(message) = next.worker.pop_front() {
+                next.channel.push_back(message);
+            }
+            explore(engine, next, seen, histories);
+        }
+        if !schedule.channel.is_empty() {
+            let mut next = schedule.clone();
+            if let Some(message) = next.channel.pop_front()
+                && (!next.exited || matches!(message, Message::Input(_)))
+            {
+                next.handle(engine, message);
+            }
+            explore(engine, next, seen, histories);
+        }
+        if schedule.exited && schedule.worker.is_empty() && schedule.channel.is_empty() {
+            histories.insert(schedule.history);
+        }
+    }
+
+    fn generate(engine: Engine) -> Histories {
+        let mut histories = HashSet::new();
+        explore(
+            engine,
+            Schedule::default(),
+            &mut HashSet::new(),
+            &mut histories,
+        );
+        histories
+    }
+
+    fn event(observation: Observation, moves: &[rules::Move; 2]) -> Event<'static> {
+        match observation {
+            Observation::Message(Message::Input(command)) => match command {
+                Action::Position => POSITION_B,
+                Action::Invalid => INVALID_POSITION,
+                Action::Go => GO,
+                Action::Infinite => INFINITE,
+                Action::Stop => STOP,
+                Action::Ready => READY,
+                Action::Quit => QUIT,
+                Action::Eof => EndOfInput,
+            },
+            Observation::Message(Message::Report(kind, root)) => {
+                let movement = match root {
+                    Root::A => moves[0],
+                    Root::B => moves[1],
+                };
+                match kind {
+                    ReportKind::Depth => Report(SearchReport::FinishedDepth(FinishedDepth {
+                        depth: 1,
+                        score: Score::Centipawns(-900),
+                        nodes: 1,
+                        elapsed: Duration::from_millis(1),
+                        principal_variation: vec![movement],
+                    })),
+                    ReportKind::Ended => Report(SearchReport::Ended(Some(movement))),
+                }
+            }
+            Observation::Line(line) => match line {
+                Line::Info(Root::A) => INFO_A,
+                Line::Info(Root::B) => Response(
+                    "info depth 1 multipv 1 score cp -900 nodes 1 nps 1000 time 1 pv h8h7\n",
+                ),
+                Line::Bestmove(Root::A) => MOVE_A,
+                Line::Bestmove(Root::B) => MOVE_B,
+                Line::Ready => READY_OK,
+                Line::PositionRejected => REJECT_POSITION,
+                Line::InvalidPosition => {
+                    Response("info string position rejected: invalid FEN: no king\n")
+                }
+                Line::GoRejected => REJECT_GO,
+            },
+        }
+    }
+
+    #[test]
+    #[expect(
+        clippy::print_stderr,
+        reason = "report the size of the bounded model run"
+    )]
+    fn model_histories_obey_session_rules() {
+        let moves = [forced_move(A), forced_move(B)];
+        let events = |history: &[Observation]| {
+            std::iter::once(POSITION_A)
+                .chain(
+                    history
+                        .iter()
+                        .map(|&observation| event(observation, &moves)),
+                )
+                .collect::<Vec<_>>()
+        };
+        let correct = generate(Engine::Correct);
+        assert!(!correct.is_empty());
+        eprintln!("Correct engine: {} histories", correct.len());
+        for history in &correct {
+            accepts(&events(history));
+        }
+        for engine in [
+            Engine::LateRejection,
+            Engine::LateReady,
+            Engine::IdleStopRepeats,
+            Engine::QuitDropsMove,
+            Engine::ReadyReleasesMove,
+            Engine::NoStopBarrier,
+            Engine::ReadyAfterQuit,
+        ] {
+            let generated = generate(engine);
+            // Some schedules never exercise the fault or are observationally
+            // identical to a permitted handling order after finite Ended.
+            let violations = generated.difference(&correct);
+            assert!(
+                violations.clone().next().is_some(),
+                "{engine:?} emitted no bad history"
+            );
+            eprintln!("{engine:?}: {} bad histories", violations.clone().count());
+            for history in violations {
+                assert!(
+                    check(&events(history)).is_err(),
+                    "{engine:?} accepted: {history:?}"
+                );
+            }
+        }
+    }
 }

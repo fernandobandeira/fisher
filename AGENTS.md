@@ -28,6 +28,7 @@ If it is red and you cannot fix it, say so plainly with the output. Do not weake
 | `CODING_STANDARDS.md` | How a review comment becomes a check, and the few rules that are still prose. |
 | `docs/adr/` | Decisions that are hard to reverse, and why. |
 | `expectations/` | Expected values that came from outside the implementer. |
+| `strength/` | The record of how strongly each revision plays, and the script that measures it. |
 | `.beads/` | Local Beads issue tracker. |
 
 ## Boundaries

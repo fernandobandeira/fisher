@@ -1,0 +1,3 @@
+date	revision	opponent	conditions	games	won	drawn	lost	score	queen_ahead_won	queen_ahead_drawn	queen_ahead_lost	abnormal_endings	elo_difference	elo_interval	runner
+2026-11-23	dbe9113ec19f58db8478a0394993cea2416e59dc	6831e46cf89d255502420b2bbfb25e40b03ba6d7	1	400	390	10	0	98.8	369	9	0	0	759.05	122.86	fastchess alpha 1.8.3 compiled for macos-latest 20261107-d7b47e8 (CI)
+2026-11-23	dbe9113ec19f58db8478a0394993cea2416e59dc	Stockfish 19, UCI_Elo 1320	1	400	54	28	318	17.0	47	14	12	0	-275.45	42.22	fastchess alpha 1.8.3 compiled for macos-latest 20261107-d7b47e8 (CI)

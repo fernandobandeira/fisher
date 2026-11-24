@@ -1,0 +1,24 @@
+# Four-ply info spelling: April 2006 UCI specification, info and Move format
+# https://backscattering.de/chess/uci/#engine-info and fisher-8hc question 1
+# (owner approval 2026-11-24). D3–D6 supply the allowances for the principal
+# variation, time and nodes per second. The fisher-2aj.2 sources and
+# comments below supply the retained scores, node counts and reply order.
+# Sources: April 2006 UCI specification https://backscattering.de/chess/uci/
+# and fisher-l7f owner decisions from 2026-11-22.
+# Search: fisher-2aj rules 1 to 7, 9 and 10. Exact search values
+# were checked by exhaustive enumeration with python-chess 1.11.2.
+# Starting score: four-ply minimax with python-chess 1.11.2 followed rules
+# 1 to 7. An independent reviewer reproduced cp 0 and per-ply counts
+# 20/400/8902/197281 with their own minimax. See expectations/perft.epd.
+# Searched transcript written 2026-11-23.
+> position startpos
+> go infinite
+# Rule 9 sends info before the reply to isready. The move waits for stop.
+# Rules 1 to 7 and 10. Published perft counts sum to 206603. See the header for cp 0.
+< info depth 4 score cp 0 time {time} nodes 206603 nps {nps} pv {pv}
+> isready
+# UCI go infinite and isready. No bestmove precedes readyok.
+< readyok
+# The owner's decision discards the held move on UCI quit.
+> quit
+! exit

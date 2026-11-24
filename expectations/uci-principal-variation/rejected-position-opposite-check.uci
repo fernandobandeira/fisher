@@ -1,0 +1,28 @@
+# Four-ply info spelling: April 2006 UCI specification, info and Move format
+# https://backscattering.de/chess/uci/#engine-info and fisher-8hc question 1
+# (owner approval 2026-11-24). D3–D6 supply the allowances for the principal
+# variation, time and nodes per second. The fisher-2aj.2 sources and
+# comments below supply the retained scores, node counts and reply order.
+# Sources: April 2006 UCI specification https://backscattering.de/chess/uci/
+# and the owner decision of 2026-11-23 to reject opposite check with one
+# diagnostic. Shakmaty 0.30.3 independently rejects the second FEN.
+# Search: fisher-2aj rules 1 to 7 and 10. Exact search values
+# were checked by exhaustive enumeration with python-chess 1.11.2.
+# Searched transcript written 2026-11-23.
+> position fen 7k/8/5K1Q/8/8/8/8/8 b - - 0 1
+# White to move while the black king on e8 is attacked by the rook on e1.
+> position fen 4k3/8/8/8/8/8/8/4RK2 w - - 0 1
+# Owner decision of 2026-11-23: one diagnostic naming the check.
+< info string {message:in check}
+> isready
+# UCI isready/readyok.
+< readyok
+> go
+# Rules 4, 5, 7 and 10. Black must play h8g8, then h6g7 is checkmate.
+# Python-chess counts 1, 21, 30 and 730 nodes at plies 1 to 4.
+< info depth 4 score mate -1 time {time} nodes 782 nps {nps} pv {pv}
+# Owner-approved example: the original position still has its sole legal move.
+< bestmove h8g8
+# UCI quit.
+> quit
+! exit

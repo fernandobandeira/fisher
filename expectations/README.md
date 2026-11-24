@@ -15,7 +15,7 @@ The 15 searched transcripts that expect an `info` line come from fisher-2aj.2.
 
 ## UCI transcripts
 
-All UCI transcripts live in `uci/`. Each `uci/*.uci` path describes one
+The current UCI transcripts live in `uci/`. Each `uci/*.uci` path describes one
 session with a fresh fisher process. Read the records top to bottom. Blank
 lines and lines starting with `#` are comments. The header gives the sources
 and date. A comment above a command or reply names the passage or owner
@@ -74,6 +74,39 @@ actual UCI moves for equality, as required by rule 6. This comparison is
 part of running that transcript and uses the existing `{legal}` record.
 Run [material-zero.uci](uci/material-zero.uci) once to check the
 exact score for a position with no captures within four plies.
+
+### Four-ply principal variation (fisher-8hc.1)
+
+The prospective sessions in `uci-principal-variation/` use the order in
+the April 2006 UCI info example. The owner approved that order on
+2026-11-24 in fisher-8hc question 1. D3–D6 in fisher-r6y supply the
+principal variation and the allowances.
+[UCI specification, info](https://backscattering.de/chess/uci/#engine-info)
+
+The current runner reads `uci/`. Fisher-8hc.2 selects the approved
+prospective sessions and uses the seven other sessions from `uci/`.
+
+```text
+< info depth 4 score {score} time {time} nodes {nodes} nps {nps} pv {pv}
+```
+
+Match the entire output line after removing the line ending. Each space
+in the pattern is a single ASCII space. For a literal score or node count,
+require that exact text in place of its allowance. Only `position-moves.uci`
+uses the unrestricted score and node allowances.
+
+| Allowance | Pattern |
+|---|---|
+| `{score}` | `(?:cp (?:0\|-?[1-9][0-9]*)\|mate -?[1-9][0-9]*)` |
+| `{time}`, `{nodes}`, `{nps}` | `(?:0\|[1-9][0-9]*)` |
+| `{pv}` | `[a-h][1-8][a-h][1-8][qrbn]?(?: [a-h][1-8][a-h][1-8][qrbn]?){0,3}` |
+
+The principal variation contains one to four UCI moves with single spaces
+between them. The line ends immediately after the last move. Each move
+contains two squares and an optional lowercase promotion suffix. The move
+pattern excludes `0000`. Digits in every allowance are ASCII. Fisher-8hc.2
+checks replay and scoring under D5. The fresh-process comparison still
+applies to the prospective `equal-scores.uci` session.
 
 ## Published perft
 

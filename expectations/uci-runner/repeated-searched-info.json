@@ -1,0 +1,457 @@
+{
+  "source": "Independent examples from fisher-5sg.1, fisher-r6y D15, and fisher-5sg decision 1 (owner approval 2026-11-24), with the fuller spelling from fisher-8hc.1. The depth-dependent principal variation bound is proposed.",
+  "cases": [
+    {
+      "name": "zero-matches",
+      "transcript": ["> go infinite", "> isready", "<* info depth {depth} score {score} nodes {nodes}", "# Compare the first nonmatch.", "", "< readyok", "> stop", "< bestmove e2e4", "> quit", "! exit"],
+      "script": [
+        {"after_send": 2, "events": [[0, "stdout", "readyok"]]},
+        {"after_send": 3, "events": [[0, "stdout", "bestmove e2e4"]]},
+        {"after_send": 4, "events": [[0, "eof", null], [0, "exit", 0]]}
+      ],
+      "expected": {"verdict": "accept", "reason": "The first line is the required reply."}
+    },
+    {
+      "name": "one-match",
+      "transcript": ["> go infinite", "> isready", "<* info depth {depth} score {score} nodes {nodes}", "# Compare the first nonmatch.", "", "< readyok", "> stop", "< bestmove e2e4", "> quit", "! exit"],
+      "script": [
+        {"after_send": 2, "events": [[0, "stdout", "info depth 1 score cp 0 nodes 20"], [0, "stdout", "readyok"]]},
+        {"after_send": 3, "events": [[0, "stdout", "bestmove e2e4"]]},
+        {"after_send": 4, "events": [[0, "eof", null], [0, "exit", 0]]}
+      ],
+      "expected": {"verdict": "accept", "reason": "One matching depth precedes the required reply."}
+    },
+    {
+      "name": "several-matches",
+      "transcript": ["> go infinite", "> isready", "<* info depth {depth} score {score} nodes {nodes}", "# Compare the first nonmatch.", "", "< readyok", "> stop", "< bestmove e2e4", "> quit", "! exit"],
+      "script": [
+        {"after_send": 2, "events": [[0, "stdout", "info depth 1 score cp 0 nodes 20"], [0, "stdout", "info depth 2 score cp -10 nodes 420"], [0, "stdout", "info depth 10 score mate 2 nodes 1200"], [0, "stdout", "readyok"]]},
+        {"after_send": 3, "events": [[0, "stdout", "bestmove e2e4"]]},
+        {"after_send": 4, "events": [[0, "eof", null], [0, "exit", 0]]}
+      ],
+      "expected": {"verdict": "accept", "reason": "All three positive depths match, then readyok matches."}
+    },
+    {
+      "name": "missing-reply",
+      "transcript": ["> go infinite", "> isready", "<* info depth {depth} score {score} nodes {nodes}", "< readyok", "> stop", "< bestmove e2e4", "> quit", "! exit"],
+      "script": [
+        {"after_send": 2, "events": [[0, "stdout", "info depth 1 score cp 0 nodes 20"], [0, "eof", null], [0, "exit", 0]]}
+      ],
+      "expected": {"verdict": "run-reject", "reason": "EOF precedes the required reply."}
+    },
+    {
+      "name": "diagnostic",
+      "transcript": ["> go infinite", "> isready", "<* info depth {depth} score {score} nodes {nodes}", "# Compare the first nonmatch.", "", "< readyok", "> stop", "< bestmove e2e4", "> quit", "! exit"],
+      "script": [
+        {"after_send": 2, "events": [[0, "stdout", "info depth 2 score cp 0 nodes 420"], [0, "stdout", "info string unexpected diagnostic"], [0, "stdout", "readyok"]]},
+        {"after_send": 3, "events": [[0, "stdout", "bestmove e2e4"]]},
+        {"after_send": 4, "events": [[0, "eof", null], [0, "exit", 0]]}
+      ],
+      "expected": {"verdict": "run-reject", "reason": "The first nonmatch differs from the required readyok reply."}
+    },
+    {
+      "name": "early-bestmove",
+      "transcript": ["> go infinite", "> isready", "<* info depth {depth} score {score} nodes {nodes}", "# Compare the first nonmatch.", "", "< readyok", "> stop", "< bestmove e2e4", "> quit", "! exit"],
+      "script": [
+        {"after_send": 2, "events": [[0, "stdout", "info depth 2 score cp 0 nodes 420"], [0, "stdout", "bestmove e2e4"], [0, "stdout", "readyok"]]},
+        {"after_send": 3, "events": [[0, "stdout", "bestmove e2e4"]]},
+        {"after_send": 4, "events": [[0, "eof", null], [0, "exit", 0]]}
+      ],
+      "expected": {"verdict": "run-reject", "reason": "The first nonmatch differs from the required readyok reply."}
+    },
+    {
+      "name": "zero-depth-output",
+      "transcript": ["> go infinite", "> isready", "<* info depth {depth} score {score} nodes {nodes}", "# Compare the first nonmatch.", "", "< readyok", "> stop", "< bestmove e2e4", "> quit", "! exit"],
+      "script": [
+        {"after_send": 2, "events": [[0, "stdout", "info depth 2 score cp 0 nodes 420"], [0, "stdout", "info depth 0 score cp 0 nodes 20"], [0, "stdout", "readyok"]]},
+        {"after_send": 3, "events": [[0, "stdout", "bestmove e2e4"]]},
+        {"after_send": 4, "events": [[0, "eof", null], [0, "exit", 0]]}
+      ],
+      "expected": {"verdict": "run-reject", "reason": "The first nonmatch differs from the required readyok reply."}
+    },
+    {
+      "name": "leading-zero-depth",
+      "transcript": ["> go infinite", "> isready", "<* info depth {depth} score {score} nodes {nodes}", "# Compare the first nonmatch.", "", "< readyok", "> stop", "< bestmove e2e4", "> quit", "! exit"],
+      "script": [
+        {"after_send": 2, "events": [[0, "stdout", "info depth 2 score cp 0 nodes 420"], [0, "stdout", "info depth 01 score cp 0 nodes 20"], [0, "stdout", "readyok"]]},
+        {"after_send": 3, "events": [[0, "stdout", "bestmove e2e4"]]},
+        {"after_send": 4, "events": [[0, "eof", null], [0, "exit", 0]]}
+      ],
+      "expected": {"verdict": "run-reject", "reason": "The first nonmatch differs from the required readyok reply."}
+    },
+    {
+      "name": "broken-spacing",
+      "transcript": ["> go infinite", "> isready", "<* info depth {depth} score {score} nodes {nodes}", "# Compare the first nonmatch.", "", "< readyok", "> stop", "< bestmove e2e4", "> quit", "! exit"],
+      "script": [
+        {"after_send": 2, "events": [[0, "stdout", "info depth 2 score cp 0 nodes 420"], [0, "stdout", "info depth  1 score cp 0 nodes 20"], [0, "stdout", "readyok"]]},
+        {"after_send": 3, "events": [[0, "stdout", "bestmove e2e4"]]},
+        {"after_send": 4, "events": [[0, "eof", null], [0, "exit", 0]]}
+      ],
+      "expected": {"verdict": "run-reject", "reason": "The first nonmatch differs from the required readyok reply."}
+    },
+    {
+      "name": "trailing-text",
+      "transcript": ["> go infinite", "> isready", "<* info depth {depth} score {score} nodes {nodes}", "# Compare the first nonmatch.", "", "< readyok", "> stop", "< bestmove e2e4", "> quit", "! exit"],
+      "script": [
+        {"after_send": 2, "events": [[0, "stdout", "info depth 2 score cp 0 nodes 420"], [0, "stdout", "info depth 1 score cp 0 nodes 20 extra"], [0, "stdout", "readyok"]]},
+        {"after_send": 3, "events": [[0, "stdout", "bestmove e2e4"]]},
+        {"after_send": 4, "events": [[0, "eof", null], [0, "exit", 0]]}
+      ],
+      "expected": {"verdict": "run-reject", "reason": "The first nonmatch differs from the required readyok reply."}
+    },
+    {
+      "name": "search-output-after-reply",
+      "transcript": ["> go infinite", "> isready", "<* info depth {depth} score {score} nodes {nodes}", "# Compare the first nonmatch.", "", "< readyok", "> stop", "< bestmove e2e4", "> quit", "! exit"],
+      "script": [
+        {"after_send": 2, "events": [[0, "stdout", "readyok"]]},
+        {"after_send": 3, "events": [[0, "stdout", "info depth 1 score cp 0 nodes 20"], [0, "stdout", "bestmove e2e4"]]},
+        {"after_send": 4, "events": [[0, "eof", null], [0, "exit", 0]]}
+      ],
+      "expected": {"verdict": "run-reject", "reason": "The repetition ended at readyok. The info line differs from bestmove."}
+    },
+    {
+      "name": "literal-depth-match",
+      "transcript": ["> go infinite", "> isready", "<* info depth 4 score {score} nodes {nodes}", "# Compare the first nonmatch.", "", "< readyok", "> stop", "< bestmove e2e4", "> quit", "! exit"],
+      "script": [
+        {"after_send": 2, "events": [[0, "stdout", "info depth 4 score cp 0 nodes 1200"], [0, "stdout", "readyok"]]},
+        {"after_send": 3, "events": [[0, "stdout", "bestmove e2e4"]]},
+        {"after_send": 4, "events": [[0, "eof", null], [0, "exit", 0]]}
+      ],
+      "expected": {"verdict": "accept", "reason": "Depth 4 matches the literal."}
+    },
+    {
+      "name": "literal-depth-mismatch",
+      "transcript": ["> go infinite", "> isready", "<* info depth 4 score {score} nodes {nodes}", "# Compare the first nonmatch.", "", "< readyok", "> stop", "< bestmove e2e4", "> quit", "! exit"],
+      "script": [
+        {"after_send": 2, "events": [[0, "stdout", "info depth 3 score cp 0 nodes 900"], [0, "stdout", "readyok"]]},
+        {"after_send": 3, "events": [[0, "stdout", "bestmove e2e4"]]},
+        {"after_send": 4, "events": [[0, "eof", null], [0, "exit", 0]]}
+      ],
+      "expected": {"verdict": "run-reject", "reason": "Depth 3 differs from the literal and reaches the readyok comparison."}
+    },
+    {
+      "name": "literal-mate-score",
+      "transcript": ["> go infinite", "> isready", "<* info depth {depth} score mate -1 nodes {nodes}", "# Compare the first nonmatch.", "", "< readyok", "> stop", "< bestmove e2e4", "> quit", "! exit"],
+      "script": [
+        {"after_send": 2, "events": [[0, "stdout", "info depth 1 score mate -1 nodes 20"], [0, "stdout", "readyok"]]},
+        {"after_send": 3, "events": [[0, "stdout", "bestmove e2e4"]]},
+        {"after_send": 4, "events": [[0, "eof", null], [0, "exit", 0]]}
+      ],
+      "expected": {"verdict": "accept", "reason": "The negative mate score matches the literal."}
+    },
+    {
+      "name": "full-spelling",
+      "transcript": ["> go infinite", "> isready", "<* info depth {depth} score {score} time {time} nodes {nodes} nps {nps} pv {pv}", "# Compare the first nonmatch.", "", "< readyok", "> stop", "< bestmove e2e4", "> quit", "! exit"],
+      "script": [
+        {"after_send": 2, "events": [[0, "stdout", "info depth 1 score cp 0 time 0 nodes 20 nps 0 pv e2e4"], [0, "stdout", "info depth 5 score cp -10 time 20 nodes 1200 nps 60000 pv e2e4 e7e5 g1f3 b8c6 f1b5"], [0, "stdout", "readyok"]]},
+        {"after_send": 3, "events": [[0, "stdout", "bestmove e2e4"]]},
+        {"after_send": 4, "events": [[0, "eof", null], [0, "exit", 0]]}
+      ],
+      "expected": {"verdict": "accept", "reason": "Both principal variations fit their matched depths."}
+    },
+    {
+      "name": "full-spelling-literals",
+      "transcript": ["> go infinite", "> isready", "<* info depth {depth} score {score} time 1 nodes {nodes} nps 420000 pv e2e4 e7e5", "# Compare the first nonmatch.", "", "< readyok", "> stop", "< bestmove e2e4", "> quit", "! exit"],
+      "script": [
+        {"after_send": 2, "events": [[0, "stdout", "info depth 2 score cp 0 time 1 nodes 420 nps 420000 pv e2e4 e7e5"], [0, "stdout", "readyok"]]},
+        {"after_send": 3, "events": [[0, "stdout", "bestmove e2e4"]]},
+        {"after_send": 4, "events": [[0, "eof", null], [0, "exit", 0]]}
+      ],
+      "expected": {"verdict": "accept", "reason": "The time, rate, and principal variation match their literals."}
+    },
+    {
+      "name": "principal-variation-too-long",
+      "transcript": ["> go infinite", "> isready", "<* info depth {depth} score {score} time {time} nodes {nodes} nps {nps} pv {pv}", "# Compare the first nonmatch.", "", "< readyok", "> stop", "< bestmove e2e4", "> quit", "! exit"],
+      "script": [
+        {"after_send": 2, "events": [[0, "stdout", "info depth 1 score cp 0 time 0 nodes 20 nps 0 pv e2e4 e7e5"], [0, "stdout", "readyok"]]},
+        {"after_send": 3, "events": [[0, "stdout", "bestmove e2e4"]]},
+        {"after_send": 4, "events": [[0, "eof", null], [0, "exit", 0]]}
+      ],
+      "expected": {"verdict": "run-reject", "reason": "The two moves exceed the matched depth of one."}
+    },
+    {
+      "name": "spelling-mismatch",
+      "transcript": ["> go infinite", "> isready", "<* info depth {depth} score {score} time {time} nodes {nodes} nps {nps} pv {pv}", "# Compare the first nonmatch.", "", "< readyok", "> stop", "< bestmove e2e4", "> quit", "! exit"],
+      "script": [
+        {"after_send": 2, "events": [[0, "stdout", "info depth 1 score cp 0 nodes 20"], [0, "stdout", "readyok"]]},
+        {"after_send": 3, "events": [[0, "stdout", "bestmove e2e4"]]},
+        {"after_send": 4, "events": [[0, "eof", null], [0, "exit", 0]]}
+      ],
+      "expected": {"verdict": "run-reject", "reason": "The full spelling requires time, nps, and pv."}
+    },
+    {
+      "name": "delimiter-at-4900ms",
+      "transcript": ["> go infinite", "> isready", "<* info depth {depth} score {score} nodes {nodes}", "# Compare the first nonmatch.", "", "< readyok", "> stop", "< bestmove e2e4", "> quit", "! exit"],
+      "script": [
+        {"after_send": 2, "events": [[0, "stdout", "info depth 1 score cp 0 nodes 20"], [1600, "stdout", "info depth 2 score cp 0 nodes 420"], [3200, "stdout", "info depth 3 score cp 0 nodes 900"], [4800, "stdout", "info depth 4 score cp 0 nodes 1200"], [4900, "stdout", "readyok"]], "clock": "observation"},
+        {"after_send": 3, "events": [[0, "stdout", "bestmove e2e4"]]},
+        {"after_send": 4, "events": [[0, "eof", null], [0, "exit", 0]]}
+      ],
+      "expected": {"verdict": "accept", "reason": "The required reply arrives inside the read bound."}
+    },
+    {
+      "name": "delimiter-at-5100ms",
+      "transcript": ["> go infinite", "> isready", "<* info depth {depth} score {score} nodes {nodes}", "# Compare the first nonmatch.", "", "< readyok", "> stop", "< bestmove e2e4", "> quit", "! exit"],
+      "script": [
+        {"after_send": 2, "events": [[0, "stdout", "info depth 1 score cp 0 nodes 20"], [1600, "stdout", "info depth 2 score cp 0 nodes 420"], [3200, "stdout", "info depth 3 score cp 0 nodes 900"], [4800, "stdout", "info depth 4 score cp 0 nodes 1200"], [5100, "stdout", "readyok"]], "clock": "observation"},
+        {"after_send": 3, "events": [[0, "stdout", "bestmove e2e4"]]},
+        {"after_send": 4, "events": [[0, "eof", null], [0, "exit", 0]]}
+      ],
+      "expected": {"verdict": "run-reject", "reason": "The read bound expires before the required reply."}
+    },
+    {
+      "name": "flood-without-delimiter",
+      "transcript": ["> go infinite", "> isready", "<* info depth {depth} score {score} nodes {nodes}", "# Compare the first nonmatch.", "", "< readyok", "> stop", "< bestmove e2e4", "> quit", "! exit"],
+      "script": [
+        {"after_send": 2, "events": [
+          [50, "stdout", "info depth 1 score cp 0 nodes 20"],
+          [150, "stdout", "info depth 1 score cp 0 nodes 20"],
+          [250, "stdout", "info depth 1 score cp 0 nodes 20"],
+          [350, "stdout", "info depth 1 score cp 0 nodes 20"],
+          [450, "stdout", "info depth 1 score cp 0 nodes 20"],
+          [550, "stdout", "info depth 1 score cp 0 nodes 20"],
+          [650, "stdout", "info depth 1 score cp 0 nodes 20"],
+          [750, "stdout", "info depth 1 score cp 0 nodes 20"],
+          [850, "stdout", "info depth 1 score cp 0 nodes 20"],
+          [950, "stdout", "info depth 1 score cp 0 nodes 20"],
+          [1050, "stdout", "info depth 1 score cp 0 nodes 20"],
+          [1150, "stdout", "info depth 1 score cp 0 nodes 20"],
+          [1250, "stdout", "info depth 1 score cp 0 nodes 20"],
+          [1350, "stdout", "info depth 1 score cp 0 nodes 20"],
+          [1450, "stdout", "info depth 1 score cp 0 nodes 20"],
+          [1550, "stdout", "info depth 1 score cp 0 nodes 20"],
+          [1650, "stdout", "info depth 1 score cp 0 nodes 20"],
+          [1750, "stdout", "info depth 1 score cp 0 nodes 20"],
+          [1850, "stdout", "info depth 1 score cp 0 nodes 20"],
+          [1950, "stdout", "info depth 1 score cp 0 nodes 20"],
+          [2050, "stdout", "info depth 1 score cp 0 nodes 20"],
+          [2150, "stdout", "info depth 1 score cp 0 nodes 20"],
+          [2250, "stdout", "info depth 1 score cp 0 nodes 20"],
+          [2350, "stdout", "info depth 1 score cp 0 nodes 20"],
+          [2450, "stdout", "info depth 1 score cp 0 nodes 20"],
+          [2550, "stdout", "info depth 1 score cp 0 nodes 20"],
+          [2650, "stdout", "info depth 1 score cp 0 nodes 20"],
+          [2750, "stdout", "info depth 1 score cp 0 nodes 20"],
+          [2850, "stdout", "info depth 1 score cp 0 nodes 20"],
+          [2950, "stdout", "info depth 1 score cp 0 nodes 20"],
+          [3050, "stdout", "info depth 1 score cp 0 nodes 20"],
+          [3150, "stdout", "info depth 1 score cp 0 nodes 20"],
+          [3250, "stdout", "info depth 1 score cp 0 nodes 20"],
+          [3350, "stdout", "info depth 1 score cp 0 nodes 20"],
+          [3450, "stdout", "info depth 1 score cp 0 nodes 20"],
+          [3550, "stdout", "info depth 1 score cp 0 nodes 20"],
+          [3650, "stdout", "info depth 1 score cp 0 nodes 20"],
+          [3750, "stdout", "info depth 1 score cp 0 nodes 20"],
+          [3850, "stdout", "info depth 1 score cp 0 nodes 20"],
+          [3950, "stdout", "info depth 1 score cp 0 nodes 20"],
+          [4050, "stdout", "info depth 1 score cp 0 nodes 20"],
+          [4150, "stdout", "info depth 1 score cp 0 nodes 20"],
+          [4250, "stdout", "info depth 1 score cp 0 nodes 20"],
+          [4350, "stdout", "info depth 1 score cp 0 nodes 20"],
+          [4450, "stdout", "info depth 1 score cp 0 nodes 20"],
+          [4550, "stdout", "info depth 1 score cp 0 nodes 20"],
+          [4650, "stdout", "info depth 1 score cp 0 nodes 20"],
+          [4750, "stdout", "info depth 1 score cp 0 nodes 20"],
+          [4850, "stdout", "info depth 1 score cp 0 nodes 20"],
+          [4950, "stdout", "info depth 1 score cp 0 nodes 20"],
+          [5050, "stdout", "info depth 1 score cp 0 nodes 20"],
+          [5150, "stdout", "info depth 1 score cp 0 nodes 20"],
+          [5250, "stdout", "info depth 1 score cp 0 nodes 20"],
+          [5350, "stdout", "info depth 1 score cp 0 nodes 20"],
+          [5450, "stdout", "info depth 1 score cp 0 nodes 20"],
+          [5550, "stdout", "info depth 1 score cp 0 nodes 20"],
+          [5650, "stdout", "info depth 1 score cp 0 nodes 20"],
+          [5750, "stdout", "info depth 1 score cp 0 nodes 20"],
+          [5850, "stdout", "info depth 1 score cp 0 nodes 20"],
+          [5950, "stdout", "info depth 1 score cp 0 nodes 20"],
+          [6050, "stdout", "info depth 1 score cp 0 nodes 20"],
+          [6150, "eof", null],
+          [6150, "exit", 0]
+        ], "clock": "observation"},
+        {"after_send": 3, "events": [[0, "stdout", "bestmove e2e4"]]},
+        {"after_send": 4, "events": [[0, "eof", null], [0, "exit", 0]]}
+      ],
+      "expected": {"verdict": "run-reject", "reason": "The read bound expires despite a matching line every 100 ms."}
+    },
+    {
+      "name": "mandatory-depth-before-repetition",
+      "transcript": ["> go infinite", "> isready", "< info depth 1 score cp 0 nodes 20", "<* info depth {depth} score {score} nodes {nodes}", "< readyok", "> stop", "< bestmove e2e4", "> quit", "! exit"],
+      "script": [
+        {"after_send": 2, "events": [[0, "stdout", "info depth 1 score cp 0 nodes 20"], [0, "stdout", "info depth 2 score cp 0 nodes 420"], [0, "stdout", "info depth 3 score cp 0 nodes 900"], [0, "stdout", "info depth 4 score cp 0 nodes 1200"], [0, "stdout", "readyok"]]},
+        {"after_send": 3, "events": [[0, "stdout", "bestmove e2e4"]]},
+        {"after_send": 4, "events": [[0, "eof", null], [0, "exit", 0]]}
+      ],
+      "expected": {"verdict": "accept", "reason": "Depth 1 is required, depths 2 through 4 match the repetition, and readyok follows."}
+    },
+    {
+      "name": "greedy-depth-delimiter",
+      "transcript": ["> go infinite", "> isready", "<* info depth {depth} score {score} nodes {nodes}", "< info depth 4 score {score} nodes {nodes}", "< readyok", "> stop", "< bestmove e2e4", "> quit", "! exit"],
+      "script": [
+        {"after_send": 2, "events": [[0, "stdout", "info depth 1 score cp 0 nodes 20"], [0, "stdout", "info depth 2 score cp 0 nodes 420"], [0, "stdout", "info depth 3 score cp 0 nodes 900"], [0, "stdout", "info depth 4 score cp 0 nodes 1200"], [0, "stdout", "readyok"]]}
+      ],
+      "expected": {"verdict": "run-reject", "reason": "The repetition consumes depth 4. Readyok fails the mandatory depth 4 comparison."}
+    },
+    {
+      "name": "exit-zero-matches",
+      "transcript": ["> go infinite", "> quit", "<* info depth {depth} score {score} nodes {nodes}", "! exit"],
+      "script": [
+        {"after_send": 2, "events": [[0, "eof", null], [0, "exit", 0]]}
+      ],
+      "expected": {"verdict": "accept", "reason": "EOF immediately delimits a clean exit."}
+    },
+    {
+      "name": "exit-with-matches",
+      "transcript": ["> go infinite", "> quit", "<* info depth {depth} score {score} nodes {nodes}", "! exit"],
+      "script": [
+        {"after_send": 2, "events": [[0, "stdout", "info depth 1 score cp 0 nodes 20"], [0, "stdout", "info depth 2 score cp 0 nodes 420"], [0, "eof", null], [0, "exit", 0]]}
+      ],
+      "expected": {"verdict": "accept", "reason": "Matching output precedes EOF and clean exit."}
+    },
+    {
+      "name": "dirty-exit",
+      "transcript": ["> go infinite", "> quit", "<* info depth {depth} score {score} nodes {nodes}", "! exit"],
+      "script": [
+        {"after_send": 2, "events": [[0, "stdout", "info depth 1 score cp 0 nodes 20"], [0, "stdout", "info depth 2 score cp 0 nodes 420"], [0, "eof", null], [0, "exit", 1]]}
+      ],
+      "expected": {"verdict": "run-reject", "reason": "The process exits with status 1."}
+    },
+    {
+      "name": "unexpected-output-before-exit",
+      "transcript": ["> go infinite", "> quit", "<* info depth {depth} score {score} nodes {nodes}", "! exit"],
+      "script": [
+        {"after_send": 2, "events": [[0, "stdout", "info depth 1 score cp 0 nodes 20"], [0, "stdout", "info depth 2 score cp 0 nodes 420"], [0, "stdout", "info string unexpected diagnostic"], [0, "eof", null], [0, "exit", 0]]}
+      ],
+      "expected": {"verdict": "run-reject", "reason": "The first nonmatch before exit must be stdout EOF."}
+    },
+    {
+      "name": "separate-exit-status-bound",
+      "transcript": ["> go infinite", "> quit", "<* info depth {depth} score {score} nodes {nodes}", "! exit"],
+      "script": [
+        {"after_send": 2, "events": [[0, "stdout", "info depth 1 score cp 0 nodes 20"], [4900, "eof", null], [5100, "exit", 0]], "clock": "observation"}
+      ],
+      "expected": {"verdict": "accept", "reason": "EOF arrives within the read bound and status 0 arrives within the separate exit-status bound."}
+    },
+    {
+      "name": "two-repetitions",
+      "transcript": ["> go infinite", "> isready", "<* info depth {depth} score {score} nodes {nodes}", "< readyok", "> stop", "< bestmove e2e4", "> go infinite", "> isready", "<* info depth {depth} score {score} nodes {nodes}", "< readyok", "> stop", "< bestmove e2e4", "> quit", "! exit"],
+      "script": [
+        {"after_send": 2, "events": [[2400, "stdout", "info depth 1 score cp 0 nodes 20"], [4900, "stdout", "readyok"]], "clock": "observation"},
+        {"after_send": 3, "events": [[0, "stdout", "bestmove e2e4"]]},
+        {"after_send": 5, "events": [[2400, "stdout", "info depth 2 score cp 0 nodes 420"], [4900, "stdout", "readyok"]], "clock": "observation"},
+        {"after_send": 6, "events": [[0, "stdout", "bestmove e2e4"]]},
+        {"after_send": 7, "events": [[0, "eof", null], [0, "exit", 0]]}
+      ],
+      "expected": {"verdict": "accept", "reason": "Each repetition consumes its own output and starts its own five-second read bound."}
+    },
+    {
+      "name": "unknown-allowance",
+      "transcript": ["> go infinite", "> isready", "<* info depth {depth} score {score} nodes {count}", "< readyok", "> stop", "< bestmove e2e4", "> quit", "! exit"],
+      "script": [
+        {"after_send": 2, "events": [[0, "stdout", "readyok"]]},
+        {"after_send": 3, "events": [[0, "stdout", "bestmove e2e4"]]},
+        {"after_send": 4, "events": [[0, "eof", null], [0, "exit", 0]]}
+      ],
+      "expected": {"verdict": "load-reject", "reason": "Unknown allowance."}
+    },
+    {
+      "name": "incomplete-spelling",
+      "transcript": ["> go infinite", "> isready", "<* info depth {depth} score {score}", "< readyok", "> stop", "< bestmove e2e4", "> quit", "! exit"],
+      "script": [
+        {"after_send": 2, "events": [[0, "stdout", "readyok"]]},
+        {"after_send": 3, "events": [[0, "stdout", "bestmove e2e4"]]},
+        {"after_send": 4, "events": [[0, "eof", null], [0, "exit", 0]]}
+      ],
+      "expected": {"verdict": "load-reject", "reason": "The nodes slot is missing."}
+    },
+    {
+      "name": "misplaced-allowance",
+      "transcript": ["> go infinite", "> isready", "<* info depth {depth} score {score} nodes {depth}", "< readyok", "> stop", "< bestmove e2e4", "> quit", "! exit"],
+      "script": [
+        {"after_send": 2, "events": [[0, "stdout", "readyok"]]},
+        {"after_send": 3, "events": [[0, "stdout", "bestmove e2e4"]]},
+        {"after_send": 4, "events": [[0, "eof", null], [0, "exit", 0]]}
+      ],
+      "expected": {"verdict": "load-reject", "reason": "Depth allowance is outside the depth slot."}
+    },
+    {
+      "name": "non-search-pattern",
+      "transcript": ["> go infinite", "> isready", "<* info string {message}", "< readyok", "> stop", "< bestmove e2e4", "> quit", "! exit"],
+      "script": [
+        {"after_send": 2, "events": [[0, "stdout", "readyok"]]},
+        {"after_send": 3, "events": [[0, "stdout", "bestmove e2e4"]]},
+        {"after_send": 4, "events": [[0, "eof", null], [0, "exit", 0]]}
+      ],
+      "expected": {"verdict": "load-reject", "reason": "Neither searched spelling starts with info string."}
+    },
+    {
+      "name": "terminal-depth-zero",
+      "transcript": ["> go infinite", "> isready", "<* info depth 0 score cp 0", "< readyok", "> stop", "< bestmove e2e4", "> quit", "! exit"],
+      "script": [
+        {"after_send": 2, "events": [[0, "stdout", "readyok"]]},
+        {"after_send": 3, "events": [[0, "stdout", "bestmove e2e4"]]},
+        {"after_send": 4, "events": [[0, "eof", null], [0, "exit", 0]]}
+      ],
+      "expected": {"verdict": "load-reject", "reason": "The terminal report has depth zero and lacks a nodes slot."}
+    },
+    {
+      "name": "malformed-score-literal",
+      "transcript": ["> go infinite", "> isready", "<* info depth 1 score banana nodes {nodes}", "< readyok", "> stop", "< bestmove e2e4", "> quit", "! exit"],
+      "script": [
+        {"after_send": 2, "events": [[0, "stdout", "readyok"]]},
+        {"after_send": 3, "events": [[0, "stdout", "bestmove e2e4"]]},
+        {"after_send": 4, "events": [[0, "eof", null], [0, "exit", 0]]}
+      ],
+      "expected": {"verdict": "load-reject", "reason": "The literal score needs a cp or mate form."}
+    },
+    {
+      "name": "literal-depth-zero",
+      "transcript": ["> go infinite", "> isready", "<* info depth 0 score cp 0 nodes 0", "< readyok", "> stop", "< bestmove e2e4", "> quit", "! exit"],
+      "script": [
+        {"after_send": 2, "events": [[0, "stdout", "readyok"]]},
+        {"after_send": 3, "events": [[0, "stdout", "bestmove e2e4"]]},
+        {"after_send": 4, "events": [[0, "eof", null], [0, "exit", 0]]}
+      ],
+      "expected": {"verdict": "load-reject", "reason": "The depth slot requires a positive decimal."}
+    },
+    {
+      "name": "literal-variation-too-long",
+      "transcript": ["> go infinite", "> isready", "<* info depth 1 score cp 0 time 0 nodes 20 nps 0 pv e2e4 e7e5", "< readyok", "> stop", "< bestmove e2e4", "> quit", "! exit"],
+      "script": [
+        {"after_send": 2, "events": [[0, "stdout", "readyok"]]},
+        {"after_send": 3, "events": [[0, "stdout", "bestmove e2e4"]]},
+        {"after_send": 4, "events": [[0, "eof", null], [0, "exit", 0]]}
+      ],
+      "expected": {"verdict": "load-reject", "reason": "The literal principal variation is longer than the literal depth."}
+    },
+    {
+      "name": "followed-by-send",
+      "transcript": ["> go infinite", "> isready", "<* info depth {depth} score {score} nodes {nodes}", "> quit", "! exit"],
+      "script": [],
+      "expected": {"verdict": "load-reject", "reason": "A send follows the repetition."}
+    },
+    {
+      "name": "followed-by-cr-send",
+      "transcript": ["> go infinite", "> isready", "<* info depth {depth} score {score} nodes {nodes}", ">CR quit", "! exit"],
+      "script": [],
+      "expected": {"verdict": "load-reject", "reason": "A CR send follows the repetition."}
+    },
+    {
+      "name": "followed-by-eof",
+      "transcript": ["> go infinite", "> isready", "<* info depth {depth} score {score} nodes {nodes}", "! eof", "! exit"],
+      "script": [],
+      "expected": {"verdict": "load-reject", "reason": "Closing stdin is not a delimiter."}
+    },
+    {
+      "name": "followed-by-transcript-end",
+      "transcript": ["> go infinite", "> isready", "<* info depth {depth} score {score} nodes {nodes}"],
+      "script": [],
+      "expected": {"verdict": "load-reject", "reason": "Transcript ends without a delimiter."}
+    },
+    {
+      "name": "followed-by-repetition",
+      "transcript": ["> go infinite", "> isready", "<* info depth {depth} score {score} nodes {nodes}", "<* info depth {depth} score {score} nodes {nodes}", "< readyok", "> stop", "< bestmove e2e4", "> quit", "! exit"],
+      "script": [],
+      "expected": {"verdict": "load-reject", "reason": "Another repetition follows the repetition."}
+    }
+  ]
+}

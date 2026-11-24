@@ -26,6 +26,7 @@ decision that supplies its expectation.
 | `> text` | Send the text and flush standard input. Append LF. Preserve whitespace after the prefix. |
 | `>CR text` | Send and flush as above. Append CR. |
 | `< text` | Read the next standard-output line and compare its text exactly, excluding the line ending. |
+| `<* text` | Consume zero or more consecutive matching searched `info` lines before the next reply or clean exit. See [Repeated searched info](#repeated-searched-info). |
 | `! eof` | Close standard input. |
 | `! exit` | Require clean process exit and no further standard output. If input is still open, keep it open until exit. |
 
@@ -108,6 +109,77 @@ contains two squares and an optional lowercase promotion suffix. The move
 pattern excludes `0000`. Digits in every allowance are ASCII. Fisher-8hc.2
 checks replay and scoring under D5. The fresh-process comparison still
 applies to the prospective `equal-scores.uci` session.
+
+### Repeated searched info
+
+Source: fisher-r6y D15 and fisher-5sg decision 1, approved by the owner on
+2026-11-24. See the [staged runner examples](uci-runner/repeated-searched-info.md).
+
+After the literal prefix `<* `, use one of these two full spellings. Both
+remain valid. The spelling in the record selects the grammar for every
+match, independently of the engine revision.
+
+```text
+info depth D score S nodes N
+info depth D score S time T nodes N nps R pv P
+```
+
+Match the entire line, excluding its ending, with single ASCII spaces.
+Each slot accepts its corresponding allowance or a literal of the same
+form. A literal requires an exact text match. Transcript authors supply
+no regular expressions.
+
+| Slot | Allowance | Form of literal and text matched by the allowance |
+|---|---|---|
+| D | `{depth}` | Positive ASCII decimal, `[1-9][0-9]*`. |
+| S | `{score}` | `cp 0`, `cp` followed by a signed decimal, or `mate` followed by a signed decimal. Here a signed decimal is `-?[1-9][0-9]*`. |
+| N | `{nodes}` | Nonnegative ASCII decimal, `0\|[1-9][0-9]*`. |
+| T | `{time}` | Same decimal form as N. |
+| R | `{nps}` | Same decimal form as N. |
+| P | `{pv}` | One or more UCI moves separated by single spaces, each spelled `[a-h][1-8][a-h][1-8][qrbn]?`. |
+
+Proposed for owner approval: P contains at most D moves, where D is the
+matched depth. With literal D and P, check this bound at load time. With
+`{depth}`, check the bound against each output line. This agrees with the
+four-ply bound at D = 4. This record checks the spelling of UCI moves.
+
+Reject unknown or misplaced allowances and malformed patterns at load
+time, including when stdout would supply zero matches. For example,
+`<* info depth {depth} score mate -1 nodes {nodes}` is valid.
+`<* info depth 0 score cp 0` is invalid because it reports a terminal
+position at depth zero, outside either positive-depth searched spelling.
+`<* info depth 1 score banana nodes {nodes}` is invalid because the score
+literal has neither score form.
+
+The next record must be an ordinary `< ` reply or `! exit`, ignoring
+comments and blank lines. A send (`> ` or `>CR `), `! eof` (even if
+followed by `! exit`), end of transcript, or another `<* ` at that
+position is a load-time error. The fixtures show each placement.
+
+Execute all preceding sends before starting the observation. Consume
+consecutive matches until the first nonmatch, then hand that same line
+to the ordinary reply comparison. EOF before a required reply fails.
+For `! exit`, the first nonmatch must be stdout EOF and the process must
+exit cleanly. The allowance ends at its delimiter. An early `bestmove`,
+malformed `info`, or unsolicited diagnostic still reaches the ordinary
+comparison or exit check.
+
+Matching is greedy. If the next ordinary reply can also match the
+repetition, the repetition consumes that line. To require a depth report
+that can match the repetition, put the mandatory reply before the
+repetition. For example, require depth 1, allow depths 2 through 4 to
+match a following `{depth}` repetition, then require `readyok`. A stream
+with depths 1 through 4 followed by `readyok` passes in that order.
+
+Start one absolute five-second read bound when each observation starts.
+It covers all matches and the delimiter read, including stdout EOF for
+`! exit`. Matching lines do not renew it. The process exit-status wait
+keeps its own separate five-second bound, which starts at stdout EOF,
+as it does for `! exit` today.
+
+To check silence after a command, synchronize with a search or held move
+and use a strict exit. A repetition before exit alone cannot establish
+when buffered output was written.
 
 ## Published perft
 

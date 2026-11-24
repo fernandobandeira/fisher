@@ -161,9 +161,11 @@ depth-dependent principal variation bound below apply.
 
 No fixture changes verdict. `full-spelling` and the two fixtures for an
 overlong principal variation report a positive time, so their verdicts
-still test the move bound. Four added fixtures reject one fault each: a
-time of 0, a missing `multipv`, a `multipv` other than 1, and the old
-order of nodes, time and nps.
+still test the move bound. Five added fixtures reject one fault each: a
+time of 0, a missing `multipv`, a `multipv` other than 1, the old order
+of nodes, time and nps, and an nps that is not 1000 times the nodes
+divided by the time, rounded down (`nps-mismatch`). fisher-8hc.6 chose
+their verdicts; fisher-8hc.7 implements the checks.
 
 Match the entire line, excluding its ending, with single ASCII spaces.
 Each slot accepts its corresponding allowance or a literal of the same

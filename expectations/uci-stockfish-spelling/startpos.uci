@@ -1,7 +1,7 @@
 # Four-ply info spelling from Stockfish sf_19 (edb0d9d), read 2026-11-24:
 # UCIEngine::on_update_full in src/uci.cpp and SearchManager::output_pv in src/search.cpp.
-# fisher-r6y D41 and fisher-8hc.6 stage this spelling, awaiting the owner's
-# approval at merge. D3-D6 supply the
+# fisher-r6y D41 sets this spelling; fisher-8hc.6 committed these sessions.
+# D3-D6 supply the
 # existing principal variation and allowances, with time at least one under D41.
 # The fisher-2aj.2 sources below supply the retained scores, node counts and response order.
 # Sources: April 2006 UCI specification https://backscattering.de/chess/uci/

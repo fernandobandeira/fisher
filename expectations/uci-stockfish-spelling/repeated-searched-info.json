@@ -220,6 +220,16 @@
       "expected": {"verdict": "run-reject", "reason": "The full spelling requires nodes, nps and time in Stockfish's order."}
     },
     {
+      "name": "nps-mismatch",
+      "transcript": ["> go infinite", "> isready", "<* info depth {depth} multipv 1 score {score} nodes {nodes} nps {nps} time {time} pv {pv}", "# Compare the first nonmatch.", "", "< readyok", "> stop", "< bestmove e2e4", "> quit", "! exit"],
+      "script": [
+        {"after_send": 2, "events": [[0, "stdout", "info depth 1 multipv 1 score cp 0 nodes 20 nps 20001 time 1 pv e2e4"], [0, "stdout", "readyok"]]},
+        {"after_send": 3, "events": [[0, "stdout", "bestmove e2e4"]]},
+        {"after_send": 4, "events": [[0, "eof", null], [0, "exit", 0]]}
+      ],
+      "expected": {"verdict": "run-reject", "reason": "The nps is not 1000 times the nodes divided by the time, rounded down."}
+    },
+    {
       "name": "delimiter-at-4900ms",
       "transcript": ["> go infinite", "> isready", "<* info depth {depth} score {score} nodes {nodes}", "# Compare the first nonmatch.", "", "< readyok", "> stop", "< bestmove e2e4", "> quit", "! exit"],
       "script": [

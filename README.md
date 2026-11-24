@@ -10,12 +10,12 @@ Fisher plays random legal moves over UCI. The [acceptance record](docs/uci-accep
 git config core.hooksPath .githooks                           # run the check before every commit
 npx skills@latest experimental_install -a claude-code codex   # restore the agent skills
 cargo install cargo-deny --version 0.22.0 --locked             # check dependency advisories and sources
-scripts/check                                                 # run the same checks as CI
+scripts/check                                                 # run the checks from the CI check job
 ```
 
 The skills are Matt Pocock's. They are not committed: `skills-lock.json` pins the commit, and the second command copies them into `.agents/skills/`. A new git worktree needs the same command.
 
-The crate boundary check uses Python 3.8 or newer. The pre-commit hook runs the full gate. It needs network access to refresh RustSec and Cargo registry data. If the refresh fails, restore connectivity and rerun `scripts/check`. Rust comes from [rustup](https://rustup.rs). The version is pinned in `rust-toolchain.toml`.
+The crate boundary check uses Python 3.8 or newer. The pre-commit hook runs the local gate. The pull-request jobs also report mutation and coverage results. It needs network access to refresh RustSec and Cargo registry data. If the refresh fails, restore connectivity and rerun `scripts/check`. Rust comes from [rustup](https://rustup.rs). The version is pinned in `rust-toolchain.toml`.
 
 ## Start work
 

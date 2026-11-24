@@ -23,6 +23,8 @@ Merge each slice into `main` after `scripts/check`, the pull-request mutation an
 
 ### Pull requests
 
+Agents merge only when the pull-request checks and the required review pass. GitHub currently has no branch protection or ruleset on `main` that requires these results. The `check`, `mutation`, and `coverage` jobs report on pull requests. Direct pushes run `check` alone, and the weekly schedule also runs full mutation testing.
+
 - **Squash-merge.** Each pull request becomes one commit on `main`. With the repository's settings the squash commit keeps the messages of the commits it replaces, so their `Guard-Change:` lines survive.
 - **Stack a slice that builds on one not merged yet.** Use GitHub's stacked pull requests through the `gh stack` extension (`gh extension install github/gh-stack`), not a base branch set by hand. `gh stack init` adopts existing branches, `gh stack link` joins pull requests that are already open, and `gh stack sync` rebases the layers above one that changed.
 - **Title each layer by its place and its ticket.** A layer's title starts with its position from the bottom of the stack, its size and its ticket ID, as in `[1/4] (fisher-5sg.1) Add a transcript record for any number of info lines`. When a layer is added or removed, renumber the others with `gh pr edit <number> --title`.

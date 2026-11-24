@@ -1,0 +1,10 @@
+# Written 2026-11-24 from the April 2006 UCI specification https://backscattering.de/chess/uci/
+# fisher-8ie rules 1, 3, 5 and 9, D11, D20, D25 and D41.
+# A finished depth may report before the search ends. No depth has to finish.
+# go-parameters.uci independently supplies the position and its sole legal move.
+> position fen 7k/8/5K1Q/8/8/8/8/8 b - - 0 1
+> go
+> quit
+<* info depth {depth} multipv 1 score {score} nodes {nodes} nps {nps} time {time} pv {pv}
+< bestmove {legal}
+! exit

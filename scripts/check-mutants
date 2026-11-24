@@ -3,6 +3,7 @@
 
 import argparse
 from collections import Counter, defaultdict
+from hashlib import sha256
 import json
 import re
 from pathlib import Path
@@ -32,7 +33,10 @@ def reviewed_entries(entries):
         identity = key(entry, entry["site"])
         if identity in reviewed or not entry["proof"].strip() or not identity[-1]:
             raise ValueError(f"Give each equivalent mutant one distinct site and a proof: {identity}")
-        reviewed[identity] = entry["proof"]
+        digest = entry["function_sha256"]
+        if not re.fullmatch(r"[0-9a-f]{64}", digest):
+            raise ValueError(f"Record the SHA-256 of the reviewed function: {identity}")
+        reviewed[identity] = digest
     return reviewed
 
 
@@ -46,10 +50,24 @@ def mutation_site(diff):
     )
 
 
+def function_digest(source, span):
+    # Cargo-mutants reports one-based character positions and an exclusive end.
+    lines = source.split("\n")
+    start, end = span["start"], span["end"]
+    first, last = start["line"] - 1, end["line"] - 1
+    begin, limit = start["column"] - 1, end["column"] - 1
+    if first == last:
+        function = lines[first][begin:limit]
+    else:
+        function = "\n".join([lines[first][begin:], *lines[first + 1:last], lines[last][:limit]])
+    return sha256(function.encode("utf-8")).hexdigest()
+
+
 def reconcile(results, reviewed, full, log_directory="mutants.out/log"):
     counts = defaultdict(Counter)
     seen = Counter()
     listed_survivors = set()
+    changed_functions = set()
     problems = []
     for mutant, outcome, site in results:
         identity = key(mutant, site)
@@ -63,9 +81,16 @@ def reconcile(results, reviewed, full, log_directory="mutants.out/log"):
             )
         if outcome != "surviving":
             continue
-        if identity in reviewed:
+        if identity in reviewed and mutant["function_sha256"] == reviewed[identity]:
             counts[crate]["equivalent"] += 1
             listed_survivors.add(identity)
+        elif identity in reviewed:
+            changed_functions.add(identity)
+            problems.append(
+                f"{mutant['name']} survived after its enclosing function changed. "
+                f"Review its proof in {CONFIG} before updating the digest "
+                f"({mutant['function_sha256']}), or add a test that catches it."
+            )
         else:
             problems.append(
                 f"{mutant['name']} survived. Add a test that catches it, or propose a proof "
@@ -76,8 +101,10 @@ def reconcile(results, reviewed, full, log_directory="mutants.out/log"):
             problems.append(f"Ambiguous equivalent mutant {identity}. Give it a distinct site.")
     if full:
         for identity in reviewed.keys() - listed_survivors:
-            reason = "no longer survives" if identity in seen else "no longer exists"
-            problems.append(f"Reviewed mutant {identity} {reason}. Update {CONFIG}.")
+            if identity not in seen:
+                problems.append(f"Reviewed mutant {identity} no longer exists. Update {CONFIG}.")
+            elif identity not in changed_functions:
+                problems.append(f"Reviewed mutant {identity} no longer survives. Update {CONFIG}.")
     return counts, sorted(problems)
 
 
@@ -97,6 +124,10 @@ def read_results(output, status):
         mutant = item["scenario"]["Mutant"]
         function = mutant["function"]
         mutant["function"] = function["function_name"] if function else None
+        mutant["function_sha256"] = (
+            function_digest((ROOT / mutant["file"]).read_bytes().decode("utf-8"), function["span"])
+            if function else None
+        )
         site = mutation_site((output / item["diff_path"]).read_text())
         yield mutant, OUTCOMES[item["summary"]], site
 
@@ -193,12 +224,24 @@ def self_test():
         (stale / "mutants.json").write_text("invalid stale report")
         assert list(read_results(fresh, 0)) == []
 
+    source = "fn score(score: i32) -> bool {\n    score != 0 && score > 0\n}"
+    span = {"start": {"line": 1, "column": 1}, "end": {"line": 3, "column": 2}}
+    digest = function_digest(source, span)
+    assert digest == sha256(source.encode()).hexdigest()
+    shifted_span = {"start": {"line": 2, "column": 1}, "end": {"line": 4, "column": 2}}
+    assert function_digest("// a new comment\n" + source, shifted_span) == digest
+    assert function_digest("é fn f() {}", {
+        "start": {"line": 1, "column": 3}, "end": {"line": 1, "column": 12},
+    }) == sha256(b"fn f() {}").hexdigest()
+    changed_digest = function_digest(source.replace("score != 0", "score == 0"), span)
+
     mutant = {
         "file": "crates/search/src/lib.rs",
         "function": "score",
         "replacement": ">=",
         "package": "search",
         "name": "replace > with >=",
+        "function_sha256": digest,
     }
     diff = "--- before\n+++ after\n@@ -10,2 +10,2 @@\n-    score > 0\n+    score >= 0\n"
     site = mutation_site(diff)
@@ -208,6 +251,9 @@ def self_test():
 
     counts, problems = reconcile([(mutant, "surviving", shifted)], reviewed, full=True)
     assert not problems and counts["search"]["equivalent"] == 1
+    stale = {**mutant, "function_sha256": changed_digest}
+    for full in (False, True):
+        assert "function changed" in reconcile([(stale, "surviving", site)], reviewed, full)[1][0]
     assert "survived" in reconcile([(mutant, "surviving", site)], {}, full=False)[1][0]
     other = ("-nodes > 0", "+nodes >= 0")
     assert "survived" in reconcile([(mutant, "surviving", other)], reviewed, full=False)[1][0]

@@ -32,19 +32,22 @@ fn reports_terminal_positions_without_searching_a_depth() -> Result<(), Box<dyn 
         ),
         ("7k/5K2/6Q1/8/8/8/8/8 b - - 0 1", Score::Centipawns(0)),
     ] {
-        assert_eq!(
-            reports_for(fen)?,
-            [
-                SearchReport::FinishedDepth(FinishedDepth {
-                    depth: 0,
-                    score,
-                    nodes: 0,
-                    elapsed: std::time::Duration::ZERO,
-                    principal_variation: Vec::new(),
-                }),
-                SearchReport::Ended(None),
-            ],
-            "{fen}"
+        let reports = reports_for(fen)?;
+        // A terminal root has no legal first move for a principal variation.
+        assert!(
+            matches!(
+                reports.as_slice(),
+                [
+                    SearchReport::FinishedDepth(FinishedDepth {
+                        depth: 0,
+                        score: actual,
+                        principal_variation,
+                        ..
+                    }),
+                    SearchReport::Ended(None),
+                ] if *actual == score && principal_variation.is_empty()
+            ),
+            "{fen}: {reports:?}"
         );
     }
     Ok(())

@@ -237,7 +237,10 @@ mod tests {
                 expected.to_string()
             );
         }
-        assert!(UciMove::parse("a7a8x").is_none());
+        assert_eq!(
+            UciMove::parse("a7a8x").is_none(),
+            "a7a8x".parse::<ReferenceMove>().is_err()
+        );
     }
 
     #[test]

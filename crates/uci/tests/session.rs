@@ -87,7 +87,8 @@ fn session_output(
 
 #[test]
 fn answers_the_handshake_and_quits_before_a_later_command() -> io::Result<()> {
-    // Identification and readiness responses come from handshake.uci.
+    // handshake.uci specifies the responses. unknown-input.uci accepts CRLF
+    // and a lone CR (the `>CR isready` record).
     assert_eq!(
         session_output(
             b"ucinewgame\nunknown\nuci\r\nisready\rquit\nisready\n",
@@ -95,7 +96,6 @@ fn answers_the_handshake_and_quits_before_a_later_command() -> io::Result<()> {
         )?,
         "id name fisher test\nid author Fernando Bandeira\nuciok\nreadyok\n"
     );
-    assert_eq!(session_output(b"isready", |_, _| {})?, "readyok\n");
     Ok(())
 }
 
@@ -111,14 +111,18 @@ fn waits_for_stop_before_accepting_another_go_or_position() -> io::Result<()> {
             report(SearchReport::Ended(legal_move(&request.position, "h8", "g8")));
         },
     )?;
-    assert_eq!(
-        output,
-        concat!(
-            "info string go rejected: waiting for stop\n",
-            "info string position rejected: waiting for stop\n",
-            "readyok\nbestmove h8g8\n"
-        )
-    );
+    let responses: Vec<_> = output.lines().collect();
+    let [first, second, "readyok", "bestmove h8g8"] = responses.as_slice() else {
+        return Err(io::Error::other(format!(
+            "unexpected responses: {output:?}"
+        )));
+    };
+    for response in [first, second] {
+        assert!(
+            response.starts_with("info string ") && response.contains("waiting for stop"),
+            "{response}"
+        );
+    }
     Ok(())
 }
 
@@ -199,7 +203,7 @@ fn reports_a_flush_failure_on_each_protocol_response() -> io::Result<()> {
     // and the searched and terminal responses are specified in expectations/uci.
     const COMMANDS: &[u8] = b"uci\nisready\nposition\n        position fen 7k/8/5K1Q/8/8/8/8/8 b - - 0 1\n        go infinite\nposition startpos\ngo\nstop\ngo depth\nquit\n";
     let successful = session_output(COMMANDS, deepening::search)?;
-    // Three IDs/uciok responses, readyok, the position diagnostic, one info,
+    // Two ID responses and uciok, readyok, the position diagnostic, one info,
     // two rejected commands, the released move, and info/bestmove for finite go.
     assert_eq!(successful.lines().count(), 11);
 

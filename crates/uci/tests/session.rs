@@ -227,7 +227,7 @@ fn reports_a_flush_failure_on_each_protocol_response() -> io::Result<()> {
 }
 
 #[test]
-fn returns_the_writer_error_when_reporting_a_terminal_position() {
+fn returns_the_writer_error() {
     struct ClosedOutput;
     impl io::Write for ClosedOutput {
         fn write(&mut self, _: &[u8]) -> io::Result<usize> {

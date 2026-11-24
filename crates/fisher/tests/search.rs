@@ -1,8 +1,8 @@
 #[path = "support/mate_in_two.rs"]
 mod mate_in_two;
-#[path = "../../fisher/tests/support/principal_variation.rs"]
+#[path = "support/principal_variation.rs"]
 mod principal_variation;
-#[path = "../../fisher/tests/support/reference_minimax.rs"]
+#[path = "support/reference_minimax.rs"]
 mod reference;
 mod support;
 

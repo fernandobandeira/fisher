@@ -7,5 +7,10 @@ fn main() -> io::Result<()> {
         return Ok(());
     }
 
-    uci::run_session(io::stdin(), output, deepening::search)
+    uci::run_session(
+        io::stdin(),
+        output,
+        env!("CARGO_PKG_VERSION"),
+        deepening::search,
+    )
 }

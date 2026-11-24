@@ -18,6 +18,10 @@ ALLOWED = {
 }
 
 
+# The binary retains its pre-existing minimax reference tests.
+TEST_ONLY = {"fisher": {"rules", "search"}}
+
+
 def violations(metadata):
     workspace_ids = set(metadata["workspace_members"])
     members = [
@@ -64,9 +68,12 @@ def violations(metadata):
             if path is None:
                 continue
             target = members_by_path.get(Path(path).resolve())
-            if target is None or target in ALLOWED[name]:
+            permitted = ALLOWED[name]
+            if kind == "dev":
+                permitted = permitted | TEST_ONLY.get(name, set())
+            if target is None or target in permitted:
                 continue
-            allowed = ", ".join(sorted(ALLOWED[name])) or "none"
+            allowed = ", ".join(sorted(permitted)) or "none"
             problems.append(
                 f"{name} -> {target} ({declaration}) is forbidden. "
                 f"Allowed workspace dependencies for {name}: {allowed}. "
@@ -97,7 +104,9 @@ def self_test():
         "workspace_root": "/workspace",
         "workspace_members": ["fisher", "uci", "rules", "xtask", "search", "bench", "deepening"],
         "packages": [
-            package("fisher", [bench, deepening, uci]),
+            package("fisher", [
+                bench, deepening, uci, dict(rules, kind="dev"), dict(search, kind="dev")
+            ]),
             package("uci", [deepening, dict(rules, kind="dev", rename="chess", target="cfg(unix)")]),
             package("rules", [dict(uci, path="/other/crates/uci"), shakmaty]),
             package("xtask", []),

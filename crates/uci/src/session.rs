@@ -1,12 +1,12 @@
 use std::{
     io::{self, BufRead, BufReader, Read, Write},
-    sync::mpsc,
+    sync::{Arc, atomic::AtomicBool, mpsc},
     thread,
     time::{Duration, Instant},
 };
 
-use deepening::{Score, SearchResult};
-use rules::Position;
+use deepening::{FinishedDepth, Limits, Score, SearchRequest};
+use rules::{Move, Position};
 
 use crate::{
     Response, SearchScore, UciMove,
@@ -16,7 +16,9 @@ use crate::{
 /// Runs a UCI session until quit, end of input, or an I/O error.
 ///
 /// The reader can block independently of the command handler. Search runs on
-/// the command thread and receives the position of each accepted go.
+/// the command thread and receives an owned request for each accepted go.
+/// The callback takes finished depths in order. Returning the chosen move ends
+/// the work, including when the search finishes without reporting a depth.
 ///
 /// # Errors
 ///
@@ -25,7 +27,8 @@ use crate::{
 pub fn run_session(
     input: impl Read + Send + 'static,
     mut output: impl Write,
-    search: impl FnMut(&Position) -> SearchResult,
+    version: &str,
+    search: impl FnMut(SearchRequest, &mut dyn FnMut(FinishedDepth)) -> Option<Move> + Send + 'static,
 ) -> io::Result<()> {
     let (sender, lines) = mpsc::channel();
     thread::Builder::new().spawn(move || {
@@ -34,15 +37,14 @@ pub fn run_session(
         }
     })?;
 
-    let clock_start = Instant::now();
-    answer_commands(lines, &mut output, search, || clock_start.elapsed())
+    answer_commands(lines, &mut output, version, search)
 }
 
 fn answer_commands(
     lines: impl IntoIterator<Item = io::Result<String>>,
     output: &mut impl Write,
-    mut search: impl FnMut(&Position) -> SearchResult,
-    now: impl Fn() -> Duration,
+    version: &str,
+    mut search: impl FnMut(SearchRequest, &mut dyn FnMut(FinishedDepth)) -> Option<Move>,
 ) -> io::Result<()> {
     let mut position = Position::starting();
     let mut held_move = None;
@@ -50,10 +52,7 @@ fn answer_commands(
     for line in lines {
         match parse_command(&line?) {
             Input::Handled(Command::Uci) => {
-                send(
-                    output,
-                    &Response::IdName(concat!("fisher ", env!("CARGO_PKG_VERSION"))),
-                )?;
+                send(output, &Response::IdName(&format!("fisher {version}")))?;
                 send(output, &Response::IdAuthor("Fernando Bandeira"))?;
                 send(output, &Response::UciOk)?;
             }
@@ -83,20 +82,29 @@ fn answer_commands(
                 }
             }
             Input::Handled(Command::Go(parameters)) => {
-                // TODO(fisher-7vo): Obey the supplied search limits.
+                let started = Instant::now();
+                // TODO(fisher-7vo): Obey searchmoves and mate.
                 // TODO(fisher-2ha): Wait for ponderhit when pondering.
-                let started = now();
-                let result = search(&position);
-                let elapsed = now().saturating_sub(started);
-                let time_ms = u64::try_from(elapsed.as_millis().max(1)).unwrap_or(u64::MAX);
-                let pv: Vec<_> = result
-                    .principal_variation
-                    .iter()
-                    .copied()
-                    .map(UciMove::from)
-                    .collect();
-                send(output, &search_info(&result, time_ms, &pv))?;
-                let chosen = result.chosen_move.map_or(UciMove::Null, UciMove::from);
+                // TODO(fisher-5sg.10): Pass the clocks to the search.
+                let request = SearchRequest {
+                    position,
+                    limits: Limits {
+                        depth: parameters.depth,
+                        nodes: parameters.nodes,
+                        movetime: parameters.movetime.map(Duration::from_millis),
+                        infinite: parameters.infinite,
+                    },
+                    stop: Arc::new(AtomicBool::new(false)),
+                    started,
+                };
+                let mut written = Ok(());
+                let chosen = search(request, &mut |depth| {
+                    if written.is_ok() {
+                        written = send_search_info(output, &depth);
+                    }
+                });
+                written?;
+                let chosen = chosen.map_or(UciMove::Null, UciMove::from);
                 if parameters.infinite {
                     held_move = Some(chosen);
                 } else {
@@ -117,7 +125,14 @@ fn answer_commands(
 
 /// Terminal positions report `info depth 0 score mate 0` for checkmate
 /// or `info depth 0 score cp 0` for stalemate.
-fn search_info<'a>(result: &SearchResult, time_ms: u64, pv: &'a [UciMove]) -> Response<'a> {
+fn send_search_info(output: &mut impl Write, result: &FinishedDepth) -> io::Result<()> {
+    let time_ms = u64::try_from(result.elapsed.as_millis().max(1)).unwrap_or(u64::MAX);
+    let pv: Vec<_> = result
+        .principal_variation
+        .iter()
+        .copied()
+        .map(UciMove::from)
+        .collect();
     let (depth, nodes) = if result.chosen_move.is_some() {
         (result.depth, Some(result.nodes))
     } else {
@@ -127,14 +142,17 @@ fn search_info<'a>(result: &SearchResult, time_ms: u64, pv: &'a [UciMove]) -> Re
         Score::Centipawns(value) => SearchScore::Centipawns(value),
         Score::Mate { plies, winning } => SearchScore::Mate { plies, winning },
     };
-    Response::SearchInfo {
-        depth,
-        score,
-        nodes,
-        time_ms: nodes.map(|_| time_ms),
-        nps: nodes.map(|nodes| nodes_per_second(nodes, time_ms)),
-        pv,
-    }
+    send(
+        output,
+        &Response::SearchInfo {
+            depth,
+            score,
+            nodes,
+            time_ms: nodes.map(|_| time_ms),
+            nps: nodes.map(|nodes| nodes_per_second(nodes, time_ms)),
+            pv: &pv,
+        },
+    )
 }
 
 fn nodes_per_second(nodes: u64, time_ms: u64) -> u64 {
@@ -224,34 +242,34 @@ mod tests {
     }
 
     #[test]
-    fn search_info_uses_elapsed_time_from_the_clock() -> io::Result<()> {
-        assert_search_info_time(7250, 3, 68_867_666)
+    fn search_info_uses_reported_elapsed_time() -> io::Result<()> {
+        assert_search_info_time(3250, 3, 68_867_666)
     }
 
     #[test]
     fn search_info_reports_one_millisecond_for_submillisecond_search() -> io::Result<()> {
-        assert_search_info_time(4250, 1, 206_603_000)
+        assert_search_info_time(250, 1, 206_603_000)
     }
 
-    fn assert_search_info_time(end_micros: u64, time: u64, nps: u64) -> io::Result<()> {
-        // The starting position visits 206603 nodes (sum of published perft counts).
-        let readings = std::cell::Cell::new([4000, end_micros].into_iter());
-        let now = || {
-            let mut remaining = readings.take();
-            let micros = remaining
-                .next()
-                .expect("one clock reading on each side of search");
-            readings.set(remaining);
-            Duration::from_micros(micros)
-        };
+    fn assert_search_info_time(micros: u64, time: u64, nps: u64) -> io::Result<()> {
         let mut output = Vec::new();
         answer_commands(
             ["go infinite", "stop"].map(|command| Ok(command.to_owned())),
             &mut output,
-            deepening::search,
-            now,
+            "test",
+            |request, report| {
+                let chosen_move = request.position.legal_moves().into_iter().next();
+                report(FinishedDepth {
+                    depth: 4,
+                    score: Score::Centipawns(0),
+                    nodes: 206_603,
+                    elapsed: Duration::from_micros(micros),
+                    principal_variation: chosen_move.into_iter().collect(),
+                    chosen_move,
+                });
+                chosen_move
+            },
         )?;
-        assert!(readings.take().next().is_none());
         let text = String::from_utf8(output).map_err(io::Error::other)?;
         assert!(
             text.starts_with(&format!(

@@ -778,8 +778,11 @@ fn command_responses_precede_bestmove() {
     }
 }
 
+// Shows the scripted input driving the public session entry. While the search
+// runs on the command thread it cannot detect an early acknowledgement; see the
+// recording contract in `support/search_history.rs`.
 #[test]
-fn scripted_input_enqueues_commands_before_ended() -> io::Result<()> {
+fn scripted_input_drives_the_session_entry() -> io::Result<()> {
     let (input, commands) = scripted_input();
     let Command(position) = POSITION_A else {
         unreachable!()

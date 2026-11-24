@@ -5,7 +5,13 @@
 //! returns successfully. Before stepping a scripted finished depth or Ended,
 //! wait until every earlier recorded command has reached the ordered command
 //! channel. Use `scripted_input` to wait for the reader to ask for the next
-//! line, after it has enqueued the one just sent.
+//! line, after it has enqueued the one just sent. That acknowledgement holds
+//! because the session's reader sends each complete line before it reads
+//! again; the scripted-input test cannot observe it while the search runs on
+//! the command thread, so fisher-2aj.5 must show it failing on a reader that
+//! acknowledges before sending. Record a `Report` event before passing that
+//! report to the session's callback, so its `info` line or `bestmove` cannot
+//! be recorded ahead of it.
 //! Commands recorded before Ended are handled before it, subject to the stop
 //! barrier. After finite Ended, commands may be handled on either side of
 //! bestmove in input order (fisher-8ie rules 6–8).

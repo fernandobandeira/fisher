@@ -1,11 +1,15 @@
 //! Session rules 1–10 (fisher-8ie, D24 and D25), read 2026-11-24.
 //! Source: April 2006 UCI, <https://backscattering.de/chess/uci/>.
-//! Record commands and reports in their shared input order and record
-//! replies at the writer, including each newline. Finish recording when
-//! the session returns successfully. Synchronize the inputs and replies
-//! when a history requires a particular order.
-//! Commands use the ordinary UCI spelling. Parser edge cases belong to
-//! transcripts. A report belongs to the one accepted search in progress.
+//! Record commands in input order, reports in report order, and responses
+//! at the writer, including each newline. Finish recording when the session
+//! returns successfully. A command's arrival need not be its handling time.
+//! A finite search can finish or handle more input after Ended while its
+//! bestmove is still outstanding (fisher-8ie rules 6–8).
+//! This checker reads fisher-2aj.5's "until that search has reported" and
+//! the `SearchReport` seam as requiring `Ended` before `bestmove`. Infinite work
+//! also needs stop or exit (rule 2 and D25).
+//! Commands use ordinary UCI spelling. A report belongs to the one
+//! accepted search in progress.
 
 use std::collections::VecDeque;
 
@@ -17,7 +21,7 @@ pub(super) enum Event<'a> {
     Command(&'a str),
     EndOfInput,
     Report(SearchReport),
-    Reply(&'a str),
+    Response(&'a str),
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -39,16 +43,18 @@ impl std::fmt::Display for Violation {
 
 type Fault = (u8, &'static str);
 
+#[derive(Clone)]
 struct Search {
     infinite: bool,
     stopped: bool,
+    readiness_requested: bool,
     ended: Option<String>,
     info: VecDeque<String>,
     last_move: Option<String>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum CommandReply {
+enum CommandResponse {
     Ready,
     PositionRejected,
     InvalidPosition,
@@ -58,67 +64,119 @@ enum CommandReply {
     UciOk,
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct Session<'a> {
     position: Chess,
     rejected_position: Option<Chess>,
     search: Option<Search>,
-    command_replies: VecDeque<CommandReply>,
-    deferred: VecDeque<Option<&'a str>>,
+    command_responses: VecDeque<CommandResponse>,
+    deferred: VecDeque<&'a str>,
     idle_stop: bool,
     exiting: bool,
+    last_bestmove: Option<String>,
 }
 
 pub(super) fn check(history: &[Event<'_>]) -> Result<(), Violation> {
-    let mut session = Session::default();
+    // Keep each possible handling order until a response rules it out.
+    // Once one command waits for bestmove, later commands wait behind it.
+    let mut sessions = vec![Session::default()];
     for (index, event) in history.iter().enumerate() {
-        session.observe(event).map_err(|(rule, detail)| Violation {
-            rule,
-            event: index + 1,
-            detail,
-        })?;
+        let mut next = Vec::new();
+        let mut failure = None;
+        for mut session in sessions {
+            if let Some(command) = input(event)
+                && session.can_wait_for_bestmove()
+            {
+                let mut waiting = session.clone();
+                waiting.deferred.push_back(command);
+                next.push(waiting);
+            }
+            match session.observe(event) {
+                Ok(()) => next.push(session),
+                Err(fault) => {
+                    failure = Some(fault);
+                }
+            }
+        }
+        if next.is_empty()
+            && let Some((rule, detail)) = failure
+        {
+            return Err(Violation {
+                rule,
+                event: index + 1,
+                detail,
+            });
+        }
+        sessions = next;
     }
-    session.finish().map_err(|(rule, detail)| Violation {
-        rule,
-        event: history.len() + 1,
-        detail,
-    })
+    let mut result = Ok(());
+    for session in sessions {
+        match session.finish() {
+            Ok(()) => return Ok(()),
+            Err((rule, detail)) => {
+                result = Err(Violation {
+                    rule,
+                    event: history.len() + 1,
+                    detail,
+                });
+            }
+        }
+    }
+    result
+}
+
+fn input<'a>(event: &Event<'a>) -> Option<&'a str> {
+    match event {
+        Event::Command(command) => Some(command),
+        Event::EndOfInput => Some("quit"),
+        Event::Report(_) | Event::Response(_) => None,
+    }
 }
 
 impl<'a> Session<'a> {
     fn observe(&mut self, event: &Event<'a>) -> Result<(), Fault> {
         match event {
-            Event::Command(command) => self.receive(Some(command)),
-            Event::EndOfInput => self.receive(None),
+            Event::Command(command) => self.receive(command),
+            Event::EndOfInput => self.receive("quit"),
             Event::Report(report) => self.report(report)?,
-            Event::Reply(line) => self.reply(line)?,
+            Event::Response(line) => self.response(line)?,
         }
         Ok(())
     }
 
-    fn receive(&mut self, command: Option<&'a str>) {
-        if self
-            .search
-            .as_ref()
-            .is_some_and(|search| search.stopped || (!search.infinite && search.ended.is_some()))
-        {
+    fn can_wait_for_bestmove(&self) -> bool {
+        !self.exiting
+            && self.deferred.is_empty()
+            && self
+                .search
+                .as_ref()
+                .is_some_and(|search| !search.stopped && !search.infinite && search.ended.is_some())
+    }
+
+    fn receive(&mut self, command: &'a str) {
+        if self.exiting {
+            return;
+        }
+        if !self.deferred.is_empty() || self.search.as_ref().is_some_and(|search| search.stopped) {
             self.deferred.push_back(command);
-        } else if !self.exiting {
+        } else {
             self.command(command);
         }
     }
 
-    fn command(&mut self, command: Option<&str>) {
-        let mut words = command.unwrap_or("quit").split_ascii_whitespace();
+    fn command(&mut self, command: &str) {
+        let mut words = command.split_ascii_whitespace();
         match words.next() {
             Some("go") if self.search.is_some() => {
-                self.command_replies.push_back(CommandReply::GoRejected);
+                self.command_responses
+                    .push_back(CommandResponse::GoRejected);
             }
             Some("go") => {
                 self.idle_stop = false;
                 self.search = Some(Search {
                     infinite: words.any(|word| word == "infinite"),
                     stopped: false,
+                    readiness_requested: false,
                     ended: None,
                     info: VecDeque::new(),
                     last_move: None,
@@ -126,16 +184,16 @@ impl<'a> Session<'a> {
             }
             Some("position") if self.search.is_some() => {
                 self.rejected_position = position(words);
-                self.command_replies
-                    .push_back(CommandReply::PositionRejected);
+                self.command_responses
+                    .push_back(CommandResponse::PositionRejected);
             }
             Some("position") => {
                 if let Some(next) = position(words) {
                     self.position = next;
                     self.rejected_position = None;
                 } else {
-                    self.command_replies
-                        .push_back(CommandReply::PositionRejected);
+                    self.command_responses
+                        .push_back(CommandResponse::InvalidPosition);
                 }
             }
             Some("stop") => {
@@ -145,12 +203,20 @@ impl<'a> Session<'a> {
                     self.idle_stop = true;
                 }
             }
-            Some("quit") => self.exiting = true,
-            Some("isready") => self.command_replies.push_back(CommandReply::Ready),
-            Some("uci") => self.command_replies.extend([
-                CommandReply::IdName,
-                CommandReply::IdAuthor,
-                CommandReply::UciOk,
+            Some("quit") => {
+                self.exiting = true;
+                self.deferred.clear();
+            }
+            Some("isready") => {
+                if let Some(search) = &mut self.search {
+                    search.readiness_requested = true;
+                }
+                self.command_responses.push_back(CommandResponse::Ready);
+            }
+            Some("uci") => self.command_responses.extend([
+                CommandResponse::IdName,
+                CommandResponse::IdAuthor,
+                CommandResponse::UciOk,
             ]),
             _ => {}
         }
@@ -175,63 +241,68 @@ impl<'a> Session<'a> {
         Ok(())
     }
 
-    fn reply(&mut self, line: &str) -> Result<(), Fault> {
-        if self.exiting && self.search.is_none() && self.command_replies.is_empty() {
-            return Err((9, "output after the final reply on exit"));
+    fn response(&mut self, line: &str) -> Result<(), Fault> {
+        if self.exiting && self.search.is_none() && self.command_responses.is_empty() {
+            return Err((9, "output after the final response on exit"));
         }
         let body = line
             .strip_suffix('\n')
             .and_then(|body| (!body.contains(['\n', '\r'])).then_some(body))
-            .ok_or((10, "expected one newline-terminated reply"))?;
+            .ok_or((10, "expected one newline-terminated response"))?;
         match body.split_once(' ').unwrap_or((body, "")) {
             ("bestmove", text) if text.parse::<UciMove>().is_ok() => self.bestmove(text),
             ("info", text) if text.starts_with("depth ") => self.search_info(body),
-            ("readyok", "") if body == "readyok" => self.command_reply(CommandReply::Ready),
-            ("uciok", "") if body == "uciok" => self.command_reply(CommandReply::UciOk),
-            ("id", text) if payload(text, "name ") => self.command_reply(CommandReply::IdName),
-            ("id", text) if payload(text, "author ") => self.command_reply(CommandReply::IdAuthor),
+            ("readyok", "") if body == "readyok" => self.command_response(CommandResponse::Ready),
+            ("uciok", "") if body == "uciok" => self.command_response(CommandResponse::UciOk),
+            ("id", text) if payload(text, "name ") => {
+                self.command_response(CommandResponse::IdName)
+            }
+            ("id", text) if payload(text, "author ") => {
+                self.command_response(CommandResponse::IdAuthor)
+            }
             ("info", "string position rejected: waiting for stop") => {
-                self.command_reply(CommandReply::PositionRejected)
+                self.command_response(CommandResponse::PositionRejected)
             }
             ("info", "string go rejected: waiting for stop") => {
-                self.command_reply(CommandReply::GoRejected)
+                self.command_response(CommandResponse::GoRejected)
             }
             ("info", text) if payload(text, "string position rejected: ") => {
-                self.command_reply(CommandReply::InvalidPosition)
+                self.command_response(CommandResponse::InvalidPosition)
             }
             ("info", text) if payload(text, "string ") && self.idle_stop => {
-                Err((4, "idle stop wrote a reply"))
+                Err((4, "idle stop wrote a response"))
             }
             ("info", text) if payload(text, "string ") => Err((10, "unexpected diagnostic")),
-            _ => Err((10, "expected one whole session reply")),
+            _ => Err((10, "expected one whole session response")),
         }
     }
 
-    fn command_reply(&mut self, reply: CommandReply) -> Result<(), Fault> {
-        if self.command_replies.front() == Some(&reply) {
-            self.command_replies.pop_front();
-            if reply == CommandReply::Ready {
-                self.idle_stop = false;
-            }
+    fn command_response(&mut self, response: CommandResponse) -> Result<(), Fault> {
+        if self.command_responses.front() == Some(&response) {
+            self.command_responses.pop_front();
             return Ok(());
         }
-        if reply == CommandReply::Ready && !self.command_replies.is_empty() {
-            return Err((7, "readyok preceded an earlier command reply"));
+        if self.idle_stop && !self.command_responses.contains(&response) {
+            return Err((4, "idle stop wrote a response"));
         }
-        if self.idle_stop && !self.command_replies.contains(&reply) {
-            return Err((4, "idle stop wrote a reply"));
+        if response == CommandResponse::Ready && !self.command_responses.is_empty() {
+            return Err((7, "readyok preceded an earlier command response"));
         }
         if matches!(
-            reply,
-            CommandReply::PositionRejected
-                | CommandReply::InvalidPosition
-                | CommandReply::GoRejected
+            response,
+            CommandResponse::PositionRejected
+                | CommandResponse::InvalidPosition
+                | CommandResponse::GoRejected
         ) {
             return Err((8, "wrong or extra rejection of position or go"));
         }
         Err((
-            if reply == CommandReply::Ready { 6 } else { 10 },
-            "unsolicited command reply",
+            if response == CommandResponse::Ready {
+                6
+            } else {
+                10
+            },
+            "unsolicited command response",
         ))
     }
 
@@ -254,17 +325,23 @@ impl<'a> Session<'a> {
             .search
             .as_ref()
             .ok_or((1, "bestmove without an outstanding go"))?;
-        if self.command_replies.contains(&CommandReply::Ready) {
-            return Err((6, "bestmove preceded readyok for a search still running"));
-        }
-        if !self.command_replies.is_empty() {
+        // Once the next search reports Ended with the same move, the
+        // history cannot tell which search produced a matching bestmove.
+        if search.ended.is_none() && self.last_bestmove.as_deref() == Some(text) {
             return Err((
-                8,
-                "bestmove preceded the rejection or reply to an earlier command",
+                1,
+                "duplicate bestmove before the next search reported Ended",
             ));
         }
         if search.infinite && !search.stopped && !self.exiting {
-            return Err((2, "go infinite released its move before stop or exit"));
+            return Err(if search.readiness_requested {
+                (6, "isready ended an infinite search")
+            } else {
+                (2, "go infinite released its move before stop or exit")
+            });
+        }
+        if self.exiting && !self.command_responses.is_empty() {
+            return Err((9, "exit bestmove preceded an outstanding command response"));
         }
         if !legal(&self.position, text) {
             if self
@@ -290,6 +367,7 @@ impl<'a> Session<'a> {
         {
             return Err((3, "bestmove did not use the last finished depth"));
         }
+        self.last_bestmove = Some(text.to_owned());
         self.search = None;
         while !self.exiting && !self.search.as_ref().is_some_and(|search| search.stopped) {
             let Some(command) = self.deferred.pop_front() else {
@@ -301,8 +379,14 @@ impl<'a> Session<'a> {
     }
 
     fn finish(&self) -> Result<(), Fault> {
-        if self.command_replies.contains(&CommandReply::Ready)
-            || self.deferred.contains(&Some("isready"))
+        let mut deferred_before_exit = self
+            .deferred
+            .iter()
+            .copied()
+            .take_while(|command| command.split_ascii_whitespace().next() != Some("quit"));
+        if self.command_responses.contains(&CommandResponse::Ready)
+            || deferred_before_exit
+                .any(|text| text.split_ascii_whitespace().next() == Some("isready"))
         {
             return Err((6, "missing readyok"));
         }
@@ -318,8 +402,8 @@ impl<'a> Session<'a> {
             }
             return Err((1, "accepted go has no bestmove"));
         }
-        if !self.command_replies.is_empty() {
-            return Err((8, "missing command reply"));
+        if !self.command_responses.is_empty() {
+            return Err((8, "missing command response"));
         }
         if !self.exiting {
             return Err((9, "history has no quit or end of input"));
@@ -333,18 +417,24 @@ fn payload(text: &str, prefix: &str) -> bool {
         .is_some_and(|value| !value.trim().is_empty())
 }
 
-fn position(mut words: std::str::SplitAsciiWhitespace<'_>) -> Option<Chess> {
+fn position(words: std::str::SplitAsciiWhitespace<'_>) -> Option<Chess> {
+    let mut words = words.peekable();
     let mut position = match words.next()? {
         "startpos" => Chess::default(),
-        "fen" => words
-            .by_ref()
-            .take(6)
-            .collect::<Vec<_>>()
-            .join(" ")
-            .parse::<Fen>()
-            .ok()?
-            .into_position(CastlingMode::Standard)
-            .ok()?,
+        "fen" => {
+            let mut fen = Vec::new();
+            while words.peek().is_some_and(|word| *word != "moves") {
+                fen.push(words.next()?);
+            }
+            if !(4..=6).contains(&fen.len()) {
+                return None;
+            }
+            fen.join(" ")
+                .parse::<Fen>()
+                .ok()?
+                .into_position(CastlingMode::Standard)
+                .ok()?
+        }
         _ => return None,
     };
     match words.next() {
@@ -402,8 +492,13 @@ fn info(depth: &FinishedDepth) -> String {
         .map(movement)
         .collect::<Vec<_>>()
         .join(" ");
+    let pv = if pv.is_empty() {
+        String::new()
+    } else {
+        format!(" pv {pv}")
+    };
     format!(
-        "info depth {} multipv 1 score {score} nodes {} nps {nps} time {time} pv {pv}",
+        "info depth {} multipv 1 score {score} nodes {} nps {nps} time {time}{pv}",
         depth.depth, depth.nodes
     )
 }

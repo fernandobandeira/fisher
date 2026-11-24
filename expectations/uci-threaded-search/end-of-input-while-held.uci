@@ -2,9 +2,8 @@
 # The held move is sent before exit. The original search sources follow.
 # Four-ply info spelling from Stockfish sf_19 (edb0d9d), read 2026-11-24:
 # UCIEngine::on_update_full in src/uci.cpp and SearchManager::output_pv in src/search.cpp.
-# fisher-r6y D41 sets this spelling; fisher-8hc.6 committed these sessions.
-# D3-D6 supply the
-# existing principal variation and allowances, with time at least one under D41.
+# fisher-r6y D41 sets this spelling. D3-D6 supply the principal variation
+# and allowances, with time at least one under D41.
 # The fisher-2aj.2 sources below supply the retained scores, node counts and response order.
 # Sources: April 2006 UCI specification https://backscattering.de/chess/uci/
 # and fisher-l7f owner decisions from 2026-11-22.
@@ -16,7 +15,7 @@
 # Searched transcript written 2026-11-23.
 > position startpos
 > go infinite
-# Read the search info before sending isready. The move is held.
+# The finished depth is reported before the end of input.
 # D25 releases it on quit or the end of input as well as on stop.
 # Rules 1 to 7 and 10. Published perft counts sum to 206603. See the header for cp 0.
 < info depth 4 multipv 1 score cp 0 nodes 206603 nps {nps} time {time} pv {pv}

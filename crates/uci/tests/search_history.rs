@@ -19,13 +19,13 @@ const INFINITE: Event<'_> = Command("go infinite");
 const STOP: Event<'_> = Command("stop");
 const QUIT: Event<'_> = Command("quit");
 const READY: Event<'_> = Command("isready");
-const READY_OK: Event<'_> = Reply("readyok\n");
-const MOVE_A: Event<'_> = Reply("bestmove h8g8\n");
-const MOVE_B: Event<'_> = Reply("bestmove h8h7\n");
+const READY_OK: Event<'_> = Response("readyok\n");
+const MOVE_A: Event<'_> = Response("bestmove h8g8\n");
+const MOVE_B: Event<'_> = Response("bestmove h8h7\n");
 const INFO_A: Event<'_> =
-    Reply("info depth 1 multipv 1 score cp -900 nodes 1 nps 1000 time 1 pv h8g8\n");
-const REJECT_POSITION: Event<'_> = Reply("info string position rejected: waiting for stop\n");
-const REJECT_GO: Event<'_> = Reply("info string go rejected: waiting for stop\n");
+    Response("info depth 1 multipv 1 score cp -900 nodes 1 nps 1000 time 1 pv h8g8\n");
+const REJECT_POSITION: Event<'_> = Response("info string position rejected: waiting for stop\n");
+const REJECT_GO: Event<'_> = Response("info string go rejected: waiting for stop\n");
 
 #[expect(
     clippy::unwrap_used,
@@ -73,11 +73,16 @@ fn rule_1_one_bestmove_per_go() {
         "duplicate bestmove",
         &[POSITION_A, GO, ended(A), MOVE_A, STOP, MOVE_A, QUIT],
     );
+    rejects(
+        1,
+        "duplicate bestmove before the next search reports Ended",
+        &[POSITION_A, GO, ended(A), STOP, GO, MOVE_A, MOVE_A, QUIT],
+    );
     rejects(1, "bestmove without go", &[MOVE_A, QUIT]);
     rejects(
         1,
         "accepted go without bestmove",
-        &[POSITION_A, GO, ended(A), QUIT],
+        &[POSITION_A, GO, ended(A)],
     );
 }
 
@@ -100,7 +105,7 @@ fn rule_2_infinite_holds_its_move() {
     );
 
     let terminal = Command("position fen 7k/6Q1/5K2/8/8/8/8/8 b - - 0 1");
-    let null = Reply("bestmove 0000\n");
+    let null = Response("bestmove 0000\n");
     accepts(&[
         terminal.clone(),
         INFINITE,
@@ -135,6 +140,20 @@ fn rule_3_finished_depths_precede_bestmove() {
         MOVE_A,
         QUIT,
     ]);
+    rejects(
+        3,
+        "stop released bestmove before Ended",
+        &[
+            POSITION_A,
+            INFINITE,
+            finished_depth(),
+            INFO_A,
+            STOP,
+            MOVE_A,
+            ended(A),
+            QUIT,
+        ],
+    );
     rejects(
         3,
         "late search info",
@@ -174,7 +193,7 @@ fn rule_3_finished_depths_precede_bestmove() {
         elapsed: Duration::from_millis(1),
         principal_variation: pawn_move("e4").into_iter().collect(),
     }));
-    let info = Reply("info depth 1 multipv 1 score cp 0 nodes 20 nps 20000 time 1 pv e2e4\n");
+    let info = Response("info depth 1 multipv 1 score cp 0 nodes 20 nps 20000 time 1 pv e2e4\n");
     rejects(
         3,
         "stop ignored the last finished depth",
@@ -184,7 +203,7 @@ fn rule_3_finished_depths_precede_bestmove() {
             info,
             STOP,
             Report(SearchReport::Ended(pawn_move("e3"))),
-            Reply("bestmove e2e3\n"),
+            Response("bestmove e2e3\n"),
             QUIT,
         ],
     );
@@ -195,10 +214,15 @@ fn rule_4_idle_stop_is_silent() {
     accepts(&[STOP, READY, READY_OK, QUIT]);
     rejects(
         4,
+        "idle stop added a readyok",
+        &[STOP, READY, READY_OK, READY_OK, QUIT],
+    );
+    rejects(
+        4,
         "idle stop wrote output",
         &[
             STOP,
-            Reply("info string no search\n"),
+            Response("info string no search\n"),
             READY,
             READY_OK,
             QUIT,
@@ -217,7 +241,7 @@ fn rule_5_bestmove_is_legal_in_the_accepted_position() {
     rejects(
         5,
         "0000 with a legal move",
-        &[POSITION_A, GO, ended(A), Reply("bestmove 0000\n"), QUIT],
+        &[POSITION_A, GO, ended(A), Response("bestmove 0000\n"), QUIT],
     );
 }
 
@@ -252,7 +276,7 @@ fn rule_6_isready_does_not_end_a_search() {
         ],
     );
     rejects(
-        2,
+        6,
         "isready released infinite search after readyok",
         &[
             POSITION_A,
@@ -268,7 +292,7 @@ fn rule_6_isready_does_not_end_a_search() {
 }
 
 #[test]
-fn rule_7_earlier_command_replies_precede_readyok() {
+fn rule_7_earlier_command_responses_precede_readyok() {
     accepts(&[
         POSITION_A,
         INFINITE,
@@ -481,32 +505,152 @@ fn rule_9_quit_and_end_of_input_release_the_move_then_exit() {
 }
 
 #[test]
-fn rule_10_replies_are_whole_lines() {
+fn rule_10_responses_are_whole_lines() {
     accepts(&[
         Command("uci"),
-        Reply("id name fisher test\n"),
-        Reply("id author Fernando Bandeira\n"),
-        Reply("uciok\n"),
+        Response("id name fisher test\n"),
+        Response("id author Fernando Bandeira\n"),
+        Response("uciok\n"),
         READY,
         READY_OK,
         QUIT,
     ]);
-    rejects(10, "missing newline", &[READY, Reply("readyok"), QUIT]);
+    rejects(10, "missing newline", &[READY, Response("readyok"), QUIT]);
     rejects(
         10,
-        "two replies in one line",
+        "two responses in one line",
         &[
             POSITION_A,
             GO,
             READY,
             ended(A),
-            Reply("bestmove h8g8readyok\n"),
+            Response("bestmove h8g8readyok\n"),
             QUIT,
         ],
     );
     rejects(
         10,
-        "two replies in one event",
-        &[READY, READY, Reply("readyok\nreadyok\n"), QUIT],
+        "two responses in one event",
+        &[READY, READY, Response("readyok\nreadyok\n"), QUIT],
+    );
+}
+
+#[test]
+fn commands_after_exit_are_ignored() {
+    for exit in [QUIT, EndOfInput] {
+        accepts(&[POSITION_A, GO, ended(A), exit.clone(), READY, MOVE_A]);
+        for go in [GO, INFINITE] {
+            accepts(&[POSITION_A, go, STOP, exit.clone(), READY, ended(A), MOVE_A]);
+        }
+        accepts(&[exit, READY, GO, POSITION_B]);
+    }
+}
+
+#[test]
+fn invalid_idle_position_is_reported() {
+    for (command, diagnostic) in [
+        (
+            Command("position fen 8/8/8/8/8/8/8/8 w - - 0 1"),
+            Response("info string position rejected: invalid FEN: no king\n"),
+        ),
+        (
+            Command("position startpos moves e2e5"),
+            Response("info string position rejected: illegal UCI move e2e5\n"),
+        ),
+    ] {
+        accepts(&[command.clone(), diagnostic.clone(), READY, READY_OK, QUIT]);
+        accepts(&[command.clone(), READY, diagnostic.clone(), READY_OK, QUIT]);
+        accepts(&[
+            STOP,
+            command.clone(),
+            READY,
+            diagnostic.clone(),
+            READY_OK,
+            QUIT,
+        ]);
+        accepts(&[STOP, READY, command, READY_OK, diagnostic, QUIT]);
+    }
+}
+
+#[test]
+fn readiness_on_either_side_of_finite_bestmove() {
+    accepts(&[POSITION_A, GO, ended(A), READY, READY_OK, MOVE_A, QUIT]);
+    accepts(&[POSITION_A, GO, READY, ended(A), MOVE_A, READY_OK, QUIT]);
+}
+
+#[test]
+fn replacements_on_either_side_of_finite_bestmove() {
+    for (command, diagnostic) in [(POSITION_B, REJECT_POSITION), (GO, REJECT_GO)] {
+        accepts(&[POSITION_A, GO, ended(A), command, diagnostic, MOVE_A, QUIT]);
+    }
+    accepts(&[
+        POSITION_A,
+        GO,
+        ended(A),
+        MOVE_A,
+        POSITION_B,
+        GO,
+        ended(B),
+        MOVE_B,
+        QUIT,
+    ]);
+}
+
+#[test]
+fn fen_fields_end_before_the_move_list() {
+    for position in [
+        "position fen rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - moves e2e4",
+        "position fen rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 moves e2e4",
+        "position fen rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1 moves e2e4",
+    ] {
+        let after_e4 = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1";
+        let movement = rules::Position::from_fen(after_e4)
+            .ok()
+            .and_then(|position| {
+                position.legal_moves().into_iter().find(|movement| {
+                    movement.from().to_string() == "e7" && movement.to().to_string() == "e5"
+                })
+            });
+        assert!(movement.is_some());
+        accepts(&[
+            Command(position),
+            GO,
+            Report(SearchReport::Ended(movement)),
+            Response("bestmove e7e5\n"),
+            QUIT,
+        ]);
+    }
+}
+
+#[test]
+fn empty_principal_variation_omits_pv() {
+    let depth = Report(SearchReport::FinishedDepth(FinishedDepth {
+        depth: 1,
+        score: Score::Centipawns(-900),
+        nodes: 1,
+        elapsed: Duration::from_millis(1),
+        principal_variation: Vec::new(),
+    }));
+    accepts(&[
+        POSITION_A,
+        GO,
+        depth.clone(),
+        Response("info depth 1 multipv 1 score cp -900 nodes 1 nps 1000 time 1\n"),
+        ended(A),
+        MOVE_A,
+        QUIT,
+    ]);
+    rejects(
+        3,
+        "empty principal variation printed pv",
+        &[
+            POSITION_A,
+            GO,
+            depth,
+            Response("info depth 1 multipv 1 score cp -900 nodes 1 nps 1000 time 1 pv \n"),
+            ended(A),
+            MOVE_A,
+            QUIT,
+        ],
     );
 }

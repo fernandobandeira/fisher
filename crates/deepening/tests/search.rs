@@ -1,8 +1,8 @@
 #[path = "support/mate_in_two.rs"]
 mod mate_in_two;
-#[path = "support/principal_variation.rs"]
+#[path = "../../fisher/tests/support/principal_variation.rs"]
 mod principal_variation;
-#[path = "support/reference_minimax.rs"]
+#[path = "../../fisher/tests/support/reference_minimax.rs"]
 mod reference;
 mod support;
 
@@ -12,7 +12,6 @@ use rules::Position;
 use search::{Score, SearchResult, minimax};
 use shakmaty::{Chess, EnPassantMode, Position as _, fen::Fen};
 use support::{check_perft, reference_position};
-use uci::UciMove;
 
 fn search_nodes(fen: &str, depth: u8) -> Result<u64, Box<dyn Error>> {
     Ok(minimax(&Position::from_fen(fen)?, depth).nodes)
@@ -45,10 +44,7 @@ fn check_mate_in_two(
             record.id
         );
         assert_eq!(
-            result
-                .chosen_move
-                .map(|movement| UciMove::from(movement).to_string())
-                .as_deref(),
+            result.chosen_move.map(move_text).as_deref(),
             Some(record.published_move),
             "{}",
             record.id
@@ -160,10 +156,18 @@ fn assert_matches_reference(position: &Chess, depth: u8) -> Result<SearchResult,
         position,
         depth,
         expected.score,
-        result
-            .principal_variation
-            .iter()
-            .map(|&movement| UciMove::from(movement).to_string()),
+        result.principal_variation.iter().copied().map(move_text),
     )?;
     Ok(result)
+}
+
+fn move_text(movement: rules::Move) -> String {
+    let promotion = match movement.promotion() {
+        Some(rules::Promotion::Knight) => "n",
+        Some(rules::Promotion::Bishop) => "b",
+        Some(rules::Promotion::Rook) => "r",
+        Some(rules::Promotion::Queen) => "q",
+        None => "",
+    };
+    format!("{}{}{promotion}", movement.from(), movement.to())
 }

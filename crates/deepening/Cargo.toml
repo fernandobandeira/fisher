@@ -1,0 +1,15 @@
+[package]
+name = "deepening"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+rules = { path = "../rules" }
+search = { path = "../search" }
+
+[dev-dependencies]
+shakmaty = "0.30.3"
+
+[lints]
+workspace = true

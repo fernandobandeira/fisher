@@ -32,7 +32,7 @@ const MATE: &str = "mate";
 const MOVETIME: &str = "movetime";
 
 #[derive(Debug, PartialEq, Eq)]
-pub enum Command {
+pub(super) enum Command {
     Uci,
     IsReady,
     UciNewGame,
@@ -43,26 +43,26 @@ pub enum Command {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub enum Input {
+pub(super) enum Input {
     Handled(Command),
     Ignored,
     Unknown,
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub struct PositionCommand {
-    pub source: PositionSource,
-    pub moves: Vec<UciMove>,
+pub(super) struct PositionCommand {
+    pub(super) source: PositionSource,
+    pub(super) moves: Vec<UciMove>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub enum PositionSource {
+pub(super) enum PositionSource {
     Startpos,
     Fen(String),
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub struct PositionSyntaxError(PositionSyntaxCause);
+pub(super) struct PositionSyntaxError(PositionSyntaxCause);
 
 #[derive(Debug, PartialEq, Eq)]
 enum PositionSyntaxCause {
@@ -88,24 +88,24 @@ impl fmt::Display for PositionSyntaxError {
 impl std::error::Error for PositionSyntaxError {}
 
 #[derive(Debug, Default, PartialEq, Eq)]
-pub struct GoParameters {
-    pub searchmoves: Vec<UciMove>,
-    pub ponder: bool,
-    pub wtime: Option<u64>,
-    pub btime: Option<u64>,
-    pub winc: Option<u64>,
-    pub binc: Option<u64>,
-    pub movestogo: Option<u64>,
-    pub depth: Option<u64>,
-    pub nodes: Option<u64>,
-    pub mate: Option<u64>,
-    pub movetime: Option<u64>,
-    pub infinite: bool,
+pub(super) struct GoParameters {
+    pub(super) searchmoves: Vec<UciMove>,
+    pub(super) ponder: bool,
+    pub(super) wtime: Option<u64>,
+    pub(super) btime: Option<u64>,
+    pub(super) winc: Option<u64>,
+    pub(super) binc: Option<u64>,
+    pub(super) movestogo: Option<u64>,
+    pub(super) depth: Option<u64>,
+    pub(super) nodes: Option<u64>,
+    pub(super) mate: Option<u64>,
+    pub(super) movetime: Option<u64>,
+    pub(super) infinite: bool,
 }
 
 /// Reads one line sent by the GUI. An unknown prefix does not hide a command.
 #[must_use]
-pub fn parse_command(line: &str) -> Input {
+pub(super) fn parse_command(line: &str) -> Input {
     let mut tokens = line.split_whitespace();
     while let Some(token) = tokens.next() {
         match token {
@@ -228,3 +228,6 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod commands;

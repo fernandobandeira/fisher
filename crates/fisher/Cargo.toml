@@ -6,8 +6,7 @@ rust-version.workspace = true
 
 [dependencies]
 bench = { path = "../bench" }
-rules = { path = "../rules" }
-search = { path = "../search" }
+deepening = { path = "../deepening" }
 uci = { path = "../uci" }
 
 [dev-dependencies]

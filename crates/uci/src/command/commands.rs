@@ -1,5 +1,5 @@
+use super::*;
 use rules::Square;
-use uci::{Command, GoParameters, Input, PositionCommand, PositionSource, UciMove, parse_command};
 
 #[test]
 fn ignored_commands_consume_the_rest_of_the_line() {

@@ -37,6 +37,12 @@ If it is red and you cannot fix it, say so plainly with the output. Do not weake
 - Design each library crate as a deep module. Other crates enter through its root exports in `lib.rs`. Keep implementation modules private. Follow the [crate interface rules](CODING_STANDARDS.md#crate-interfaces) when adding a dependency, export or cross-crate test.
 - A change to a crate's public interface is a decision for the human. Propose it, do not slip it in.
 
+## The owner's attention
+
+Bring the owner what only the owner can decide: what fisher does for the person using it, which claims matter, what a crate is for and what it exports, a guard, and anything hard to reverse.
+
+Decide implementation details yourself: how the code inside a crate is arranged, how a check is built, and small points the UCI specification leaves open. For those, do what Stockfish does, or another established engine where Stockfish is silent. Record the choice and the revision you read in the ticket.
+
 ## Vocabulary
 
 Use the terms in `GLOSSARY.md` in code, tickets, commit messages and reports. If the concept you need is not there, stop and raise it. Do not invent a word, and do not reach for a synonym the glossary avoids.

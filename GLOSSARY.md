@@ -144,6 +144,10 @@ _Avoid_: chess interface, chess engine protocol
 The program at the other end of UCI, which starts the engine and tells it what to search, whether or not it has a window. A match runner is a GUI. The name is the one the UCI specification gives it.
 _Avoid_: host, client, front end, chess app
 
+**Session**:
+One run of fisher, from the start of the process to `quit` or the end of standard input. A position carries over from one search to the next within it.
+_Avoid_: connection, game
+
 **UCI move**:
 A move as UCI writes it: the square a piece leaves, the square it reaches, and a piece kind when a pawn promotes, such as e7e8q. It does not say whether it castles or captures; only a position can turn it into a move.
 _Avoid_: long algebraic notation, coordinate move, move string

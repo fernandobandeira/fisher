@@ -1,4 +1,8 @@
-use std::{io, sync::atomic::Ordering, time::Duration};
+use std::{
+    io,
+    sync::{Arc, atomic::AtomicBool},
+    time::Duration,
+};
 
 use deepening::{FinishedDepth, Limits, Score, SearchReport};
 use rules::{Move, Position, Square};
@@ -14,7 +18,6 @@ fn session_reports_the_scripted_search() -> io::Result<()> {
         &mut output,
         "test",
         |request, report| {
-            assert!(!request.stop.load(Ordering::Relaxed));
             if request.limits.nodes == Some(0) {
                 assert_eq!(
                     request.limits,
@@ -162,14 +165,26 @@ fn rejected_positions_leave_the_last_accepted_position_in_place() -> io::Result<
 #[test]
 fn terminal_search_reports_omit_search_statistics_and_a_move() -> io::Result<()> {
     // The owner-approved responses in terminal-positions.uci.
-    assert_eq!(
-        session_output(
-            b"position fen 7k/6Q1/5K2/8/8/8/8/8 b - - 0 1\ngo\n              position fen 7k/5K2/6Q1/8/8/8/8/8 b - - 0 1\ngo\n",
-            deepening::search,
-        )?,
-        concat!("info depth 0 score mate 0\nbestmove 0000\n", "info depth 0 score cp 0\nbestmove 0000\n")
-    );
+    for (position, expected) in [
+        (
+            &b"position fen 7k/6Q1/5K2/8/8/8/8/8 b - - 0 1\ngo\n"[..],
+            "info depth 0 score mate 0\nbestmove 0000\n",
+        ),
+        (
+            &b"position fen 7k/5K2/6Q1/8/8/8/8/8 b - - 0 1\ngo\n"[..],
+            "info depth 0 score cp 0\nbestmove 0000\n",
+        ),
+    ] {
+        assert_eq!(session_output(position, finished_search)?, expected);
+    }
     Ok(())
+}
+
+// These tests examine output from finished work, including reports after
+// stop is queued. Keep the search independent of the interrupt in this fixture.
+fn finished_search(mut request: deepening::SearchRequest, report: &mut dyn FnMut(SearchReport)) {
+    request.stop = Arc::new(AtomicBool::new(false));
+    deepening::search(request, report);
 }
 
 #[test]
@@ -180,8 +195,14 @@ fn reports_the_read_error_from_the_gui() {
             Err(io::ErrorKind::BrokenPipe.into())
         }
     }
-    let error = uci::run_session(BrokenInput, io::sink(), "test", |_, _| {}).unwrap_err();
+    let input = io::Read::chain(&b"go infinite\n"[..], BrokenInput);
+    let mut output = Vec::new();
+    let error = uci::run_session(input, &mut output, "test", |_, report| {
+        report(SearchReport::Ended(None));
+    })
+    .unwrap_err();
     assert_eq!(error.kind(), io::ErrorKind::BrokenPipe);
+    assert_eq!(output, b"bestmove 0000\n");
 }
 
 #[test]
@@ -204,7 +225,7 @@ fn reports_a_flush_failure_on_each_protocol_response() -> io::Result<()> {
     // Handshake and readiness, a rejected position, the held-move guards,
     // and the searched and terminal responses are specified in expectations/uci.
     const COMMANDS: &[u8] = b"uci\nisready\nposition\n        position fen 7k/8/5K1Q/8/8/8/8/8 b - - 0 1\n        go infinite\nposition startpos\ngo\nstop\ngo depth\nquit\n";
-    let successful = session_output(COMMANDS, deepening::search)?;
+    let successful = session_output(COMMANDS, finished_search)?;
     // Two ID responses and uciok, readyok, the position diagnostic, one info,
     // two rejected commands, the released move, and info/bestmove for finite go.
     assert_eq!(successful.lines().count(), 11);
@@ -214,7 +235,7 @@ fn reports_a_flush_failure_on_each_protocol_response() -> io::Result<()> {
             COMMANDS,
             FailOnFlush(Some(response)),
             "test",
-            deepening::search,
+            finished_search,
         )
         .unwrap_err();
         assert_eq!(

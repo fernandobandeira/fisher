@@ -171,3 +171,39 @@ fn move_text(movement: rules::Move) -> String {
     };
     format!("{}{}{promotion}", movement.from(), movement.to())
 }
+
+#[test]
+fn checks_for_an_interrupt_before_each_node() {
+    use search::minimax_until_interrupted;
+
+    let position = Position::starting();
+    // Published starting-position perft counts.
+    let nodes = 20 + 400;
+    for interrupt_at in [1, 2, 22, nodes] {
+        let mut interrupt_checks = 0;
+        let result = minimax_until_interrupted(&position, 2, || {
+            interrupt_checks += 1;
+            interrupt_checks >= interrupt_at
+        });
+        assert!(result.is_none(), "interrupt at node {interrupt_at}");
+        assert_eq!(interrupt_checks, interrupt_at);
+    }
+    let mut interrupt_checks = 0;
+    let result = minimax_until_interrupted(&position, 2, || {
+        interrupt_checks += 1;
+        false
+    });
+    assert_eq!(interrupt_checks, nodes);
+    assert_eq!(result, Some(minimax(&position, 2)));
+}
+
+#[test]
+fn does_not_check_for_an_interrupt_at_the_root() {
+    use search::minimax_until_interrupted;
+
+    let position = Position::starting();
+    assert_eq!(
+        minimax_until_interrupted(&position, 0, || true),
+        Some(minimax(&position, 0))
+    );
+}

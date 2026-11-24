@@ -110,6 +110,21 @@ fn end_of_input_while_held() -> io::Result<()> {
 }
 
 #[test]
+fn go_then_quit() -> io::Result<()> {
+    play_transcript("go-then-quit")
+}
+
+#[test]
+fn go_then_end_of_input() -> io::Result<()> {
+    play_transcript("go-then-end-of-input")
+}
+
+#[test]
+fn stop_position_go() -> io::Result<()> {
+    play_transcript("stop-position-go")
+}
+
+#[test]
 fn mate_in_one() -> io::Result<()> {
     play_transcript("mate-in-one")
 }

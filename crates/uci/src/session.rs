@@ -1,6 +1,12 @@
 use std::{
+    collections::VecDeque,
     io::{self, BufRead, BufReader, Read, Write},
-    sync::{Arc, atomic::AtomicBool, mpsc},
+    panic::{self, AssertUnwindSafe},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    },
     thread,
     time::{Duration, Instant},
 };
@@ -10,106 +16,263 @@ use rules::Position;
 
 use crate::{
     Response, SearchScore, UciMove,
-    command::{Command, GoParameters, Input, PositionCommand, PositionSource, parse_command},
+    command::{
+        Command, GoParameters, Input, PositionCommand, PositionSource, PositionSyntaxError,
+        parse_command,
+    },
 };
 
 /// Runs a UCI session until quit, end of input, or an I/O error.
 ///
-/// The reader can block independently of the command handler. Search runs on
-/// the command thread and receives an owned request for each accepted go.
-/// The callback queues finished depths and the end report in order. The search
-/// must send exactly one `SearchReport::Ended` for each request, after its last
-/// finished depth.
+/// The reader and search thread send events into one ordered stream. Only the
+/// command handler writes output. Each search must send one `SearchReport::Ended`
+/// after its last finished depth and return.
 ///
 /// # Errors
 ///
-/// Returns an error if the reader thread cannot start, input cannot be read,
-/// or output cannot be written or flushed.
+/// Returns an error if a thread cannot start, the search dies or returns
+/// without ending, reports after ending, input cannot be read, or output cannot be written or flushed.
 pub fn run_session(
     input: impl Read + Send + 'static,
     mut output: impl Write,
     version: &str,
     search: impl FnMut(SearchRequest, &mut dyn FnMut(SearchReport)) + Send + 'static,
 ) -> io::Result<()> {
-    let (sender, lines) = mpsc::channel();
+    let (sender, events) = mpsc::channel();
+    let reader = sender.clone();
     thread::Builder::new().spawn(move || {
-        if let Err(error) = read_input(BufReader::new(input), &sender) {
-            drop(sender.send(Err(error)));
-        }
+        let event = Event::EndOfInput(read_input(BufReader::new(input), &reader));
+        drop(reader.send(event));
     })?;
 
-    answer_commands(lines, &mut output, version, search, Instant::now)
+    let (requests, work) = mpsc::channel();
+    let worker = thread::Builder::new().spawn(move || {
+        run_searches(work, &sender, search).inspect_err(|error| {
+            drop(sender.send(Event::Error(io::Error::other(error.to_string()))));
+        })
+    })?;
+    let mut session = Session {
+        position: Position::starting(),
+        active: Active::Idle,
+        deferred: VecDeque::new(),
+        events,
+        requests,
+    };
+    let result = session.run(&mut output, version);
+    session.active.interrupt();
+    drop(session);
+    let joined = worker
+        .join()
+        .map_err(|_| io::Error::other("search thread died"));
+    result.and(joined.flatten())
 }
 
-fn answer_commands(
-    lines: impl IntoIterator<Item = io::Result<String>>,
-    output: &mut impl Write,
-    version: &str,
+enum Event {
+    Line(String),
+    EndOfInput(io::Result<()>),
+    Report(SearchReport),
+    Error(io::Error),
+}
+
+fn run_searches(
+    work: mpsc::Receiver<SearchRequest>,
+    events: &mpsc::Sender<Event>,
     mut search: impl FnMut(SearchRequest, &mut dyn FnMut(SearchReport)),
-    now: impl Fn() -> Instant,
 ) -> io::Result<()> {
-    let mut position = Position::starting();
-    let mut held_move = None;
-    // TODO(fisher-2aj.5): isready, stop and quit wait here for a running search to finish.
-    for line in lines {
-        match parse_command(&line?) {
-            Input::Handled(Command::Uci) => {
-                send(output, &Response::IdName(&format!("fisher {version}")))?;
-                send(output, &Response::IdAuthor("Fernando Bandeira"))?;
-                send(output, &Response::UciOk)?;
-            }
-            Input::Handled(Command::IsReady) => send(output, &Response::ReadyOk)?,
-            Input::Handled(Command::Position(_)) if held_move.is_some() => {
-                send(
-                    output,
-                    &Response::InfoString("position rejected: waiting for stop"),
-                )?;
-            }
-            Input::Handled(Command::Go(_)) if held_move.is_some() => {
-                send(
-                    output,
-                    &Response::InfoString("go rejected: waiting for stop"),
-                )?;
-            }
-            Input::Handled(Command::Position(command)) => {
-                match command
-                    .map_err(|cause| cause.to_string())
-                    .and_then(setup_position)
-                {
-                    Ok(next) => position = next,
-                    Err(cause) => {
-                        let message = format!("position rejected: {cause}");
-                        send(output, &Response::InfoString(&message))?;
-                    }
-                }
-            }
-            Input::Handled(Command::Go(parameters)) => {
-                let started = now();
-                held_move = answer_go(output, position, &parameters, started, &mut search)?;
-            }
-            Input::Handled(Command::Stop) => {
-                if let Some(chosen) = held_move.take() {
-                    send(output, &Response::BestMove(chosen))?;
-                }
-            }
-            Input::Handled(Command::Quit) => break,
-            Input::Handled(Command::UciNewGame) | Input::Ignored | Input::Unknown => {}
-        }
+    for request in work {
+        let mut progress = SearchProgress::Running;
+        panic::catch_unwind(AssertUnwindSafe(|| {
+            search(request, &mut |report| progress.send(report, events));
+        }))
+        .map_err(|_| io::Error::other("search thread died"))?;
+        progress.finish()?;
     }
     Ok(())
 }
 
-fn answer_go(
-    output: &mut impl Write,
+enum SearchProgress {
+    Running,
+    Ended,
+    ReportedAfterEnd,
+}
+
+impl SearchProgress {
+    fn send(&mut self, report: SearchReport, events: &mpsc::Sender<Event>) {
+        if !matches!(self, Self::Running) {
+            *self = Self::ReportedAfterEnd;
+            return;
+        }
+        if matches!(report, SearchReport::Ended(_)) {
+            *self = Self::Ended;
+        }
+        drop(events.send(Event::Report(report)));
+    }
+
+    fn finish(self) -> io::Result<()> {
+        match self {
+            Self::Running => Err(io::Error::other("search returned without Ended")),
+            Self::Ended => Ok(()),
+            Self::ReportedAfterEnd => Err(io::Error::other("search reported after Ended")),
+        }
+    }
+}
+
+enum Active {
+    Idle,
+    Searching {
+        stop: Arc<AtomicBool>,
+        infinite: bool,
+    },
+    Held(UciMove),
+}
+
+impl Active {
+    fn interrupt(&self) {
+        if let Self::Searching { stop, .. } = self {
+            stop.store(true, Ordering::Relaxed);
+        }
+    }
+}
+
+struct Session {
     position: Position,
-    parameters: &GoParameters,
-    started: Instant,
-    search: &mut impl FnMut(SearchRequest, &mut dyn FnMut(SearchReport)),
-) -> io::Result<Option<UciMove>> {
-    let mut held_move = None;
+    active: Active,
+    deferred: VecDeque<Event>,
+    events: mpsc::Receiver<Event>,
+    requests: mpsc::Sender<SearchRequest>,
+}
+
+impl Session {
+    fn run(&mut self, output: &mut dyn Write, version: &str) -> io::Result<()> {
+        loop {
+            match self.next_event()? {
+                Event::Line(line) => match parse_command(&line) {
+                    Input::Handled(Command::Quit) => return self.quit(output),
+                    Input::Handled(command) => self.command(output, version, command)?,
+                    Input::Ignored | Input::Unknown => {}
+                },
+                Event::EndOfInput(result) => return self.release(output).and(result),
+                Event::Report(report) => self.report(output, report)?,
+                Event::Error(error) => return Err(error),
+            }
+        }
+    }
+
+    fn receive(&self) -> io::Result<Event> {
+        self.events.recv().map_err(io::Error::other)
+    }
+
+    fn next_event(&mut self) -> io::Result<Event> {
+        self.deferred.pop_front().map_or_else(|| self.receive(), Ok)
+    }
+
+    fn command(
+        &mut self,
+        output: &mut dyn Write,
+        version: &str,
+        command: Command,
+    ) -> io::Result<()> {
+        match command {
+            Command::Uci => {
+                send(output, &Response::IdName(&format!("fisher {version}")))?;
+                send(output, &Response::IdAuthor("Fernando Bandeira"))?;
+                send(output, &Response::UciOk)
+            }
+            Command::IsReady => send(output, &Response::ReadyOk),
+            Command::Position(command) => self.position(output, command),
+            Command::Go(parameters) => self.go(output, &parameters),
+            Command::Stop | Command::Quit => self.release(output),
+            Command::UciNewGame => Ok(()),
+        }
+    }
+
+    fn position(
+        &mut self,
+        output: &mut dyn Write,
+        command: Result<PositionCommand, PositionSyntaxError>,
+    ) -> io::Result<()> {
+        if !matches!(self.active, Active::Idle) {
+            return send(
+                output,
+                &Response::InfoString("position rejected: waiting for stop"),
+            );
+        }
+        match command
+            .map_err(|cause| cause.to_string())
+            .and_then(setup_position)
+        {
+            Ok(next) => {
+                self.position = next;
+                Ok(())
+            }
+            Err(cause) => send(
+                output,
+                &Response::InfoString(&format!("position rejected: {cause}")),
+            ),
+        }
+    }
+
+    fn go(&mut self, output: &mut dyn Write, parameters: &GoParameters) -> io::Result<()> {
+        if !matches!(self.active, Active::Idle) {
+            return send(
+                output,
+                &Response::InfoString("go rejected: waiting for stop"),
+            );
+        }
+        let request = search_request(self.position, parameters);
+        self.active = Active::Searching {
+            stop: Arc::clone(&request.stop),
+            infinite: parameters.infinite,
+        };
+        self.requests.send(request).map_err(io::Error::other)
+    }
+
+    fn report(&mut self, output: &mut dyn Write, report: SearchReport) -> io::Result<()> {
+        match report {
+            SearchReport::FinishedDepth(depth) => send_search_info(output, &depth),
+            SearchReport::Ended(chosen) => {
+                let chosen = chosen.map_or(UciMove::Null, UciMove::from);
+                if matches!(self.active, Active::Searching { infinite: true, .. }) {
+                    self.active = Active::Held(chosen);
+                    Ok(())
+                } else {
+                    self.active = Active::Idle;
+                    send(output, &Response::BestMove(chosen))
+                }
+            }
+        }
+    }
+
+    fn quit(&mut self, output: &mut dyn Write) -> io::Result<()> {
+        self.release(output)?;
+        for event in self.deferred.drain(..) {
+            if let Event::EndOfInput(result) = event {
+                return result;
+            }
+        }
+        Ok(())
+    }
+
+    fn release(&mut self, output: &mut dyn Write) -> io::Result<()> {
+        self.active.interrupt();
+        while matches!(self.active, Active::Searching { .. }) {
+            match self.receive()? {
+                Event::Report(report) => self.report(output, report)?,
+                Event::Error(error) => return Err(error),
+                event @ (Event::Line(_) | Event::EndOfInput(_)) => self.deferred.push_back(event),
+            }
+        }
+        if let Active::Held(chosen) = std::mem::replace(&mut self.active, Active::Idle) {
+            send(output, &Response::BestMove(chosen))?;
+        }
+        Ok(())
+    }
+}
+
+fn search_request(position: Position, parameters: &GoParameters) -> SearchRequest {
     // TODO(fisher-7vo): Obey searchmoves and mate.
     // TODO(fisher-2ha): Wait for ponderhit when pondering.
-    let request = SearchRequest {
+    SearchRequest {
         position,
         limits: Limits {
             depth: parameters.depth,
@@ -123,31 +286,13 @@ fn answer_go(
             movestogo: parameters.movestogo,
         },
         stop: Arc::new(AtomicBool::new(false)),
-        started,
-    };
-    // While search runs on this thread, drain its reports before
-    // reading the next command.
-    let mut reports = Vec::new();
-    search(request, &mut |report| reports.push(report));
-    for report in reports {
-        match report {
-            SearchReport::FinishedDepth(depth) => send_search_info(output, &depth)?,
-            SearchReport::Ended(chosen) => {
-                let chosen = chosen.map_or(UciMove::Null, UciMove::from);
-                if parameters.infinite {
-                    held_move = Some(chosen);
-                } else {
-                    send(output, &Response::BestMove(chosen))?;
-                }
-            }
-        }
+        started: Instant::now(),
     }
-    Ok(held_move)
 }
 
 /// Terminal positions report `info depth 0 score mate 0` for checkmate
 /// or `info depth 0 score cp 0` for stalemate.
-fn send_search_info(output: &mut impl Write, result: &FinishedDepth) -> io::Result<()> {
+fn send_search_info(output: &mut dyn Write, result: &FinishedDepth) -> io::Result<()> {
     let time_ms = u64::try_from(result.elapsed.as_millis().max(1)).unwrap_or(u64::MAX);
     let pv: Vec<_> = result
         .principal_variation
@@ -202,10 +347,7 @@ fn setup_position(command: PositionCommand) -> Result<Position, String> {
     Ok(position)
 }
 
-fn read_input(
-    mut input: impl BufRead,
-    sender: &mpsc::Sender<io::Result<String>>,
-) -> io::Result<()> {
+fn read_input(mut input: impl BufRead, sender: &mpsc::Sender<Event>) -> io::Result<()> {
     let mut line = Vec::new();
     let mut previous_cr = false;
     loop {
@@ -234,111 +376,16 @@ fn read_input(
     Ok(())
 }
 
-fn send_line(sender: &mpsc::Sender<io::Result<String>>, line: &[u8]) -> bool {
+fn send_line(sender: &mpsc::Sender<Event>, line: &[u8]) -> bool {
     sender
-        .send(Ok(String::from_utf8_lossy(line).into_owned()))
+        .send(Event::Line(String::from_utf8_lossy(line).into_owned()))
         .is_ok()
 }
 
-fn send(output: &mut impl Write, response: &Response<'_>) -> io::Result<()> {
+fn send(output: &mut dyn Write, response: &Response<'_>) -> io::Result<()> {
     writeln!(output, "{response}")?;
     output.flush()
 }
 
 #[cfg(test)]
-mod tests {
-    use std::io::BufReader;
-
-    use super::*;
-
-    #[test]
-    fn node_rate_uses_reported_milliseconds() {
-        assert_eq!(nodes_per_second(10, 2), 5000);
-        assert_eq!(nodes_per_second(10, 3), 3333);
-        assert_eq!(nodes_per_second(u64::MAX, 1000), u64::MAX);
-        assert_eq!(nodes_per_second(u64::MAX, 1), u64::MAX);
-    }
-
-    #[test]
-    fn search_info_uses_reported_elapsed_time() -> io::Result<()> {
-        assert_search_info_time(3250, 3, 68_867_666)
-    }
-
-    #[test]
-    fn search_info_reports_one_millisecond_for_submillisecond_search() -> io::Result<()> {
-        assert_search_info_time(250, 1, 206_603_000)
-    }
-
-    fn assert_search_info_time(micros: u64, time: u64, nps: u64) -> io::Result<()> {
-        let mut output = Vec::new();
-        let accepted = Instant::now();
-        answer_commands(
-            ["go infinite", "stop"].map(|command| Ok(command.to_owned())),
-            &mut output,
-            "test",
-            |request, report| {
-                let chosen_move = request.position.legal_moves().into_iter().next();
-                assert_eq!(request.started, accepted);
-                report(SearchReport::FinishedDepth(FinishedDepth {
-                    depth: 4,
-                    score: Score::Centipawns(0),
-                    nodes: 206_603,
-                    elapsed: Duration::from_micros(micros),
-                    principal_variation: chosen_move.into_iter().collect(),
-                }));
-                report(SearchReport::Ended(chosen_move));
-            },
-            || accepted,
-        )?;
-        let text = String::from_utf8(output).map_err(io::Error::other)?;
-        assert!(
-            text.starts_with(&format!(
-                "info depth 4 multipv 1 score cp 0 nodes 206603 nps {nps} time {time} pv "
-            )),
-            "{text}"
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn infinite_search_holds_the_move_until_stop() -> io::Result<()> {
-        let mut output = Vec::new();
-
-        answer_commands(
-            ["go infinite", "isready", "stop", "quit"].map(|command| Ok(command.to_owned())),
-            &mut output,
-            "test",
-            |request, report| {
-                let chosen = request
-                    .position
-                    .legal_move(
-                        rules::Square::parse("e2").unwrap(),
-                        rules::Square::parse("e4").unwrap(),
-                        None,
-                    )
-                    .unwrap();
-                report(SearchReport::Ended(Some(chosen)));
-            },
-            Instant::now,
-        )?;
-
-        // The readiness response witnesses that the session still held the move.
-        assert_eq!(output, b"readyok\nbestmove e2e4\n");
-        Ok(())
-    }
-
-    #[test]
-    fn crlf_split_across_reads_sends_one_line() -> io::Result<()> {
-        let input = BufReader::with_capacity(1, &b"uci\r\nisready"[..]);
-        let (sender, lines) = mpsc::channel();
-
-        read_input(input, &sender)?;
-        drop(sender);
-
-        assert_eq!(
-            lines.into_iter().collect::<io::Result<Vec<_>>>()?,
-            ["uci", "isready"]
-        );
-        Ok(())
-    }
-}
+mod tests;

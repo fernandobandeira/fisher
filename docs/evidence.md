@@ -77,4 +77,6 @@ Below the table, list anything still undecided: a claim nobody could test, a fin
 - **Pull requests:** mutation-test whole crates when their tests change and mutants whose spans intersect the diff in the other crates. Require per-crate region coverage at or above the [reviewed floors](../.cargo/coverage-floors.json).
 - **Weekly:** mutation-test the whole workspace. Recheck every reviewed equivalent mutant and require a current proof for each survivor.
 
+Mutation and coverage judge each crate using only its unit and integration tests.
+
 `scripts/check` has to stay fast enough to run on every commit and at the end of every agent turn. Slow evidence (deep perft, matches, SPRT) runs on its own and is recorded in the claims table with the revision it ran against.

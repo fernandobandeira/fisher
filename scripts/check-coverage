@@ -63,6 +63,34 @@ def region_counts(report, root):
     return totals
 
 
+def own_region_counts(packages, root, read_report):
+    totals = {}
+    for directory, package in sorted(packages.items()):
+        report = region_counts(read_report(package), root)
+        if directory in report:
+            totals[directory] = report[directory]
+    return totals
+
+
+def coverage_report(package):
+    return json.loads(subprocess.check_output(
+        ["cargo", "llvm-cov", "--locked", "--package", package, "--tests", "--json", "--summary-only",
+         "--ignore-filename-regex", TEST_PATH_REGEX],
+        cwd=ROOT,
+    ))
+
+
+def workspace_packages():
+    metadata = json.loads(subprocess.check_output(
+        ["cargo", "metadata", "--locked", "--no-deps", "--format-version", "1"], cwd=ROOT
+    ))
+    members = set(metadata["workspace_members"])
+    return {
+        Path(package["manifest_path"]).parent.name: package["name"]
+        for package in metadata["packages"] if package["id"] in members
+    }
+
+
 def compare(totals, floors, crates):
     summaries = []
     problems = []
@@ -79,7 +107,7 @@ def compare(totals, floors, crates):
             continue
         if not 0 <= covered <= count or count == 0:
             problems.append(
-                f"{crate}: LLVM reported no usable regions. Run scripts/check-coverage with the workspace tests."
+                f"{crate}: LLVM reported no usable regions. Run scripts/check-coverage with the crate’s own tests."
             )
             continue
 
@@ -89,7 +117,7 @@ def compare(totals, floors, crates):
         if 100 * covered < floor * count:
             problems.append(
                 f"{summary}. Restore coverage with tests. See regions with "
-                "`cargo llvm-cov report --locked --workspace --text`."
+                f"`cargo llvm-cov --locked --package {crate} --tests --text`."
             )
     return summaries, problems
 
@@ -118,7 +146,20 @@ def self_test():
     summaries, problems = compare(totals, floors, set(floors))
     assert len(summaries) == 2
     assert len(problems) == 1 and problems[0].startswith("rules: 99.000%")
-    assert "cargo llvm-cov report" in problems[0]
+    assert "cargo llvm-cov --locked --package rules --tests --text" in problems[0]
+
+    # A dependency can have full coverage while running the caller's tests.
+    caller_report = {"data": [{"files": [
+        source("/work/crates/rules/src/lib.rs", 100, 100),
+        source("/work/crates/search/src/lib.rs", 1000, 1000),
+    ]}]}
+    packages = {"rules": "rules-package", "search": "search"}
+    reports = {"rules-package": report, "search": caller_report}
+    own_totals = own_region_counts(packages, root, reports.pop)
+    assert not reports
+    assert own_totals == {"rules": (99, 100), "search": (1000, 1000)}
+    assert len(compare(own_totals, floors, packages.keys())[1]) == 1
+    assert not compare(region_counts(caller_report, root), floors, packages.keys())[1]
 
     with TemporaryDirectory() as directory:
         workspace = Path(directory)
@@ -164,13 +205,9 @@ def main():
             print("\n".join(problems), file=sys.stderr)
             return 1
         floors = json.loads((ROOT / ".cargo/coverage-floors.json").read_text(), parse_float=Decimal)
-        crates = {manifest.parent.name for manifest in (ROOT / "crates").glob("*/Cargo.toml")}
-        report = subprocess.check_output(
-            ["cargo", "llvm-cov", "--locked", "--workspace", "--json", "--summary-only",
-             "--ignore-filename-regex", TEST_PATH_REGEX],
-            cwd=ROOT,
-        )
-        summaries, problems = compare(region_counts(json.loads(report), ROOT), floors, crates)
+        packages = workspace_packages()
+        totals = own_region_counts(packages, ROOT, coverage_report)
+        summaries, problems = compare(totals, floors, packages.keys())
     except (OSError, subprocess.CalledProcessError, ValueError, KeyError, InvalidOperation) as error:
         print(f"Could not check region coverage: {error}. {install}", file=sys.stderr)
         return 1

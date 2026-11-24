@@ -210,7 +210,20 @@ def mutation_batches(args, output):
         yield "changed-tests", [arg for package, _ in packages for arg in ("--package", package)]
 
 
+def mutation_command(jobs):
+    return [
+        "cargo", "mutants", "--no-config", "--test-workspace=false", "--cap-lints=true",
+        "--minimum-test-timeout", "120", "--annotations=none", "--copy-target=false", "--cargo-arg=--locked",
+        "--cargo-test-arg=--tests", "--jobs", str(jobs),
+    ]
+
+
 def self_test():
+    # Both diff batches and the full run use the same package-only policy.
+    options = mutation_command(4)
+    assert "--test-workspace=false" in options and "--test-workspace=true" not in options
+    assert "--no-config" in options
+    assert "--cargo-test-arg=--tests" in options
     assert test_sources(Path("crates/search/tests/search.rs"), b"")
     assert test_sources(Path("crates/search/tests/fixture.json"))
     assert test_sources(Path("crates/uci/src/command/tests/helpers.rs"), b"")
@@ -276,11 +289,7 @@ def run(args):
     args.output.mkdir(parents=True, exist_ok=True)
     output = Path(mkdtemp(prefix="run-", dir=args.output.resolve()))
     print(f"Mutation reports: {output}", flush=True)
-    command = [
-        "cargo", "mutants", "--test-workspace=true", "--cap-lints=true",
-        "--minimum-test-timeout", "120", "--annotations=none", "--copy-target=false", "--cargo-arg=--locked",
-        "--jobs", str(args.jobs),
-    ]
+    command = mutation_command(args.jobs)
     counts = defaultdict(Counter)
     problems = []
     for name, options in mutation_batches(args, output):

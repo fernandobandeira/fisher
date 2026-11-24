@@ -1022,63 +1022,70 @@ mod model {
                 }
                 return;
             }
-            if let Some(mut work) = self.work {
-                if work.phase == Phase::Exiting
-                    || (work.phase == Phase::Stopping && engine != Engine::NoStopBarrier)
-                {
-                    self.deferred.push_back(command);
-                    return;
-                }
-                match command {
-                    Action::Position | Action::Invalid => {
-                        self.answer(engine, Line::PositionRejected)
-                    }
-                    Action::Go | Action::Infinite => self.answer(engine, Line::GoRejected),
-                    Action::Ready => {
-                        self.answer(engine, Line::Ready);
-                        if engine == Engine::ReadyReleasesMove && work.phase == Phase::Held {
-                            self.release(engine, work);
-                        }
-                    }
-                    Action::Quit | Action::Eof if engine == Engine::QuitDropsMove => {
-                        self.exited = true;
-                    }
-                    Action::Stop | Action::Quit | Action::Eof => {
-                        let held = work.phase == Phase::Held;
-                        work.phase = if command == Action::Stop {
-                            Phase::Stopping
-                        } else {
-                            Phase::Exiting
-                        };
-                        if held {
-                            self.release(engine, work);
-                        } else {
-                            self.work = Some(work);
-                        }
+            match self.work {
+                Some(work) => self.command_while_searching(engine, command, work),
+                None => self.command_while_idle(engine, command),
+            }
+        }
+
+        fn command_while_searching(&mut self, engine: Engine, command: Action, work: Work) {
+            if work.phase == Phase::Exiting
+                || (work.phase == Phase::Stopping && engine != Engine::NoStopBarrier)
+            {
+                self.deferred.push_back(command);
+                return;
+            }
+            match command {
+                Action::Position | Action::Invalid => self.answer(engine, Line::PositionRejected),
+                Action::Go | Action::Infinite => self.answer(engine, Line::GoRejected),
+                Action::Ready => {
+                    self.answer(engine, Line::Ready);
+                    if engine == Engine::ReadyReleasesMove && work.phase == Phase::Held {
+                        self.release(engine, work);
                     }
                 }
+                Action::Quit | Action::Eof if engine == Engine::QuitDropsMove => {
+                    self.exited = true;
+                }
+                Action::Stop | Action::Quit | Action::Eof => self.end_search(engine, command, work),
+            }
+        }
+
+        fn end_search(&mut self, engine: Engine, command: Action, mut work: Work) {
+            let held = work.phase == Phase::Held;
+            work.phase = if command == Action::Stop {
+                Phase::Stopping
             } else {
-                match command {
-                    Action::Position => self.root = Root::B,
-                    Action::Invalid => self.write(Line::InvalidPosition),
-                    Action::Go | Action::Infinite => {
-                        self.work = Some(Work {
-                            root: self.root,
-                            infinite: command == Action::Infinite,
-                            phase: Phase::Working,
-                            depth_reported: false,
-                            ended_reported: false,
-                        });
-                    }
-                    Action::Ready => self.write(Line::Ready),
-                    Action::Quit | Action::Eof => self.exited = true,
-                    Action::Stop if engine == Engine::IdleStopRepeats => {
-                        if let Some(root) = self.previous_move {
-                            self.write(Line::Bestmove(root));
-                        }
-                    }
-                    Action::Stop => {}
+                Phase::Exiting
+            };
+            if held {
+                self.release(engine, work);
+            } else {
+                self.work = Some(work);
+            }
+        }
+
+        fn command_while_idle(&mut self, engine: Engine, command: Action) {
+            match command {
+                Action::Position => self.root = Root::B,
+                Action::Invalid => self.write(Line::InvalidPosition),
+                Action::Go | Action::Infinite => {
+                    self.work = Some(Work {
+                        root: self.root,
+                        infinite: command == Action::Infinite,
+                        phase: Phase::Working,
+                        depth_reported: false,
+                        ended_reported: false,
+                    });
                 }
+                Action::Ready => self.write(Line::Ready),
+                Action::Quit | Action::Eof => self.exited = true,
+                Action::Stop if engine == Engine::IdleStopRepeats => {
+                    if let Some(root) = self.previous_move {
+                        self.write(Line::Bestmove(root));
+                    }
+                }
+                Action::Stop => {}
             }
         }
 
@@ -1131,31 +1138,64 @@ mod model {
             MAX_ACTIONS
         };
         if schedule.actions < limit {
-            if schedule.input != InputState::Closed {
-                for command in INPUTS {
-                    if schedule.actions + 1 < limit
-                        || schedule.input != InputState::Open
-                        || matches!(command, Action::Quit | Action::Eof)
-                    {
-                        let mut next = schedule.clone();
-                        next.record_input(command);
-                        explore(engine, next, seen, histories);
-                    }
-                }
-            }
-            if !schedule.exited
-                && (schedule.actions + 1 < limit || schedule.input != InputState::Open)
-                && let Some(work) = schedule.work.filter(|work| !work.ended_reported)
+            explore_inputs(engine, &schedule, limit, seen, histories);
+            explore_reports(engine, &schedule, limit, seen, histories);
+        }
+        explore_deliveries(engine, &schedule, seen, histories);
+        if schedule.exited && schedule.worker.is_empty() && schedule.channel.is_empty() {
+            histories.insert(schedule.history);
+        }
+    }
+
+    fn explore_inputs(
+        engine: Engine,
+        schedule: &Schedule,
+        limit: usize,
+        seen: &mut HashSet<Schedule>,
+        histories: &mut Histories,
+    ) {
+        if schedule.input == InputState::Closed {
+            return;
+        }
+        for command in INPUTS {
+            if schedule.actions + 1 < limit
+                || schedule.input != InputState::Open
+                || matches!(command, Action::Quit | Action::Eof)
             {
-                for kind in [ReportKind::Depth, ReportKind::Ended] {
-                    if kind == ReportKind::Ended || !work.depth_reported {
-                        let mut next = schedule.clone();
-                        next.record_report(kind, work);
-                        explore(engine, next, seen, histories);
-                    }
+                let mut next = schedule.clone();
+                next.record_input(command);
+                explore(engine, next, seen, histories);
+            }
+        }
+    }
+
+    fn explore_reports(
+        engine: Engine,
+        schedule: &Schedule,
+        limit: usize,
+        seen: &mut HashSet<Schedule>,
+        histories: &mut Histories,
+    ) {
+        if !schedule.exited
+            && (schedule.actions + 1 < limit || schedule.input != InputState::Open)
+            && let Some(work) = schedule.work.filter(|work| !work.ended_reported)
+        {
+            for kind in [ReportKind::Depth, ReportKind::Ended] {
+                if kind == ReportKind::Ended || !work.depth_reported {
+                    let mut next = schedule.clone();
+                    next.record_report(kind, work);
+                    explore(engine, next, seen, histories);
                 }
             }
         }
+    }
+
+    fn explore_deliveries(
+        engine: Engine,
+        schedule: &Schedule,
+        seen: &mut HashSet<Schedule>,
+        histories: &mut Histories,
+    ) {
         // Delivery is unobservable. Delivering Ended just before or just
         // after recording a command enumerates both channel orders. Commands
         // already recorded when the worker reports are already enqueued.
@@ -1174,9 +1214,6 @@ mod model {
                 next.handle(engine, message);
             }
             explore(engine, next, seen, histories);
-        }
-        if schedule.exited && schedule.worker.is_empty() && schedule.channel.is_empty() {
-            histories.insert(schedule.history);
         }
     }
 

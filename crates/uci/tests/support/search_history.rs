@@ -117,6 +117,8 @@ impl std::fmt::Display for Violation {
 
 type Fault = (u8, &'static str);
 
+const NOT_A_RESPONSE: Fault = (10, "expected one whole session response");
+
 #[derive(Clone)]
 struct Search {
     infinite: bool,
@@ -326,29 +328,37 @@ impl<'a> Session<'a> {
         match body.split_once(' ').unwrap_or((body, "")) {
             ("bestmove", text) if text.parse::<UciMove>().is_ok() => self.bestmove(text),
             ("info", text) if text.starts_with("depth ") => self.search_info(body),
-            ("readyok", "") if body == "readyok" => self.command_response(CommandResponse::Ready),
-            ("uciok", "") if body == "uciok" => self.command_response(CommandResponse::UciOk),
-            ("id", text) if payload(text, "name ") => {
-                self.command_response(CommandResponse::IdName)
-            }
-            ("id", text) if payload(text, "author ") => {
-                self.command_response(CommandResponse::IdAuthor)
-            }
-            ("info", "string position rejected: waiting for stop") => {
-                self.command_response(CommandResponse::PositionRejected)
-            }
-            ("info", "string go rejected: waiting for stop") => {
-                self.command_response(CommandResponse::GoRejected)
-            }
-            ("info", text) if payload(text, "string position rejected: ") => {
-                self.command_response(CommandResponse::InvalidPosition)
-            }
-            ("info", text) if payload(text, "string ") && self.idle_stop => {
-                Err((4, "idle stop wrote a response"))
-            }
-            ("info", text) if payload(text, "string ") => Err((10, "unexpected diagnostic")),
-            _ => Err((10, "expected one whole session response")),
+            ("info", text) => self.info_string(text),
+            _ => self.reply(body),
         }
+    }
+
+    /// Judges an `info` response other than search information: a
+    /// rejection, or a diagnostic nothing asked for.
+    fn info_string(&mut self, text: &str) -> Result<(), Fault> {
+        let response = match text {
+            "string position rejected: waiting for stop" => CommandResponse::PositionRejected,
+            "string go rejected: waiting for stop" => CommandResponse::GoRejected,
+            _ if payload(text, "string position rejected: ") => CommandResponse::InvalidPosition,
+            _ if payload(text, "string ") && self.idle_stop => {
+                return Err((4, "idle stop wrote a response"));
+            }
+            _ if payload(text, "string ") => return Err((10, "unexpected diagnostic")),
+            _ => return Err(NOT_A_RESPONSE),
+        };
+        self.command_response(response)
+    }
+
+    /// Judges a reply to `isready` or `uci`.
+    fn reply(&mut self, body: &str) -> Result<(), Fault> {
+        let response = match (body, body.strip_prefix("id ")) {
+            ("readyok", _) => CommandResponse::Ready,
+            ("uciok", _) => CommandResponse::UciOk,
+            (_, Some(text)) if payload(text, "name ") => CommandResponse::IdName,
+            (_, Some(text)) if payload(text, "author ") => CommandResponse::IdAuthor,
+            _ => return Err(NOT_A_RESPONSE),
+        };
+        self.command_response(response)
     }
 
     fn command_response(&mut self, response: CommandResponse) -> Result<(), Fault> {

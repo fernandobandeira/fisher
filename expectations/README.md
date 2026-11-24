@@ -93,11 +93,11 @@ checks a `{score}` against the reference minimax at that depth, and the
 principal variation under D5. Deeper lines get the spelling and length
 checks only, because the reference minimax prunes nothing.
 
-### Staged transcripts for search on its own thread
+### Transcripts for search on its own thread
 
-fisher-5sg.12 staged five sessions in [`uci-threaded-search/`](uci-threaded-search/)
-on 2026-11-24 for fisher-2aj.5. The two files named for a held move
-succeed their active files under D25. The three other sessions cover
+fisher-2aj.5 activates the five sessions authored in fisher-5sg.12 in [`uci/`](uci/).
+The two held-move sessions replace their predecessors under D25.
+The three other sessions cover
 the commands after `stop` under D24 and an immediate `quit` or end of input.
 The held-move transcripts read the last `info` line before the next command.
 The scripted histories can also observe the search reporting `Ended`.
@@ -113,7 +113,7 @@ Each staged file with the same name succeeds its active file. The `go depth`,
 session in `go-depth.uci`, `go-nodes.uci` and `go-movetime.uci`. They use
 the default depth of four until their limits are implemented.
 
-Each completed depth has its own required reply with a literal depth.
+Each finished depth has its own required reply with a literal depth.
 For depth D, the node total adds the counts of every search from depth 1
 through D. Each individual search counts the nodes at plies 1 through its
 depth. For example, the starting position reports 20, 440, 9762 and 216365

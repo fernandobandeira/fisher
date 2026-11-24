@@ -101,35 +101,27 @@ fn go_infinite_terminal() -> io::Result<()> {
 
 #[test]
 fn quit_while_held() -> io::Result<()> {
-    play_threaded_transcript("quit-while-held")
+    play_transcript("quit-while-held")
 }
 
 #[test]
 fn end_of_input_while_held() -> io::Result<()> {
-    play_threaded_transcript("end-of-input-while-held")
+    play_transcript("end-of-input-while-held")
 }
 
 #[test]
 fn go_then_quit() -> io::Result<()> {
-    play_threaded_transcript("go-then-quit")
+    play_transcript("go-then-quit")
 }
 
 #[test]
 fn go_then_end_of_input() -> io::Result<()> {
-    play_threaded_transcript("go-then-end-of-input")
+    play_transcript("go-then-end-of-input")
 }
 
 #[test]
 fn stop_position_go() -> io::Result<()> {
-    play_threaded_transcript("stop-position-go")
-}
-
-fn play_threaded_transcript(name: &str) -> io::Result<()> {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../expectations/uci-threaded-search")
-        .join(format!("{name}.uci"));
-    let transcript = fs::read_to_string(path)?;
-    run_transcript(name, &transcript, Engine::start).map(drop)
+    play_transcript("stop-position-go")
 }
 
 #[test]

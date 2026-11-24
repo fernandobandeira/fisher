@@ -54,7 +54,7 @@ fn reports_terminal_positions_without_searching_a_depth() -> Result<(), Box<dyn 
 }
 
 #[test]
-fn reports_the_finished_depth_before_ending_the_search() -> Result<(), Box<dyn Error>> {
+fn reports_the_finished_depth_before_the_best_move() -> Result<(), Box<dyn Error>> {
     // The python-chess counts and the sole legal move are recorded in new-game.uci.
     let reports = reports_for("7k/8/5K1Q/8/8/8/8/8 b - - 0 1")?;
     let [

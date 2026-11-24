@@ -31,7 +31,8 @@ use crate::{
 /// # Errors
 ///
 /// Returns an error if a thread cannot start, the search dies or returns
-/// without ending, reports after ending, input cannot be read, or output cannot be written or flushed.
+/// without a best move, the search reports after its best move, input cannot
+/// be read, or output cannot be written or flushed.
 pub fn run_session(
     input: impl Read + Send + 'static,
     mut output: impl Write,

@@ -134,7 +134,7 @@ fn receive<T>(receiver: &mpsc::Receiver<T>) -> io::Result<T> {
 #[derive(Clone, Copy, Debug)]
 enum Report {
     Depth,
-    End,
+    BestMove,
 }
 
 struct Script {
@@ -189,11 +189,11 @@ const ALPHABET: [Step; 10] = [
     Step::Command("quit"),
     Step::Eof,
     Step::Report(Report::Depth),
-    Step::Report(Report::End),
+    Step::Report(Report::BestMove),
 ];
 
 // Track which scripted reports can run within four steps. A go queued behind
-// a stop cannot receive a scripted report until the first search has ended.
+// a stop cannot receive a scripted report until the first search reports its best move.
 enum ScriptSearch {
     Idle,
     Finite,
@@ -215,13 +215,13 @@ impl ScriptSearch {
         if matches!(self, Self::Finite | Self::Infinite) {
             script.report(report)?;
         }
-        if matches!(report, Report::End) {
-            self.end();
+        if matches!(report, Report::BestMove) {
+            self.report_best_move();
         }
         Ok(())
     }
 
-    fn end(&mut self) {
+    fn report_best_move(&mut self) {
         *self = match self {
             Self::Finite => Self::Idle,
             Self::Infinite => Self::Held,
@@ -295,11 +295,11 @@ fn rejected_finite_replacements_leave_the_position_for_the_next_search() -> io::
     );
     assert_eq!(session.reply()?, "readyok\n");
     script.report(Report::Depth)?;
-    script.report(Report::End)?;
+    script.report(Report::BestMove)?;
     assert!(session.reply()?.starts_with("info depth 1 "));
     assert_eq!(session.reply()?, "bestmove h8g8\n");
     session.command("go")?;
-    script.report(Report::End)?;
+    script.report(Report::BestMove)?;
     session.eof();
     assert_eq!(session.finish()?, ["bestmove h8g8\n"]);
     Ok(())
@@ -311,8 +311,8 @@ fn stop_releases_its_move_before_a_queued_position_and_go() -> io::Result<()> {
     for command in [A, "go infinite", "stop", B, "go", "quit"] {
         session.command(command)?;
     }
-    script.report(Report::End)?;
-    script.report(Report::End)?;
+    script.report(Report::BestMove)?;
+    script.report(Report::BestMove)?;
     assert_eq!(session.finish()?, ["bestmove h8g8\n", "bestmove h8h7\n"]);
     Ok(())
 }
@@ -324,7 +324,7 @@ fn acknowledged_commands_reach_the_channel_before_the_next_report() -> io::Resul
     session.command("go")?;
     session.command("isready")?;
     // The first report can only run after the reader has acknowledged isready.
-    script.report(Report::End)?;
+    script.report(Report::BestMove)?;
     assert_eq!(session.reply()?, "readyok\n");
     assert_eq!(session.reply()?, "bestmove h8g8\n");
     session.command("quit")?;

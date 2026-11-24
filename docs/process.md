@@ -41,7 +41,7 @@ Tier a change by how far it reaches, how easily a mistake in it would be noticed
 
 ## Recording the bench signature
 
-Run `fisher bench` for a change to search, evaluation or time management. Put `Bench: <total>` in the commit message and record the total and the revision in the Result column of the [claims table](evidence.md#the-claims-table).
+Run `fisher bench` for a change to search, evaluation or time management. Put `Bench: <total>` in the commit message and record the total and the revision in the Result column of the [claims table](evidence.md#the-claims-table). No hook enforces this yet; a hook is a guard and would be proposed on its own.
 
 A change that claims to preserve behaviour must keep the signature unchanged. A change intended to alter the search reports the old and new totals and explains why they differ.
 

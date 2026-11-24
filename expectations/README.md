@@ -52,10 +52,9 @@ bound reads and process exit to detect a hang.
 
 ### Searched moves
 
-Under rule 9 of fisher-2aj, an accepted `go infinite` produces its `info`
-line before the reply to `isready` and holds `bestmove` until `stop`. The
-owner approved both terminal `info` lines on 2026-11-23 in a comment on
-fisher-2aj.2.
+The sessions that read an `info` line before sending `isready` under
+`go infinite` expect that line before `readyok`. The owner approved both
+terminal `info` lines on 2026-11-23 in a comment on fisher-2aj.2.
 
 Run [equal-scores.uci](uci/equal-scores.uci) twice in fresh
 processes. Require each `bestmove` to match `{legal}` and compare the two
@@ -93,6 +92,15 @@ per second from the reported nodes and time. At depths 1 to 4 it also
 checks a `{score}` against the reference minimax at that depth, and the
 principal variation under D5. Deeper lines get the spelling and length
 checks only, because the reference minimax prunes nothing.
+
+### Staged transcripts for search on its own thread
+
+fisher-5sg.12 staged five sessions in [`uci-threaded-search/`](uci-threaded-search/)
+on 2026-11-24 for fisher-2aj.5. The two files named for a held move
+succeed their active files under D25. The three other sessions cover
+the commands after `stop` under D24 and an immediate `quit` or end of input.
+The held-move transcripts read the last `info` line before the next command.
+The scripted histories can also observe the search reporting `Ended`.
 
 ### Staged iterative deepening transcripts
 

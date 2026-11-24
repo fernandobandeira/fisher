@@ -2,6 +2,8 @@
 mod principal_variation;
 #[path = "support/reference_minimax.rs"]
 mod reference;
+#[path = "support/scripted_transcripts.rs"]
+mod scripted_transcripts;
 
 use std::{
     fs,
@@ -140,8 +142,16 @@ fn collect_legal_bestmove_replies(name: &str) -> io::Result<Vec<String>> {
         expectations.join("uci").join(format!("{name}.uci"))
     };
     let transcript = fs::read_to_string(path)?;
-    let records = load_transcript(name, &transcript)?;
-    Session::new(Engine::start()?).play(name, records)
+    run_transcript(name, &transcript, Engine::start)
+}
+
+fn run_transcript<I: TranscriptIo>(
+    name: &str,
+    transcript: &str,
+    start: impl FnOnce() -> io::Result<I>,
+) -> io::Result<Vec<String>> {
+    let records = load_transcript(name, transcript)?;
+    Session::new(start()?).play(name, records)
 }
 
 enum Delimiter<'a> {

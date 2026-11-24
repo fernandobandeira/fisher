@@ -90,6 +90,10 @@ _Avoid_: fifty-move counter, draw counter
 
 ### Search
 
+**Bench signature**:
+The total node count of a fixed-depth search over a fixed list of positions, compared between revisions to show whether a change altered what the search visits.
+_Avoid_: benchmark, bench number
+
 **Ply**:
 One move by one color, used as the unit of distance in the game tree. Depth is counted in plies.
 _Avoid_: half-move (except in the name halfmove clock), level

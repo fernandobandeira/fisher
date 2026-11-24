@@ -73,7 +73,7 @@ Below the table, list anything still undecided: a claim nobody could test, a fin
 ## What is worth its cost here
 
 - **Always:** perft against published counts, comparison with a reference engine on random positions, invariants as property tests.
-- **For every change to search, evaluation or time management:** the bench signature, and an SPRT result when the claim is strength.
+- **For every change to search, evaluation or time management:** the [bench signature](process.md#recording-the-bench-signature), and an SPRT result when the claim is strength.
 - **Only where a weak assertion could hide a serious defect:** mutation testing, on that code alone.
 - **Not by default:** full mutation runs, formal models.
 

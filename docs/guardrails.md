@@ -1,6 +1,6 @@
 # Guardrails
 
-The pull-request jobs report results. GitHub currently has no branch protection or ruleset on `main` requiring those results. Agents follow the merge-on-green rule in [the process](process.md#pull-requests). A direct push runs the `check` job alone.
+Starting with this PR’s merge, the `main gates` ruleset requires the GitHub Actions `check`, `mutation`, and `coverage` jobs to pass and the pull request to be up to date with `main`. GitHub blocks red and out-of-date pull requests, force-pushes to `main`, and deletion of `main`. Nobody is on a bypass list. See the [merge process](process.md#pull-requests).
 
 | Guardrail | What it stops | Why it matters with agent-written code | Where enforced | When |
 |---|---|---|---|---|

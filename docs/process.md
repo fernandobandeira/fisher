@@ -39,6 +39,12 @@ Tier a change by how far it reaches, how easily a mistake in it would be noticed
 | **Behaviour** | Search, evaluation, time management | The human reads the claims table and plays or watches a game. Not the code. |
 | **Commitment** | A crate's public interface; how a position or a move is represented; what the engine says over UCI; a file format; a new dependency; `unsafe`; anything under a protected path | The human approves before merge. An ADR if it is hard to reverse. |
 
+## Recording the bench signature
+
+Run `fisher bench` for a change to search, evaluation or time management. Put `Bench: <total>` in the commit message and record the total and the revision in the Result column of the [claims table](evidence.md#the-claims-table). No hook enforces this yet; a hook is a guard and would be proposed on its own.
+
+A change that claims to preserve behaviour must keep the signature unchanged. A change intended to alter the search reports the old and new totals and explains why they differ.
+
 ## What the human reads, in order
 
 1. **Intent and expected outcomes.** The claims, and where each expected value comes from. Only the owner can say what was meant.

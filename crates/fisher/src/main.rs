@@ -1,4 +1,5 @@
 use std::{
+    env,
     io::{self, BufRead, Write},
     sync::mpsc,
     thread,
@@ -12,6 +13,10 @@ use uci::{
 };
 
 fn main() -> io::Result<()> {
+    if bench::run_if_requested(env::args_os().nth(1).as_deref(), &mut io::stdout().lock())? {
+        return Ok(());
+    }
+
     let (sender, lines) = mpsc::channel();
     thread::Builder::new().spawn(move || {
         if let Err(error) = read_input(io::stdin().lock(), &sender) {

@@ -33,7 +33,7 @@ decision that supplies its expectation.
 In both send records, decode `\t` as TAB, `\r` as CR, `\\` as a backslash,
 and `\xNN` as one byte written with two hexadecimal digits.
 
-The following expected lines have special meanings. All other replies are exact.
+The following expected lines have special meanings. All other responses are exact.
 
 | Expected line | Match |
 |---|---|
@@ -41,7 +41,8 @@ The following expected lines have special meanings. All other replies are exact.
 | `< info string {message}` | Match one `info string` line with any message. |
 | `< info string {message:fragment}` | Match one `info string` line whose message contains the case-sensitive fragment. |
 | `< bestmove {legal}` | Match one `bestmove` carrying a UCI move that an independent implementation lists as legal in the current position. |
-| `< info depth 4 score {score} nodes {nodes}` | Match one `info` line against the [allowance pattern](#searched-moves) under Searched moves. |
+| `< info depth 4 multipv 1 score {score} nodes {nodes} nps {nps} time {time} pv {pv}` | Match one searched `info` line against the [allowance pattern](#searched-moves). |
+| `< info depth 4 score {score} nodes {nodes}` | Used only by the scripted runner fixtures. Match one short searched `info` line with the S and N forms of [Repeated searched info](#repeated-searched-info). |
 
 For `{legal}`, the reference starts at the starting position and follows
 accepted `position` commands and their move lists. A `bestmove` reply does
@@ -56,19 +57,6 @@ line before the reply to `isready` and holds `bestmove` until `stop`. The
 owner approved both terminal `info` lines on 2026-11-23 in a comment on
 fisher-2aj.2.
 
-The expected line `< info depth 4 score {score} nodes {nodes}` is an
-allowance. It matches the entire output line, after removing its line
-ending, against this pattern with single spaces and nothing after the node
-count.
-
-```regex
-^info depth 4 score (cp (0|-?[1-9][0-9]*)|mate -?[1-9][0-9]*) nodes (0|[1-9][0-9]*)$
-```
-
-Use this expected line only when the score has no outside expected value.
-The exact lines use the published starting-position
-perft counts and positions checked independently with python-chess.
-
 Run [equal-scores.uci](uci/equal-scores.uci) twice in fresh
 processes. Require each `bestmove` to match `{legal}` and compare the two
 actual UCI moves for equality, as required by rule 6. This comparison is
@@ -76,96 +64,54 @@ part of running that transcript and uses the existing `{legal}` record.
 Run [material-zero.uci](uci/material-zero.uci) once to check the
 exact score for a position with no captures within four plies.
 
-### Four-ply principal variation (fisher-8hc.1)
-
-The prospective sessions in `uci-principal-variation/` use the order in
-the April 2006 UCI info example. The owner approved that order on
-2026-11-24 in fisher-8hc question 1. D3–D6 in fisher-r6y supply the
-principal variation and the allowances.
-[UCI specification, info](https://backscattering.de/chess/uci/#engine-info)
-
-The current runner reads `uci/`. Fisher-8hc.2 selects the approved
-prospective sessions and uses the seven other sessions from `uci/`.
-
-```text
-< info depth 4 score {score} time {time} nodes {nodes} nps {nps} pv {pv}
-```
-
-Match the entire output line after removing the line ending. Each space
-in the pattern is a single ASCII space. For a literal score or node count,
-require that exact text in place of its allowance. Only `position-moves.uci`
-uses the unrestricted score and node allowances.
-
-The full line, with every allowance in place, is this anchored regular
-expression:
-
-```regex
-^info depth 4 score (?:cp (?:0|-?[1-9][0-9]*)|mate -?[1-9][0-9]*) time (?:0|[1-9][0-9]*) nodes (?:0|[1-9][0-9]*) nps (?:0|[1-9][0-9]*) pv [a-h][1-8][a-h][1-8][qrbn]?(?: [a-h][1-8][a-h][1-8][qrbn]?){0,3}$
-```
-
-The principal variation contains one to four UCI moves with single spaces
-between them. The line ends immediately after the last move. Each move
-contains two squares and an optional lowercase promotion suffix. The move
-pattern excludes `0000`. Digits in every allowance are ASCII. Fisher-8hc.2
-checks replay and scoring under D5. The fresh-process comparison still
-applies to the prospective `equal-scores.uci` session.
-
-### Stockfish spelling (fisher-8hc.6)
-
-The successors in [`uci-stockfish-spelling/`](uci-stockfish-spelling/)
-use fisher-r6y D41 and Stockfish sf_19 (edb0d9d), read on 2026-11-24.
+The depth-four searched lines in `uci/` use fisher-r6y D41 and Stockfish sf_19
+(edb0d9d), read on 2026-11-24.
 See [`UCIEngine::on_update_full`](https://github.com/official-stockfish/Stockfish/blob/edb0d9d/src/uci.cpp#L654)
 and [`SearchManager::output_pv`](https://github.com/official-stockfish/Stockfish/blob/edb0d9d/src/search.cpp#L2273).
-Fisher-8hc.7 selects these sessions. The depth-zero responses for roots
-with no legal move keep their current spelling.
 
 ```text
 < info depth 4 multipv 1 score {score} nodes {nodes} nps {nps} time {time} pv {pv}
 ```
 
 Match the entire output line after removing its line ending. With every
-allowance in place, the anchored regular expression is:
+allowance in place, use this anchored regular expression. Require exact
+text for any literal score or node count. Only `position-moves.uci` uses
+the score and node allowances together.
 
 ```regex
 ^info depth 4 multipv 1 score (?:cp (?:0|-?[1-9][0-9]*)|mate -?[1-9][0-9]*) nodes (?:0|[1-9][0-9]*) nps (?:0|[1-9][0-9]*) time [1-9][0-9]* pv [a-h][1-8][a-h][1-8][qrbn]?(?: [a-h][1-8][a-h][1-8][qrbn]?){0,3}$
 ```
 
 `multipv` is the literal 1. Time is a whole number of milliseconds of
-at least 1 with no leading zero. The other allowances and the one-to-four
-move bound keep the forms above.
+at least 1 with no leading zero. The principal variation contains one to
+four UCI moves separated by single spaces. Each move contains two squares
+and an optional lowercase promotion suffix. The move pattern excludes
+`0000`. Digits in every allowance are ASCII. The runner checks the nodes
+per second from the reported nodes and time and checks the principal
+variation under D5.
 
 ### Repeated searched info
 
 Source: fisher-r6y D15 and fisher-5sg decision 1, approved by the owner on
-2026-11-24. See the [staged runner examples](uci-runner/repeated-searched-info.md).
+2026-11-24. See the [runner fixtures](uci-runner/repeated-searched-info.md).
 
-After the literal prefix `<* `, use one of these two full spellings. Both
-remain valid. The spelling in the record selects the grammar for every
-match, independently of the engine revision.
-
-```text
-info depth D score S nodes N
-info depth D score S time T nodes N nps R pv P
-```
-
-The [staged successor fixtures](uci-stockfish-spelling/repeated-searched-info.json)
-use this full spelling under D41:
+After the literal prefix `<* `, use the full spelling under D41. The
+scripted fixtures also use a short spelling. The spelling in the record
+selects the grammar for every match.
 
 ```text
 info depth D multipv 1 score S nodes N nps R time T pv P
+info depth D score S nodes N
 ```
 
-For the staged full spelling, `multipv` is the literal 1 and T is a
-positive ASCII decimal, `[1-9][0-9]*`. The other slot forms and the
-depth-dependent principal variation bound below apply.
+The fixtures also use the short spelling in ordinary `< ` responses,
+where it accepts allowances at literal depth 4.
 
-No fixture changes verdict. `full-spelling` and the two fixtures for an
-overlong principal variation report a positive time, so their verdicts
-still test the move bound. Five added fixtures reject one fault each: a
-time of 0, a missing `multipv`, a `multipv` other than 1, the old order
-of nodes, time and nps, and an nps that is not 1000 times the nodes
-divided by the time, rounded down (`nps-mismatch`). fisher-8hc.6 chose
-their verdicts; fisher-8hc.7 implements the checks.
+fisher-8hc.6 chose the verdicts of every fixture, and fisher-8hc.7
+implements the checks. Five fixtures reject one fault of the full
+spelling each: `time-zero`, `missing-multipv`, `multipv-two`, `old-order`
+(nodes, time and nps out of Stockfish's order), and `nps-mismatch` (an nps
+that is not 1000 times the nodes divided by the time, rounded down).
 
 Match the entire line, excluding its ending, with single ASCII spaces.
 Each slot accepts its corresponding allowance or a literal of the same
@@ -177,14 +123,15 @@ no regular expressions.
 | D | `{depth}` | Positive ASCII decimal, `[1-9][0-9]*`. |
 | S | `{score}` | `cp 0`, `cp` followed by a signed decimal, or `mate` followed by a signed decimal. Here a signed decimal is `-?[1-9][0-9]*`. |
 | N | `{nodes}` | Nonnegative ASCII decimal, `0\|[1-9][0-9]*`. |
-| T | `{time}` | Same decimal form as N. In the staged full spelling of D41, positive, `[1-9][0-9]*`. |
+| T | `{time}` | Positive ASCII decimal, `[1-9][0-9]*`. |
 | R | `{nps}` | Same decimal form as N. |
 | P | `{pv}` | One or more UCI moves separated by single spaces, each spelled `[a-h][1-8][a-h][1-8][qrbn]?`. |
 
-Proposed for owner approval: P contains at most D moves, where D is the
-matched depth. With literal D and P, check this bound at load time. With
-`{depth}`, check the bound against each output line. This agrees with the
-four-ply bound at D = 4. This record checks the spelling of UCI moves.
+Under fisher-r6y D5, the principal variation is as long as the depth
+searched, shorter only when it ends in checkmate or stalemate. The
+repetition checks that P contains at most D moves and checks the spelling
+of each move. With literal D and P, check the bound at load time. With
+`{depth}`, check it against each output line.
 
 Reject unknown or misplaced allowances and malformed patterns at load
 time, including when stdout would supply zero matches. For example,

@@ -2,13 +2,13 @@
 
 Source: fisher-5sg.1 and fisher-r6y D15, with fisher-5sg decision 1
 approved by the owner on 2026-11-24. An independent author chose the
-verdicts before the runner change. The fuller spelling comes from
-fisher-8hc.1. Its depth-dependent principal variation bound is proposed
-for owner approval.
+verdicts before the runner change. The full spelling follows fisher-r6y
+D41 and Stockfish sf_19. Under fisher-r6y D5, the principal variation is
+as long as the depth searched, shorter only when it ends in checkmate or
+stalemate.
 
 [repeated-searched-info.json](repeated-searched-info.json) holds the
 fixtures for fisher-5sg.2. Each case starts a fresh scripted session.
-The active runner reads sessions from `expectations/uci/`.
 
 - `transcript` is an array of lines. Append LF to each and concatenate
   them to obtain the input to the transcript loader.
@@ -39,5 +39,5 @@ status after the read bound would have expired.
 The mandatory-depth case places the exact depth 1 reply before the
 repetition. In the greedy case, depth 4 matches the repetition and gets
 consumed, so `readyok` reaches the ordinary depth 4 comparison and
-fails. The principal variation cases exercise the proposed bound at
+fails. The principal variation cases exercise the depth-dependent bound at
 depths below and above four.

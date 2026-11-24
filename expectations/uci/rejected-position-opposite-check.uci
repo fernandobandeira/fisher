@@ -1,3 +1,9 @@
+# Four-ply info spelling from Stockfish sf_19 (edb0d9d), read 2026-11-24:
+# UCIEngine::on_update_full in src/uci.cpp and SearchManager::output_pv in src/search.cpp.
+# fisher-r6y D41 sets this spelling; fisher-8hc.6 committed these sessions.
+# D3-D6 supply the
+# existing principal variation and allowances, with time at least one under D41.
+# The fisher-2aj.2 sources below supply the retained scores, node counts and response order.
 # Sources: April 2006 UCI specification https://backscattering.de/chess/uci/
 # and the owner decision of 2026-11-23 to reject opposite check with one
 # diagnostic. Shakmaty 0.30.3 independently rejects the second FEN.
@@ -15,7 +21,7 @@
 > go
 # Rules 4, 5, 7 and 10. Black must play h8g8, then h6g7 is checkmate.
 # Python-chess counts 1, 21, 30 and 730 nodes at plies 1 to 4.
-< info depth 4 score mate -1 nodes 782
+< info depth 4 multipv 1 score mate -1 nodes 782 nps {nps} time {time} pv {pv}
 # Owner-approved example: the original position still has its sole legal move.
 < bestmove h8g8
 # UCI quit.

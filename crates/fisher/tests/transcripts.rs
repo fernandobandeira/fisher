@@ -132,13 +132,9 @@ fn play_transcript(name: &str) -> io::Result<()> {
 }
 
 fn collect_legal_bestmove_replies(name: &str) -> io::Result<Vec<String>> {
-    let expectations = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../expectations");
-    let file = format!("{name}.uci");
-    let path = ["uci-stockfish-spelling", "uci-principal-variation"]
-        .into_iter()
-        .map(|directory| expectations.join(directory).join(&file))
-        .find(|path| path.is_file())
-        .unwrap_or_else(|| expectations.join("uci").join(file));
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../expectations/uci")
+        .join(format!("{name}.uci"));
     let transcript = fs::read_to_string(path)?;
     run_transcript(name, &transcript, Engine::start)
 }

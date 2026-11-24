@@ -38,7 +38,7 @@ with open(sys.argv[1], encoding="utf-8") as source:
 #[test]
 fn repeated_searched_info_fixtures() -> io::Result<()> {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../expectations/uci-stockfish-spelling/repeated-searched-info.json");
+        .join("../../expectations/uci-runner/repeated-searched-info.json");
     let decoded = Command::new("python3")
         .args(["-c", DECODE_FIXTURES])
         .arg(path)

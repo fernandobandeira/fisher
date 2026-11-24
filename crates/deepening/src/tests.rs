@@ -18,31 +18,31 @@ fn interrupt_inside_the_depth_discards_it() -> std::io::Result<()> {
     let expected = request.position.legal_moves().into_iter().next();
     let worker = thread::spawn(move || {
         let mut reports = Vec::new();
-        let mut permission_checks = 0;
+        let mut interrupt_checks = 0;
         search_with_clock(
             &request,
             &mut |report| reports.push(report),
             &Instant::now,
             &mut || {
-                permission_checks += 1;
-                if permission_checks == 3 {
+                interrupt_checks += 1;
+                if interrupt_checks == 3 {
                     assert!(at_node.send(()).is_ok());
                     assert!(may_resume.recv_timeout(Duration::from_secs(5)).is_ok());
                 }
-                !request.stop.load(Ordering::Relaxed)
+                is_interrupted(&request)
             },
         );
-        (permission_checks, reports)
+        (interrupt_checks, reports)
     });
     reached
         .recv_timeout(Duration::from_secs(5))
         .map_err(io::Error::other)?;
     stop.store(true, Ordering::Relaxed);
     resume.send(()).map_err(io::Error::other)?;
-    let (permission_checks, reports) = worker
+    let (interrupt_checks, reports) = worker
         .join()
         .map_err(|_| io::Error::other("search thread died"))?;
-    assert_eq!(permission_checks, 3);
+    assert_eq!(interrupt_checks, 3);
     assert_eq!(reports, [SearchReport::Ended(expected)]);
     Ok(())
 }
@@ -62,7 +62,7 @@ fn reports_elapsed_time_from_the_clock() -> std::io::Result<()> {
         &request,
         &mut |report| reports.push(report),
         &|| origin + Duration::from_micros(3250),
-        &mut || true,
+        &mut || false,
     );
 
     let [

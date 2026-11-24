@@ -31,7 +31,7 @@ use crate::{
 /// # Errors
 ///
 /// Returns an error if a thread cannot start, the search dies or returns
-/// without ending, input cannot be read, or output cannot be written or flushed.
+/// without ending, reports after ending, input cannot be read, or output cannot be written or flushed.
 pub fn run_session(
     input: impl Read + Send + 'static,
     mut output: impl Write,
@@ -41,10 +41,7 @@ pub fn run_session(
     let (sender, events) = mpsc::channel();
     let reader = sender.clone();
     thread::Builder::new().spawn(move || {
-        let event = match read_input(BufReader::new(input), &reader) {
-            Ok(()) => Event::EndOfInput,
-            Err(error) => Event::Error(error),
-        };
+        let event = Event::EndOfInput(read_input(BufReader::new(input), &reader));
         drop(reader.send(event));
     })?;
 
@@ -72,7 +69,7 @@ pub fn run_session(
 
 enum Event {
     Line(String),
-    EndOfInput,
+    EndOfInput(io::Result<()>),
     Report(SearchReport),
     Error(io::Error),
 }
@@ -83,19 +80,41 @@ fn run_searches(
     mut search: impl FnMut(SearchRequest, &mut dyn FnMut(SearchReport)),
 ) -> io::Result<()> {
     for request in work {
-        let mut ended = false;
+        let mut progress = SearchProgress::Running;
         panic::catch_unwind(AssertUnwindSafe(|| {
-            search(request, &mut |report| {
-                ended |= matches!(report, SearchReport::Ended(_));
-                drop(events.send(Event::Report(report)));
-            });
+            search(request, &mut |report| progress.send(report, events));
         }))
         .map_err(|_| io::Error::other("search thread died"))?;
-        if !ended {
-            return Err(io::Error::other("search returned without Ended"));
-        }
+        progress.finish()?;
     }
     Ok(())
+}
+
+enum SearchProgress {
+    Running,
+    Ended,
+    ReportedAfterEnd,
+}
+
+impl SearchProgress {
+    fn send(&mut self, report: SearchReport, events: &mpsc::Sender<Event>) {
+        if !matches!(self, Self::Running) {
+            *self = Self::ReportedAfterEnd;
+            return;
+        }
+        if matches!(report, SearchReport::Ended(_)) {
+            *self = Self::Ended;
+        }
+        drop(events.send(Event::Report(report)));
+    }
+
+    fn finish(self) -> io::Result<()> {
+        match self {
+            Self::Running => Err(io::Error::other("search returned without Ended")),
+            Self::Ended => Ok(()),
+            Self::ReportedAfterEnd => Err(io::Error::other("search reported after Ended")),
+        }
+    }
 }
 
 enum Active {
@@ -128,11 +147,11 @@ impl Session {
         loop {
             match self.next_event()? {
                 Event::Line(line) => match parse_command(&line) {
-                    Input::Handled(Command::Quit) => return self.release(output),
+                    Input::Handled(Command::Quit) => return self.quit(output),
                     Input::Handled(command) => self.command(output, version, command)?,
                     Input::Ignored | Input::Unknown => {}
                 },
-                Event::EndOfInput => return self.release(output),
+                Event::EndOfInput(result) => return self.release(output).and(result),
                 Event::Report(report) => self.report(output, report)?,
                 Event::Error(error) => return Err(error),
             }
@@ -224,13 +243,23 @@ impl Session {
         }
     }
 
+    fn quit(&mut self, output: &mut dyn Write) -> io::Result<()> {
+        self.release(output)?;
+        for event in self.deferred.drain(..) {
+            if let Event::EndOfInput(result) = event {
+                return result;
+            }
+        }
+        Ok(())
+    }
+
     fn release(&mut self, output: &mut dyn Write) -> io::Result<()> {
         self.active.interrupt();
         while matches!(self.active, Active::Searching { .. }) {
             match self.receive()? {
                 Event::Report(report) => self.report(output, report)?,
                 Event::Error(error) => return Err(error),
-                event @ (Event::Line(_) | Event::EndOfInput) => self.deferred.push_back(event),
+                event @ (Event::Line(_) | Event::EndOfInput(_)) => self.deferred.push_back(event),
             }
         }
         if let Active::Held(chosen) = std::mem::replace(&mut self.active, Active::Idle) {

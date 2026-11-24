@@ -7,7 +7,7 @@ use std::{
 };
 
 use rules::{Move, Position};
-use search::minimax_with_permission;
+use search::minimax_until_interrupted;
 
 pub use search::Score;
 
@@ -61,22 +61,26 @@ pub enum SearchReport {
 
 /// Reports each finished depth, then `Ended` with the move to send.
 /// If interrupted before finishing a depth, the move is the first legal move.
-/// A completed search of a terminal root reports depth 0 then `Ended(None)`.
+/// A finished search of a terminal root reports depth 0 then `Ended(None)`.
 #[expect(
     clippy::needless_pass_by_value,
     reason = "The worker owns the request and the current fixed-depth search only borrows it"
 )]
 pub fn search(request: SearchRequest, report: &mut dyn FnMut(SearchReport)) {
     search_with_clock(&request, report, &Instant::now, &mut || {
-        !request.stop.load(Ordering::Relaxed)
+        is_interrupted(&request)
     });
+}
+
+fn is_interrupted(request: &SearchRequest) -> bool {
+    request.stop.load(Ordering::Relaxed)
 }
 
 fn search_with_clock(
     request: &SearchRequest,
     report: &mut dyn FnMut(SearchReport),
     now: &dyn Fn() -> Instant,
-    may_enter: &mut dyn FnMut() -> bool,
+    interrupted: &mut dyn FnMut() -> bool,
 ) {
     // TODO(fisher-5sg.4): Deepen under the limits of the go.
     // TODO(fisher-5sg.10): Use the clocks and moves to go to set the time limit.
@@ -84,7 +88,7 @@ fn search_with_clock(
     let result = if request.stop.load(Ordering::Relaxed) {
         None
     } else {
-        minimax_with_permission(&request.position, DEPTH, may_enter)
+        minimax_until_interrupted(&request.position, DEPTH, interrupted)
     };
     let Some(result) = result else {
         report(SearchReport::Ended(

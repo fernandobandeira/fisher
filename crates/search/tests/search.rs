@@ -173,37 +173,37 @@ fn move_text(movement: rules::Move) -> String {
 }
 
 #[test]
-fn permission_is_required_before_each_node() {
-    use search::minimax_with_permission;
+fn checks_for_an_interrupt_before_each_node() {
+    use search::minimax_until_interrupted;
 
     let position = Position::starting();
     // Published starting-position perft counts.
     let nodes = 20 + 400;
-    for refusal in [1, 2, 22, nodes] {
-        let mut permission_checks = 0;
-        let result = minimax_with_permission(&position, 2, &mut || {
-            permission_checks += 1;
-            permission_checks < refusal
+    for interrupt_at in [1, 2, 22, nodes] {
+        let mut interrupt_checks = 0;
+        let result = minimax_until_interrupted(&position, 2, || {
+            interrupt_checks += 1;
+            interrupt_checks >= interrupt_at
         });
-        assert!(result.is_none(), "refusal at node {refusal}");
-        assert_eq!(permission_checks, refusal);
+        assert!(result.is_none(), "interrupt at node {interrupt_at}");
+        assert_eq!(interrupt_checks, interrupt_at);
     }
-    let mut permission_checks = 0;
-    let result = minimax_with_permission(&position, 2, &mut || {
-        permission_checks += 1;
-        true
+    let mut interrupt_checks = 0;
+    let result = minimax_until_interrupted(&position, 2, || {
+        interrupt_checks += 1;
+        false
     });
-    assert_eq!(permission_checks, nodes);
+    assert_eq!(interrupt_checks, nodes);
     assert_eq!(result, Some(minimax(&position, 2)));
 }
 
 #[test]
-fn permission_is_unused_if_only_the_root_is_searched() {
-    use search::minimax_with_permission;
+fn does_not_check_for_an_interrupt_at_the_root() {
+    use search::minimax_until_interrupted;
 
     let position = Position::starting();
     assert_eq!(
-        minimax_with_permission(&position, 0, &mut || false),
+        minimax_until_interrupted(&position, 0, || true),
         Some(minimax(&position, 0))
     );
 }

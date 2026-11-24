@@ -192,28 +192,61 @@ const ALPHABET: [Step; 10] = [
     Step::Report(Report::End),
 ];
 
+// Track which scripted reports can run within four steps. A go queued behind
+// a stop cannot receive a scripted report until the first search has ended.
+enum ScriptSearch {
+    Idle,
+    Finite,
+    Infinite,
+    Held,
+}
+
+impl ScriptSearch {
+    fn command(&mut self, command: &str) {
+        *self = match (&*self, command) {
+            (Self::Idle, "go") | (Self::Infinite, "stop") => Self::Finite,
+            (Self::Idle, "go infinite") => Self::Infinite,
+            (Self::Held, "stop") => Self::Idle,
+            _ => return,
+        };
+    }
+
+    fn report(&mut self, script: &Script, report: Report) -> io::Result<()> {
+        if matches!(self, Self::Finite | Self::Infinite) {
+            script.report(report)?;
+        }
+        if matches!(report, Report::End) {
+            self.end();
+        }
+        Ok(())
+    }
+
+    fn end(&mut self) {
+        *self = match self {
+            Self::Finite => Self::Idle,
+            Self::Infinite => Self::Held,
+            Self::Idle | Self::Held => return,
+        };
+    }
+}
+
 fn play_short_history(steps: impl Iterator<Item = Step>) -> io::Result<()> {
     let (mut session, script) = Script::start();
-    // With three steps, a report action cannot follow a second accepted go:
-    // releasing the first search and sending the second go already take three.
-    let mut running = false;
+    let mut search = ScriptSearch::Idle;
     let mut exiting = false;
     for step in steps.chain(std::iter::once(Step::Eof)) {
         match step {
             Step::Command(command) if !exiting => {
                 session.command(command)?;
                 exiting = command == "quit";
-                running |= matches!(command, "go" | "go infinite");
+                search.command(command);
             }
             Step::Eof if !exiting => {
                 session.eof();
                 exiting = true;
             }
-            Step::Report(report) if running => {
-                script.report(report)?;
-                running = matches!(report, Report::Depth);
-            }
-            Step::Command(_) | Step::Eof | Step::Report(_) => {}
+            Step::Report(report) => search.report(&script, report)?,
+            Step::Command(_) | Step::Eof => {}
         }
     }
     drop(script);
@@ -221,21 +254,24 @@ fn play_short_history(steps: impl Iterator<Item = Step>) -> io::Result<()> {
 }
 
 #[test]
-fn checks_every_sequence_up_to_three_steps() -> io::Result<()> {
+fn checks_every_sequence_up_to_four_steps() -> io::Result<()> {
     let started = Instant::now();
     let mut histories = 0;
-    for length in 0..=3 {
-        for mut index in 0..ALPHABET.len().pow(length) {
+    for length in 0..=4 {
+        for history in 0..ALPHABET.len().pow(length) {
+            let mut index = history;
             let steps = (0..length).map(|_| {
                 let step = ALPHABET.get(index % ALPHABET.len()).copied();
                 index /= ALPHABET.len();
                 step
             });
-            play_short_history(steps.flatten())?;
+            play_short_history(steps.flatten()).map_err(|error| {
+                io::Error::other(format!("history {length}/{history}: {error}"))
+            })?;
             histories += 1;
         }
     }
-    assert_eq!(histories, 1111);
+    assert_eq!(histories, 11_111);
     writeln!(
         io::stderr().lock(),
         "{histories} histories in {:?}",
@@ -327,6 +363,29 @@ fn answers_ready_while_real_search_is_held_then_interrupts_on_stop() -> io::Resu
     session.command("quit")?;
     let expected = first_starting_move()?;
     assert_eq!(session.finish()?, [expected]);
+    Ok(())
+}
+
+#[test]
+fn isready_leaves_a_finite_real_search_running() -> io::Result<()> {
+    let (started, hold) = mpsc::channel();
+    let (resume, released) = mpsc::channel();
+    let session = Session::start(move |request, report| {
+        assert!(started.send(()).is_ok());
+        assert!(receive(&released).is_ok());
+        assert!(!request.stop.load(Ordering::Relaxed));
+        deepening::search(request, report);
+    });
+    session.command(A)?;
+    session.command("go")?;
+    receive(&hold)?;
+    session.command("isready")?;
+    assert_eq!(session.reply()?, "readyok\n");
+    resume.send(()).map_err(io::Error::other)?;
+    assert!(session.reply()?.starts_with("info depth 4 "));
+    assert_eq!(session.reply()?, "bestmove h8g8\n");
+    session.command("quit")?;
+    assert_eq!(session.finish()?, Vec::<String>::new());
     Ok(())
 }
 
@@ -438,5 +497,32 @@ fn a_search_thread_dying_during_shutdown_returns_an_error() -> io::Result<()> {
         .err()
         .ok_or_else(|| io::Error::other("session accepted a dying search"))?;
     assert_eq!(error.to_string(), "search thread died");
+    Ok(())
+}
+
+#[test]
+fn reports_after_ended_are_errors_with_input_still_open() -> io::Result<()> {
+    for extra_report in [
+        SearchReport::Ended(None),
+        SearchReport::FinishedDepth(FinishedDepth {
+            depth: 1,
+            score: Score::Centipawns(0),
+            nodes: 1,
+            elapsed: Duration::from_millis(1),
+            principal_variation: Vec::new(),
+        }),
+    ] {
+        let session = Session::start(move |_, report| {
+            report(SearchReport::Ended(None));
+            report(extra_report.clone());
+        });
+        session.command("go")?;
+        let error = receive(&session.result)?
+            .err()
+            .ok_or_else(|| io::Error::other("session accepted a report after Ended"))?;
+        assert_eq!(error.to_string(), "search reported after Ended");
+        assert_eq!(session.reply()?, "bestmove 0000\n");
+        assert!(session.replies.try_recv().is_err());
+    }
     Ok(())
 }

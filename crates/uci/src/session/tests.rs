@@ -78,7 +78,7 @@ fn crlf_split_across_reads_sends_one_line() -> io::Result<()> {
             .into_iter()
             .map(|event| match event {
                 Event::Line(line) => Ok(line),
-                Event::EndOfInput | Event::Report(_) | Event::Error(_) =>
+                Event::EndOfInput(_) | Event::Report(_) | Event::Error(_) =>
                     Err(io::Error::other("expected a line")),
             })
             .collect::<io::Result<Vec<_>>>()?,
@@ -88,7 +88,16 @@ fn crlf_split_across_reads_sends_one_line() -> io::Result<()> {
 }
 
 #[test]
-fn reader_error_during_stop_ends_the_session() -> io::Result<()> {
+fn reader_error_during_stop_releases_the_move() -> io::Result<()> {
+    reader_error_during_release("stop")
+}
+
+#[test]
+fn reader_error_during_quit_releases_the_move() -> io::Result<()> {
+    reader_error_during_release("quit")
+}
+
+fn reader_error_during_release(command: &str) -> io::Result<()> {
     let (sender, events) = mpsc::channel();
     let (requests, work) = mpsc::channel();
     let mut session = Session {
@@ -98,23 +107,49 @@ fn reader_error_during_stop_ends_the_session() -> io::Result<()> {
         events,
         requests,
     };
+    for event in [
+        Event::Line("go".to_owned()),
+        Event::Line(command.to_owned()),
+        Event::EndOfInput(Err(io::ErrorKind::BrokenPipe.into())),
+        Event::Report(SearchReport::Ended(None)),
+    ] {
+        sender.send(event).map_err(io::Error::other)?;
+    }
+    drop(sender);
+    let mut output = Vec::new();
+    assert_read_error(session.run(&mut output, "test"), &output);
+    let request = work.try_recv().map_err(io::Error::other)?;
+    assert!(request.stop.load(Ordering::Relaxed));
+    Ok(())
+}
+
+#[test]
+fn reader_error_releases_a_held_move() -> io::Result<()> {
+    let (sender, events) = mpsc::channel();
+    let (requests, _work) = mpsc::channel();
+    let mut session = Session {
+        position: Position::starting(),
+        active: Active::Held(UciMove::Null),
+        deferred: VecDeque::new(),
+        events,
+        requests,
+    };
+    let input = read_input(BufReader::new(BrokenRead), &sender);
     sender
-        .send(Event::Line("go".to_owned()))
+        .send(Event::EndOfInput(input))
         .map_err(io::Error::other)?;
-    sender
-        .send(Event::Line("stop".to_owned()))
-        .map_err(io::Error::other)?;
-    sender
-        .send(Event::Error(io::ErrorKind::BrokenPipe.into()))
-        .map_err(io::Error::other)?;
-    let result = session.run(&mut io::sink(), "test");
+    drop(sender);
+    let mut output = Vec::new();
+    assert_read_error(session.run(&mut output, "test"), &output);
+    Ok(())
+}
+
+fn assert_read_error(result: io::Result<()>, output: &[u8]) {
     assert_eq!(
         result.err().map(|error| error.kind()),
         Some(io::ErrorKind::BrokenPipe)
     );
-    let request = work.try_recv().map_err(io::Error::other)?;
-    assert!(request.stop.load(Ordering::Relaxed));
-    Ok(())
+    assert_eq!(output, b"bestmove 0000\n");
 }
 
 #[test]

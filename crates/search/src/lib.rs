@@ -1,3 +1,5 @@
+use std::convert::Infallible;
+
 use rules::{Move, PieceKind, Position, Square};
 
 const CHECKMATE: i32 = 100_000;
@@ -20,35 +22,41 @@ pub struct SearchResult {
 /// At depth zero the result has no chosen move, even if legal moves exist.
 /// The score is from the starting side to move, and nodes exclude the starting position.
 #[must_use]
-#[expect(
-    clippy::missing_panics_doc,
-    reason = "the permission never refuses a node"
-)]
 pub fn minimax(position: &Position, depth: u8) -> SearchResult {
-    #[expect(clippy::expect_used, reason = "the permission never refuses a node")]
-    let result =
-        minimax_with_permission(position, depth, &mut || true).expect("search cannot stop");
+    let Ok(result) = search_depth(position, depth, &mut || Ok::<(), Infallible>(()));
     result
 }
 
-/// Searches one depth, asking permission before playing the move that reaches each node.
-/// Returns no result if permission is refused anywhere in the depth.
+/// Searches one depth, calling `interrupted` before playing the move that reaches each node.
+/// Returns `None` if the callback returns true anywhere in the depth.
 #[must_use]
-pub fn minimax_with_permission(
+pub fn minimax_until_interrupted(
     position: &Position,
     depth: u8,
-    may_enter: &mut dyn FnMut() -> bool,
+    mut interrupted: impl FnMut() -> bool,
 ) -> Option<SearchResult> {
+    search_depth(position, depth, &mut || {
+        (!interrupted()).then_some(()).ok_or(())
+    })
+    .ok()
+}
+
+fn search_depth<E>(
+    position: &Position,
+    depth: u8,
+    before_node: &mut impl FnMut() -> Result<(), E>,
+) -> Result<SearchResult, E> {
     let mut nodes = 0;
     // Reuse one buffer per ply across sibling searches.
     let mut variations: Vec<_> = (0..depth).map(|_| Vec::new()).collect();
-    let score = search(position, 0, &mut nodes, &mut variations, may_enter)?;
-    let principal_variation = variations.into_iter().next().unwrap_or_default();
-    Some(SearchResult {
-        chosen_move: principal_variation.first().copied(),
-        score: mate_within_depth_or_centipawns(score, depth),
-        nodes,
-        principal_variation,
+    search(position, 0, &mut nodes, &mut variations, before_node).map(|score| {
+        let principal_variation = variations.into_iter().next().unwrap_or_default();
+        SearchResult {
+            chosen_move: principal_variation.first().copied(),
+            score: mate_within_depth_or_centipawns(score, depth),
+            nodes,
+            principal_variation,
+        }
     })
 }
 
@@ -67,41 +75,48 @@ fn mate_within_depth_or_centipawns(score: i32, depth: u8) -> Score {
     }
 }
 
-fn search(
+fn search<E>(
     position: &Position,
     ply: u8,
     nodes: &mut u64,
     variations: &mut [Vec<Move>],
-    may_enter: &mut dyn FnMut() -> bool,
-) -> Option<i32> {
+    before_node: &mut impl FnMut() -> Result<(), E>,
+) -> Result<i32, E> {
     let Some((best_variation, replies)) = variations.split_first_mut() else {
-        return Some(material(position));
+        return Ok(material(position));
     };
     best_variation.clear();
     let mut best_score = i32::MIN;
-    for movement in position.legal_moves() {
-        if !may_enter() {
-            return None;
-        }
-        *nodes += 1;
-        let score = -search(&movement.play(), ply + 1, nodes, replies, may_enter)?;
-        if score > best_score {
-            best_score = score;
-            best_variation.clear();
-            best_variation.push(movement);
-            if let Some(reply) = replies.first() {
-                best_variation.extend_from_slice(reply);
+    position
+        .legal_moves()
+        .into_iter()
+        .try_for_each(|movement| {
+            before_node().and_then(|()| {
+                *nodes += 1;
+                search(&movement.play(), ply + 1, nodes, replies, before_node).map(|score| {
+                    let score = -score;
+                    if score > best_score {
+                        best_score = score;
+                        best_variation.clear();
+                        best_variation.push(movement);
+                        if let Some(reply) = replies.first() {
+                            best_variation.extend_from_slice(reply);
+                        }
+                    }
+                })
+            })
+        })
+        .map(|()| {
+            if best_variation.is_empty() {
+                if position.is_in_check() {
+                    i32::from(ply) - CHECKMATE
+                } else {
+                    0
+                }
+            } else {
+                best_score
             }
-        }
-    }
-    if best_variation.is_empty() {
-        return Some(if position.is_in_check() {
-            i32::from(ply) - CHECKMATE
-        } else {
-            0
-        });
-    }
-    Some(best_score)
+        })
 }
 
 fn material(position: &Position) -> i32 {

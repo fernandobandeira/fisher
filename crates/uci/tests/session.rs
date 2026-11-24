@@ -175,14 +175,14 @@ fn terminal_search_reports_omit_search_statistics_and_a_move() -> io::Result<()>
             "info depth 0 score cp 0\nbestmove 0000\n",
         ),
     ] {
-        assert_eq!(session_output(position, completed_search)?, expected);
+        assert_eq!(session_output(position, finished_search)?, expected);
     }
     Ok(())
 }
 
-// These tests examine output from completed work, including reports after
-// stop is queued. Keep the search independent of cancellation in this fixture.
-fn completed_search(mut request: deepening::SearchRequest, report: &mut dyn FnMut(SearchReport)) {
+// These tests examine output from finished work, including reports after
+// stop is queued. Keep the search independent of the interrupt in this fixture.
+fn finished_search(mut request: deepening::SearchRequest, report: &mut dyn FnMut(SearchReport)) {
     request.stop = Arc::new(AtomicBool::new(false));
     deepening::search(request, report);
 }
@@ -195,8 +195,14 @@ fn reports_the_read_error_from_the_gui() {
             Err(io::ErrorKind::BrokenPipe.into())
         }
     }
-    let error = uci::run_session(BrokenInput, io::sink(), "test", |_, _| {}).unwrap_err();
+    let input = io::Read::chain(&b"go infinite\n"[..], BrokenInput);
+    let mut output = Vec::new();
+    let error = uci::run_session(input, &mut output, "test", |_, report| {
+        report(SearchReport::Ended(None));
+    })
+    .unwrap_err();
     assert_eq!(error.kind(), io::ErrorKind::BrokenPipe);
+    assert_eq!(output, b"bestmove 0000\n");
 }
 
 #[test]
@@ -219,7 +225,7 @@ fn reports_a_flush_failure_on_each_protocol_response() -> io::Result<()> {
     // Handshake and readiness, a rejected position, the held-move guards,
     // and the searched and terminal responses are specified in expectations/uci.
     const COMMANDS: &[u8] = b"uci\nisready\nposition\n        position fen 7k/8/5K1Q/8/8/8/8/8 b - - 0 1\n        go infinite\nposition startpos\ngo\nstop\ngo depth\nquit\n";
-    let successful = session_output(COMMANDS, completed_search)?;
+    let successful = session_output(COMMANDS, finished_search)?;
     // Two ID responses and uciok, readyok, the position diagnostic, one info,
     // two rejected commands, the released move, and info/bestmove for finite go.
     assert_eq!(successful.lines().count(), 11);
@@ -229,7 +235,7 @@ fn reports_a_flush_failure_on_each_protocol_response() -> io::Result<()> {
             COMMANDS,
             FailOnFlush(Some(response)),
             "test",
-            completed_search,
+            finished_search,
         )
         .unwrap_err();
         assert_eq!(

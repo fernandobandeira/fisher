@@ -46,6 +46,10 @@ _Avoid_: man, figure
 Everything the rules need to continue a game: which piece stands on which square, the side to move, the castling rights, the en passant square, the halfmove clock and the fullmove number.
 _Avoid_: board, state, game state
 
+**Starting position**:
+The position a game of standard chess starts from, which UCI calls `startpos`. A search can start from any position, and that one is its root.
+_Avoid_: initial position, opening position
+
 **Side to move**:
 The color that makes the next move in a position.
 _Avoid_: turn, active color, player to move
@@ -67,6 +71,10 @@ _Banned in code_: valid move
 **Opposite check**:
 Said of a position in which the king of the color that is not the side to move is attacked. No legal move leads to one, so a FEN that describes one is rejected.
 _Avoid_: other king in check, illegal check
+
+**Terminal position**:
+A position with no legal move: its side to move is checkmated or stalemated. A position drawn by the fifty-move rule or by repetition still has legal moves and is not one.
+_Avoid_: final position, game over, end of the game
 
 **Reply**:
 A move that answers the move before it, played by the other color. What fisher sends over UCI is a response, never a reply.
@@ -97,6 +105,14 @@ _Avoid_: first move, candidate move, top-level move
 **Horizon**:
 The ply at which a search stops playing moves. A position there is scored as it stands, without asking whether it has a legal move.
 _Avoid_: frontier, search edge, leaf depth
+
+**Score**:
+What a search says a position is worth to that position's side to move: a number of centipawns, or a mate distance. The score fisher reports is the root's.
+_Avoid_: rating, assessment
+
+**Mate distance**:
+The number of plies from the root to a checkmate the search has found. UCI counts it in moves instead, and gives it a minus sign when the root's side to move is the one checkmated: `mate 2` is three plies and `mate -1` is two.
+_Avoid_: mate in N (without saying plies or moves), mate depth
 
 **Bound**:
 A value that a position's score is known to be at least, or at most, when the score itself is not known. A bound is never reported or compared as a score.

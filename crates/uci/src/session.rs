@@ -17,7 +17,9 @@ use crate::{
 ///
 /// The reader can block independently of the command handler. Search runs on
 /// the command thread and receives an owned request for each accepted go.
-/// The callback queues finished depths and the end report in order.
+/// The callback queues finished depths and the end report in order. The search
+/// must send exactly one `SearchReport::Ended` for each request, after its last
+/// finished depth.
 ///
 /// # Errors
 ///

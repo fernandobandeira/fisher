@@ -44,9 +44,15 @@ pub struct FinishedDepth {
 }
 
 /// Reports from the work of a search, in the order the session consumes them.
+///
+/// A search sends zero or more `FinishedDepth` reports in increasing depth,
+/// then exactly one `Ended`, and nothing after it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SearchReport {
     FinishedDepth(FinishedDepth),
+    /// The move to send as `bestmove`: the chosen move of the last finished
+    /// depth, or the first legal move when no depth finished. `None` only when
+    /// the root has no legal move, after a `FinishedDepth` at depth 0.
     Ended(Option<Move>),
 }
 

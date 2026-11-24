@@ -327,7 +327,9 @@ fn reply_matches(expected: &str, actual: &str, position: &Chess) -> bool {
         LEGAL_BESTMOVE => actual
             .strip_prefix("bestmove ")
             .is_some_and(|text| reference_move(position, text).is_some()),
-        _ if search_info(expected).is_some_and(|info| info.valid(true)) => {
+        // The README makes only the two depth-4 spellings special for a single
+        // `< ` record; `{depth}` and other depths belong to `<* ` alone.
+        _ if search_info(expected).is_some_and(|info| info.depth == "4" && info.valid(true)) => {
             search_info_matches(expected, actual)
         }
         "info string {message}" => actual.starts_with("info string "),
@@ -341,6 +343,36 @@ fn reply_matches(expected: &str, actual: &str, position: &Chess) -> bool {
         }
         _ => expected == actual,
     }
+}
+
+#[test]
+fn single_replies_keep_allowances_to_depth_four() {
+    let position = Chess::default();
+    let cases = [
+        (
+            "info depth {depth} score cp 0 nodes 20",
+            "info depth 1 score cp 0 nodes 20",
+        ),
+        (
+            "info depth 3 score {score} nodes {nodes}",
+            "info depth 3 score cp 0 nodes 8902",
+        ),
+        (
+            "info depth 7 score {score} time {time} nodes {nodes} nps {nps} pv {pv}",
+            "info depth 7 score cp 0 time 1 nodes 1 nps 1000 pv e2e4",
+        ),
+    ];
+    for (expected, actual) in cases {
+        assert!(
+            !reply_matches(expected, actual, &position),
+            "{expected:?} must compare exactly"
+        );
+    }
+    assert!(reply_matches(
+        "info depth 4 score {score} nodes {nodes}",
+        "info depth 4 score cp 0 nodes 206603",
+        &position
+    ));
 }
 
 #[test]

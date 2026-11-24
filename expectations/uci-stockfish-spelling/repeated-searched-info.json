@@ -143,11 +143,11 @@
       "name": "full-spelling",
       "transcript": ["> go infinite", "> isready", "<* info depth {depth} multipv 1 score {score} nodes {nodes} nps {nps} time {time} pv {pv}", "# Compare the first nonmatch.", "", "< readyok", "> stop", "< bestmove e2e4", "> quit", "! exit"],
       "script": [
-        {"after_send": 2, "events": [[0, "stdout", "info depth 1 multipv 1 score cp 0 nodes 20 nps 0 time 0 pv e2e4"], [0, "stdout", "info depth 5 multipv 1 score cp -10 nodes 1200 nps 60000 time 20 pv e2e4 e7e5 g1f3 b8c6 f1b5"], [0, "stdout", "readyok"]]},
+        {"after_send": 2, "events": [[0, "stdout", "info depth 1 multipv 1 score cp 0 nodes 20 nps 20000 time 1 pv e2e4"], [0, "stdout", "info depth 5 multipv 1 score cp -10 nodes 1200 nps 60000 time 20 pv e2e4 e7e5 g1f3 b8c6 f1b5"], [0, "stdout", "readyok"]]},
         {"after_send": 3, "events": [[0, "stdout", "bestmove e2e4"]]},
         {"after_send": 4, "events": [[0, "eof", null], [0, "exit", 0]]}
       ],
-      "expected": {"verdict": "run-reject", "reason": "The first line reports time 0 and reaches the readyok comparison."}
+      "expected": {"verdict": "accept", "reason": "Both principal variations fit their matched depths."}
     },
     {
       "name": "full-spelling-literals",
@@ -178,6 +178,46 @@
         {"after_send": 4, "events": [[0, "eof", null], [0, "exit", 0]]}
       ],
       "expected": {"verdict": "run-reject", "reason": "The full spelling requires multipv, nps, time, and pv."}
+    },
+    {
+      "name": "time-zero",
+      "transcript": ["> go infinite", "> isready", "<* info depth {depth} multipv 1 score {score} nodes {nodes} nps {nps} time {time} pv {pv}", "# Compare the first nonmatch.", "", "< readyok", "> stop", "< bestmove e2e4", "> quit", "! exit"],
+      "script": [
+        {"after_send": 2, "events": [[0, "stdout", "info depth 1 multipv 1 score cp 0 nodes 20 nps 20000 time 0 pv e2e4"], [0, "stdout", "readyok"]]},
+        {"after_send": 3, "events": [[0, "stdout", "bestmove e2e4"]]},
+        {"after_send": 4, "events": [[0, "eof", null], [0, "exit", 0]]}
+      ],
+      "expected": {"verdict": "run-reject", "reason": "The full spelling requires a time of at least 1."}
+    },
+    {
+      "name": "missing-multipv",
+      "transcript": ["> go infinite", "> isready", "<* info depth {depth} multipv 1 score {score} nodes {nodes} nps {nps} time {time} pv {pv}", "# Compare the first nonmatch.", "", "< readyok", "> stop", "< bestmove e2e4", "> quit", "! exit"],
+      "script": [
+        {"after_send": 2, "events": [[0, "stdout", "info depth 1 score cp 0 nodes 20 nps 20000 time 1 pv e2e4"], [0, "stdout", "readyok"]]},
+        {"after_send": 3, "events": [[0, "stdout", "bestmove e2e4"]]},
+        {"after_send": 4, "events": [[0, "eof", null], [0, "exit", 0]]}
+      ],
+      "expected": {"verdict": "run-reject", "reason": "The full spelling requires multipv after depth."}
+    },
+    {
+      "name": "multipv-two",
+      "transcript": ["> go infinite", "> isready", "<* info depth {depth} multipv 1 score {score} nodes {nodes} nps {nps} time {time} pv {pv}", "# Compare the first nonmatch.", "", "< readyok", "> stop", "< bestmove e2e4", "> quit", "! exit"],
+      "script": [
+        {"after_send": 2, "events": [[0, "stdout", "info depth 1 multipv 2 score cp 0 nodes 20 nps 20000 time 1 pv e2e4"], [0, "stdout", "readyok"]]},
+        {"after_send": 3, "events": [[0, "stdout", "bestmove e2e4"]]},
+        {"after_send": 4, "events": [[0, "eof", null], [0, "exit", 0]]}
+      ],
+      "expected": {"verdict": "run-reject", "reason": "The full spelling requires multipv to be the literal 1."}
+    },
+    {
+      "name": "old-order",
+      "transcript": ["> go infinite", "> isready", "<* info depth {depth} multipv 1 score {score} nodes {nodes} nps {nps} time {time} pv {pv}", "# Compare the first nonmatch.", "", "< readyok", "> stop", "< bestmove e2e4", "> quit", "! exit"],
+      "script": [
+        {"after_send": 2, "events": [[0, "stdout", "info depth 1 multipv 1 score cp 0 time 1 nodes 20 nps 20000 pv e2e4"], [0, "stdout", "readyok"]]},
+        {"after_send": 3, "events": [[0, "stdout", "bestmove e2e4"]]},
+        {"after_send": 4, "events": [[0, "eof", null], [0, "exit", 0]]}
+      ],
+      "expected": {"verdict": "run-reject", "reason": "The full spelling requires nodes, nps and time in Stockfish's order."}
     },
     {
       "name": "delimiter-at-4900ms",

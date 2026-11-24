@@ -159,10 +159,11 @@ For the staged full spelling, `multipv` is the literal 1 and T is a
 positive ASCII decimal, `[1-9][0-9]*`. The other slot forms and the
 depth-dependent principal variation bound below apply.
 
-Only `full-spelling` changes verdict, from accept to run-reject, because
-its first output line reports `time 0`. The two fixtures for an overlong
-principal variation use positive time so their verdicts still test the
-move bound.
+No fixture changes verdict. `full-spelling` and the two fixtures for an
+overlong principal variation report a positive time, so their verdicts
+still test the move bound. Four added fixtures reject one fault each: a
+time of 0, a missing `multipv`, a `multipv` other than 1, and the old
+order of nodes, time and nps.
 
 Match the entire line, excluding its ending, with single ASCII spaces.
 Each slot accepts its corresponding allowance or a literal of the same
@@ -174,7 +175,7 @@ no regular expressions.
 | D | `{depth}` | Positive ASCII decimal, `[1-9][0-9]*`. |
 | S | `{score}` | `cp 0`, `cp` followed by a signed decimal, or `mate` followed by a signed decimal. Here a signed decimal is `-?[1-9][0-9]*`. |
 | N | `{nodes}` | Nonnegative ASCII decimal, `0\|[1-9][0-9]*`. |
-| T | `{time}` | Same decimal form as N. |
+| T | `{time}` | Same decimal form as N. In the staged full spelling of D41, positive, `[1-9][0-9]*`. |
 | R | `{nps}` | Same decimal form as N. |
 | P | `{pv}` | One or more UCI moves separated by single spaces, each spelled `[a-h][1-8][a-h][1-8][qrbn]?`. |
 

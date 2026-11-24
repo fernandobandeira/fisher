@@ -115,7 +115,7 @@ What fisher does between accepting a `go` and sending its `bestmove`: the work o
 _Avoid_: thinking, calculation
 
 **Node**:
-A position the search reaches by playing a move. The position it starts from is not a node.
+A position the search reaches by playing a move. The root is not a node.
 _Avoid_: visit, child
 
 **Variation**:
@@ -135,7 +135,7 @@ A depth at which every node was searched. Only a finished depth has a score and 
 _Avoid_: completed depth, complete depth, iteration
 
 **Limit**:
-A bound the GUI puts on a search in its `go`: a depth, a number of nodes, a time for the move, or the clocks.
+What the GUI's `go` allows a search: a depth, a number of nodes, a time for the move, or the clocks.
 _Avoid_: budget, allowance, ceiling
 
 **Depth cap**:

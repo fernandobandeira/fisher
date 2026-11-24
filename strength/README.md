@@ -73,12 +73,6 @@ When fisher obeys the clocks these conditions stop making sense, because a build
 - **An Elo for fisher** is not something this record establishes. Adding the difference against Stockfish to 1320 gives a rough placement only: it leans on one opponent, and for a fisher far below 1320 it is an extrapolation. Stockfish's documentation says `UCI_Elo` was calibrated at 120 seconds plus 1 a move and anchored to the CCRL 40/4 list; here it gets 10 seconds plus 0.1.
 - **A score near 0% or 100%** says little about the size of the gap. Measure against a closer opponent instead.
 
-## The first match against Stockfish
-
-`dbe9113` first played Stockfish 19 at `UCI_Elo` 1320 on 2026-11-23, by hand, before `measure` existed. Over 400 games it won 54, drew 28 and lost 318: a score of 17.0%, and an Elo difference of -275 with a margin of 42. It was a queen ahead in 73 of those games, and won 47 of them, drew 14 and lost 12. No game ended abnormally.
-
-That match is not a line in `records.tsv`, because `measure` did not produce it. The next match against Stockfish starts that series.
-
 ## Where the openings come from
 
 `openings.epd` holds 200 positions from `noob_3moves.epd` in [official-stockfish/books](https://github.com/official-stockfish/books) at commit `37751b0`, which that repository publishes under CC0. Each is a position after three moves by each color. fastchess drew them at random with `-srand 20261123` for the first match, before any result was known, and they are kept in the order it drew them.

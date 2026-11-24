@@ -1,0 +1,102 @@
+# Four-ply info spelling from Stockfish sf_19 (edb0d9d), read 2026-11-24:
+# UCIEngine::on_update_full in src/uci.cpp and SearchManager::output_pv in src/search.cpp.
+# fisher-r6y D41 sets this spelling; fisher-8hc.6 committed these sessions.
+# D3-D6 supply the
+# existing principal variation and allowances, with time at least one under D41.
+# The fisher-2aj.2 sources below supply the retained scores, node counts and response order.
+# Sources: April 2006 UCI specification https://backscattering.de/chess/uci/
+# and fisher-l7f owner decisions from 2026-11-22.
+# Search: fisher-2aj rules 1 to 8 and 10. Exact search values
+# were checked by exhaustive enumeration with python-chess 1.11.2.
+# Starting score: four-ply minimax with python-chess 1.11.2 followed rules
+# 1 to 7. An independent reviewer reproduced cp 0 and per-ply counts
+# 20/400/8902/197281 with their own minimax. See expectations/perft.epd.
+# Those published perft counts sum to 206603 nodes.
+# Mate -1 nodes 782: in 7k/8/5K1Q/8/8/8/8/8 b, black must play h8g8,
+# then h6g7 is checkmate. Python-chess counts 1, 21, 30 and 730 nodes at
+# plies 1 to 4.
+# Mate -1 nodes 1299: in 7k/8/5K2/6Q1/8/8/8/8 b, black must play h8h7,
+# then g5g7 is checkmate. Python-chess counts 1, 25, 45 and 1228 nodes at
+# plies 1 to 4.
+# Searched transcript written 2026-11-23.
+> position startpos
+> go wtime 60000
+# Rules 1 to 7 and 10. See the header for cp 0 nodes 206603.
+< info depth 4 multipv 1 score cp 0 nodes 206603 nps {nps} time {time} pv {pv}
+# UCI go/bestmove. Rules 1 and 8 defer this parameter and search four plies.
+< bestmove {legal}
+> go btime 60000
+# Rules 1 to 7 and 10. See the header for cp 0 nodes 206603.
+< info depth 4 multipv 1 score cp 0 nodes 206603 nps {nps} time {time} pv {pv}
+# UCI go/bestmove. Rules 1 and 8 defer this parameter and search four plies.
+< bestmove {legal}
+> go winc 1000
+# Rules 1 to 7 and 10. See the header for cp 0 nodes 206603.
+< info depth 4 multipv 1 score cp 0 nodes 206603 nps {nps} time {time} pv {pv}
+# UCI go/bestmove. Rules 1 and 8 defer this parameter and search four plies.
+< bestmove {legal}
+> go binc 1000
+# Rules 1 to 7 and 10. See the header for cp 0 nodes 206603.
+< info depth 4 multipv 1 score cp 0 nodes 206603 nps {nps} time {time} pv {pv}
+# UCI go/bestmove. Rules 1 and 8 defer this parameter and search four plies.
+< bestmove {legal}
+> go movestogo 40
+# Rules 1 to 7 and 10. See the header for cp 0 nodes 206603.
+< info depth 4 multipv 1 score cp 0 nodes 206603 nps {nps} time {time} pv {pv}
+# UCI go/bestmove. Rules 1 and 8 defer this parameter and search four plies.
+< bestmove {legal}
+> go movetime 50
+# Rules 1 to 7 and 10. See the header for cp 0 nodes 206603.
+< info depth 4 multipv 1 score cp 0 nodes 206603 nps {nps} time {time} pv {pv}
+# UCI go/bestmove. Rules 1 and 8 defer this parameter and search four plies.
+< bestmove {legal}
+> go depth 1
+# Rules 1 to 7 and 10. See the header for cp 0 nodes 206603.
+< info depth 4 multipv 1 score cp 0 nodes 206603 nps {nps} time {time} pv {pv}
+# UCI go/bestmove. Rules 1 and 8 defer this parameter and search four plies.
+< bestmove {legal}
+> go nodes 20
+# Rules 1 to 7 and 10. See the header for cp 0 nodes 206603.
+< info depth 4 multipv 1 score cp 0 nodes 206603 nps {nps} time {time} pv {pv}
+# UCI go/bestmove. Rules 1 and 8 defer this parameter and search four plies.
+< bestmove {legal}
+> go mate 1
+# Rules 1 to 7 and 10. See the header for cp 0 nodes 206603.
+< info depth 4 multipv 1 score cp 0 nodes 206603 nps {nps} time {time} pv {pv}
+# UCI go/bestmove. Rules 1 and 8 defer this parameter and search four plies.
+< bestmove {legal}
+> go searchmoves e2e4 d2d4
+# Rules 1 to 7 and 10. See the header for cp 0 nodes 206603.
+< info depth 4 multipv 1 score cp 0 nodes 206603 nps {nps} time {time} pv {pv}
+# UCI go/bestmove. Rules 1 and 8 defer this parameter and search four plies.
+< bestmove {legal}
+> go ponder
+# Rules 1 to 7 and 10. See the header for cp 0 nodes 206603.
+< info depth 4 multipv 1 score cp 0 nodes 206603 nps {nps} time {time} pv {pv}
+# The owner defers pondering in fisher-2ha. Rule 1 searches four plies.
+< bestmove {legal}
+# UCI position after an unknown prefix replaces a position with one reply.
+> position fen 7k/8/5K1Q/8/8/8/8/8 b - - 0 1
+> go
+# Rules 4, 5, 7 and 10. See the header for mate -1 nodes 782.
+< info depth 4 multipv 1 score mate -1 nodes 782 nps {nps} time {time} pv {pv}
+< bestmove h8g8
+> \xff unknown position fen 7k/8/5K2/6Q1/8/8/8/8 b - - 0 1
+> go
+# Rules 4, 5, 7 and 10. See the header for mate -1 nodes 1299.
+< info depth 4 multipv 1 score mate -1 nodes 1299 nps {nps} time {time} pv {pv}
+< bestmove h8h7
+# The ignored command consumes its arguments, including position.
+> unknown setoption name Path value position fen 7k/8/5K1Q/8/8/8/8/8 b - - 0 1
+> go
+# Rules 4, 5, 7 and 10. See the header for mate -1 nodes 1299.
+< info depth 4 multipv 1 score mate -1 nodes 1299 nps {nps} time {time} pv {pv}
+< bestmove h8h7
+> go
+# Rules 4, 5, 7 and 10. See the header for mate -1 nodes 1299.
+< info depth 4 multipv 1 score mate -1 nodes 1299 nps {nps} time {time} pv {pv}
+# The reference follows the prefixed position and skips the setoption value.
+< bestmove {legal}
+# UCI quit.
+> quit
+! exit

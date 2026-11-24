@@ -1,0 +1,21 @@
+# Four-ply info spelling from Stockfish sf_19 (edb0d9d), read 2026-11-24:
+# UCIEngine::on_update_full in src/uci.cpp and SearchManager::output_pv in src/search.cpp.
+# fisher-r6y D41 sets this spelling; fisher-8hc.6 committed these sessions.
+# D3-D6 supply the
+# existing principal variation and allowances, with time at least one under D41.
+# The fisher-2aj.2 sources below supply the retained scores, node counts and response order.
+# Sources: April 2006 UCI specification https://backscattering.de/chess/uci/
+# Search: fisher-2aj rules 1 to 7 and 10. Exact search values
+# were checked by exhaustive enumeration with python-chess 1.11.2.
+# Searched transcript written 2026-11-23.
+# UCI position and go.
+> position fen 7k/8/8/8/8/8/8/K7 w - - 0 1
+> go
+# Rules 2, 5, 7 and 10. There is no capture within four plies.
+# Python-chess counts 3, 9, 54 and 324 nodes at plies 1 to 4.
+< info depth 4 multipv 1 score cp 0 nodes 390 nps {nps} time {time} pv {pv}
+# UCI bestmove. The reply carries a legal move.
+< bestmove {legal}
+# UCI quit.
+> quit
+! exit

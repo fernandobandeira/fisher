@@ -66,7 +66,7 @@ fn reports_elapsed_time_from_the_clock() -> std::io::Result<()> {
 
     let [
         SearchReport::FinishedDepth(depth),
-        SearchReport::BestMove(chosen),
+        SearchReport::BestMove(best_move),
     ] = reports.as_slice()
     else {
         return Err(std::io::Error::other(format!(
@@ -78,6 +78,6 @@ fn reports_elapsed_time_from_the_clock() -> std::io::Result<()> {
     assert_eq!(depth.score, Score::Centipawns(0));
     // Published perft counts for plies 1 to 4, as in startpos.uci.
     assert_eq!(depth.nodes, 20 + 400 + 8_902 + 197_281);
-    assert_eq!(depth.principal_variation.first().copied(), *chosen);
+    assert_eq!(depth.principal_variation.first().copied(), *best_move);
     Ok(())
 }

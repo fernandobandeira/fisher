@@ -100,7 +100,7 @@ The two held-move sessions replace their predecessors under D25.
 The three other sessions cover
 the commands after `stop` under D24 and an immediate `quit` or end of input.
 The held-move transcripts read the last `info` line before the next command.
-The scripted histories can also observe the search reporting `Ended`.
+The scripted histories can also observe the search’s `BestMove` report.
 The two held-move sessions and `stop-position-go.uci` have staged
 successors for fisher-5sg.4 in [`uci-deepen-until-stop/`](uci-deepen-until-stop/).
 

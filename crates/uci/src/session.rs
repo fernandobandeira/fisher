@@ -92,27 +92,29 @@ fn run_searches(
 
 enum SearchProgress {
     Running,
-    Ended,
-    ReportedAfterEnd,
+    BestMoveReported,
+    ReportedAfterBestMove,
 }
 
 impl SearchProgress {
     fn send(&mut self, report: SearchReport, events: &mpsc::Sender<Event>) {
         if !matches!(self, Self::Running) {
-            *self = Self::ReportedAfterEnd;
+            *self = Self::ReportedAfterBestMove;
             return;
         }
         if matches!(report, SearchReport::BestMove(_)) {
-            *self = Self::Ended;
+            *self = Self::BestMoveReported;
         }
         drop(events.send(Event::Report(report)));
     }
 
     fn finish(self) -> io::Result<()> {
         match self {
-            Self::Running => Err(io::Error::other("search returned without Ended")),
-            Self::Ended => Ok(()),
-            Self::ReportedAfterEnd => Err(io::Error::other("search reported after Ended")),
+            Self::Running => Err(io::Error::other("search returned without a best move")),
+            Self::BestMoveReported => Ok(()),
+            Self::ReportedAfterBestMove => {
+                Err(io::Error::other("search reported after its best move"))
+            }
         }
     }
 }
@@ -230,14 +232,14 @@ impl Session {
     fn report(&mut self, output: &mut dyn Write, report: SearchReport) -> io::Result<()> {
         match report {
             SearchReport::FinishedDepth(depth) => send_search_info(output, &depth),
-            SearchReport::BestMove(chosen) => {
-                let chosen = chosen.map_or(UciMove::Null, UciMove::from);
+            SearchReport::BestMove(best_move) => {
+                let best_move = best_move.map_or(UciMove::Null, UciMove::from);
                 if matches!(self.active, Active::Searching { infinite: true, .. }) {
-                    self.active = Active::Held(chosen);
+                    self.active = Active::Held(best_move);
                     Ok(())
                 } else {
                     self.active = Active::Idle;
-                    send(output, &Response::BestMove(chosen))
+                    send(output, &Response::BestMove(best_move))
                 }
             }
         }
@@ -262,8 +264,8 @@ impl Session {
                 event @ (Event::Line(_) | Event::EndOfInput(_)) => self.deferred.push_back(event),
             }
         }
-        if let Active::Held(chosen) = std::mem::replace(&mut self.active, Active::Idle) {
-            send(output, &Response::BestMove(chosen))?;
+        if let Active::Held(best_move) = std::mem::replace(&mut self.active, Active::Idle) {
+            send(output, &Response::BestMove(best_move))?;
         }
         Ok(())
     }

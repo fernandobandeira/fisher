@@ -123,7 +123,7 @@ The number of plies from the root to a checkmate the search has found. UCI count
 _Avoid_: mate in N (without saying plies or moves), mate depth
 
 **Minimax**:
-The score and principal variation found by playing every legal move to a fixed depth and keeping, at each position, the move best for its side to move. A cutoff does not change it.
+The score and principal variation found by playing every legal move to a fixed depth and keeping, at each position, the move best for its side to move. A cutoff does not change its score.
 _Avoid_: negamax, brute force, full-width search
 
 **Bound**:

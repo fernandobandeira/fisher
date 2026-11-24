@@ -147,7 +147,7 @@ impl Script {
         let (steps, instructions) = mpsc::channel();
         let (sent, reported) = mpsc::channel();
         let session = Session::start(move |request, report| {
-            let chosen = request.position.legal_moves().into_iter().next();
+            let best_move = request.position.legal_moves().into_iter().next();
             let mut depth = 0;
             while let Ok(Report::Depth) = instructions.recv() {
                 depth += 1;
@@ -156,11 +156,11 @@ impl Script {
                     score: Score::Centipawns(0),
                     nodes: 1,
                     elapsed: Duration::from_millis(1),
-                    principal_variation: chosen.into_iter().collect(),
+                    principal_variation: best_move.into_iter().collect(),
                 }));
                 let _sent = sent.send(());
             }
-            report(SearchReport::BestMove(chosen));
+            report(SearchReport::BestMove(best_move));
             let _sent = sent.send(());
         });
         (session, Self { steps, reported })
@@ -390,12 +390,12 @@ fn isready_leaves_a_finite_real_search_running() -> io::Result<()> {
 }
 
 fn first_starting_move() -> io::Result<String> {
-    let chosen = rules::Position::starting()
+    let best_move = rules::Position::starting()
         .legal_moves()
         .into_iter()
         .next()
         .ok_or_else(|| io::Error::other("no legal starting move"))?;
-    Ok(format!("bestmove {}{}\n", chosen.from(), chosen.to()))
+    Ok(format!("bestmove {}{}\n", best_move.from(), best_move.to()))
 }
 
 fn interrupt_real_search_on_exit(quit: bool) -> io::Result<()> {
@@ -459,13 +459,13 @@ fn a_dying_search_returns_an_error_with_input_still_open() -> io::Result<()> {
 }
 
 #[test]
-fn a_search_returning_without_ended_is_an_error_with_input_still_open() -> io::Result<()> {
+fn a_search_returning_without_a_best_move_is_an_error_with_input_still_open() -> io::Result<()> {
     let session = Session::start(|_, _| {});
     session.command("go")?;
     let error = receive(&session.result)?
         .err()
-        .ok_or_else(|| io::Error::other("session accepted a search without Ended"))?;
-    assert_eq!(error.to_string(), "search returned without Ended");
+        .ok_or_else(|| io::Error::other("session accepted a search without a best move"))?;
+    assert_eq!(error.to_string(), "search returned without a best move");
     Ok(())
 }
 
@@ -501,7 +501,7 @@ fn a_search_thread_dying_during_shutdown_returns_an_error() -> io::Result<()> {
 }
 
 #[test]
-fn reports_after_ended_are_errors_with_input_still_open() -> io::Result<()> {
+fn reports_after_best_move_are_errors_with_input_still_open() -> io::Result<()> {
     for extra_report in [
         SearchReport::BestMove(None),
         SearchReport::FinishedDepth(FinishedDepth {
@@ -519,8 +519,8 @@ fn reports_after_ended_are_errors_with_input_still_open() -> io::Result<()> {
         session.command("go")?;
         let error = receive(&session.result)?
             .err()
-            .ok_or_else(|| io::Error::other("session accepted a report after Ended"))?;
-        assert_eq!(error.to_string(), "search reported after Ended");
+            .ok_or_else(|| io::Error::other("session accepted a report after the best move"))?;
+        assert_eq!(error.to_string(), "search reported after its best move");
         assert_eq!(session.reply()?, "bestmove 0000\n");
         assert!(session.replies.try_recv().is_err());
     }

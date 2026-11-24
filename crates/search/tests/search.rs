@@ -80,9 +80,9 @@ fn mate_on_the_horizon_scores_as_material() -> Result<(), Box<dyn Error>> {
 fn stalemate_on_the_horizon_scores_as_material() -> Result<(), Box<dyn Error>> {
     let fen = "k7/8/1p6/1Q6/8/8/8/7K w - - 0 1";
     let position: Chess = reference_position(fen)?;
-    let chosen = reference::minimax(&position, 1).best_move;
-    let chosen = chosen.ok_or("reference found no legal move")?;
-    assert!(position.clone().play(chosen)?.is_stalemate());
+    let best_move = reference::minimax(&position, 1).best_move;
+    let best_move = best_move.ok_or("reference found no legal move")?;
+    assert!(position.clone().play(best_move)?.is_stalemate());
     assert_matches_reference(&position, 1).map(drop)
 }
 

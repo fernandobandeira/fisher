@@ -59,7 +59,7 @@ fn reports_the_finished_depth_before_ending_the_search() -> Result<(), Box<dyn E
     let reports = reports_for("7k/8/5K1Q/8/8/8/8/8 b - - 0 1")?;
     let [
         SearchReport::FinishedDepth(report),
-        SearchReport::BestMove(Some(chosen)),
+        SearchReport::BestMove(Some(best_move)),
     ] = reports.as_slice()
     else {
         return Err(format!("unexpected reports: {reports:?}").into());
@@ -73,8 +73,8 @@ fn reports_the_finished_depth_before_ending_the_search() -> Result<(), Box<dyn E
             winning: false
         }
     );
-    assert_eq!(format!("{}{}", chosen.from(), chosen.to()), "h8g8");
-    assert_eq!(report.principal_variation.first(), Some(chosen));
+    assert_eq!(format!("{}{}", best_move.from(), best_move.to()), "h8g8");
+    assert_eq!(report.principal_variation.first(), Some(best_move));
     Ok(())
 }
 

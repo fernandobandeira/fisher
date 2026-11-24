@@ -19,9 +19,11 @@ The human is in the loop at the start (what to build, which claims matter) and a
 
 A slice is thin and goes end to end. "The engine answers `go` with a legal move from the starting position" is a slice: it touches the position, move generation, search and the protocol, and it can be run. "All of move generation" is a layer, not a slice.
 
-Merge each slice into `main` when it is green. Do not build a tall stack of dependent branches and review it at the end.
+Merge each slice into `main` after `scripts/check`, the pull-request mutation and coverage jobs, and the review required by its tier pass. See [guardrails](guardrails.md). Do not build a tall stack of dependent branches and review it at the end.
 
 ### Pull requests
+
+GitHub enforces the `main gates` ruleset on `main`. A pull request can merge only when its branch is up to date with `main` and the Actions `check`, `mutation`, and `coverage` jobs pass. The ruleset blocks force-pushes and deletion of `main` and has no bypass list. The project also requires the review for the change’s tier. All three jobs run on pull requests, including stacked layers, pushes to `main`, and the weekly schedule.
 
 - **Squash-merge.** Each pull request becomes one commit on `main`. With the repository's settings the squash commit keeps the messages of the commits it replaces, so their `Guard-Change:` lines survive.
 - **Stack a slice that builds on one not merged yet.** Use GitHub's stacked pull requests through the `gh stack` extension (`gh extension install github/gh-stack`), not a base branch set by hand. `gh stack init` adopts existing branches, `gh stack link` joins pull requests that are already open, and `gh stack sync` rebases the layers above one that changed.
@@ -35,7 +37,7 @@ Tier a change by how far it reaches, how easily a mistake in it would be noticed
 
 | Tier | Examples | Gate |
 |---|---|---|
-| **Local** | The inside of one crate, where existing evidence pins the behaviour: perft still matches, the bench signature is unchanged | Merge when green. The human does not read it. |
+| **Local** | The inside of one crate, where existing evidence pins the behaviour: perft still matches, the bench signature is unchanged | Merge when the local and pull-request checks pass. The human does not read the code. |
 | **Behaviour** | Search, evaluation, time management | The human reads the claims table and plays or watches a game. Not the code. |
 | **Commitment** | A crate's public interface; how a position or a move is represented; what the engine says over UCI; a file format; a new dependency; `unsafe`; anything under a protected path | The human approves before merge. An ADR if it is hard to reverse. |
 

@@ -107,6 +107,11 @@ impl Position {
                 });
             }
         }
+        self.pawn_captures(from, color, moves);
+    }
+
+    fn pawn_captures(&self, from: Square, color: Color, moves: &mut Vec<PseudoLegalMove>) {
+        let advance = color.pawn_advance();
         for file in [-1, 1] {
             if let Some(to) = from.offset(file, advance) {
                 match self.piece_at(to) {

@@ -2,7 +2,7 @@ mod glossary;
 mod interfaces;
 
 use std::env;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 #[expect(
@@ -10,16 +10,17 @@ use std::process::ExitCode;
     reason = "The xtask CLI reports failures to stderr"
 )]
 fn main() -> ExitCode {
-    let mut args = env::args_os().skip(1);
-    let check = match (args.next(), args.next()) {
-        (Some(command), None) if command == "glossary" => glossary::check,
-        (Some(command), None) if command == "interfaces" => interfaces::check,
-        _ => {
-            eprintln!("Usage: cargo xtask <glossary|interfaces>");
-            return ExitCode::FAILURE;
-        }
+    let args: Vec<_> = env::args_os().skip(1).collect();
+    let (command, root) = match args.as_slice() {
+        [command] => (command, Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")),
+        [command, option, root] if option == "--root" => (command, PathBuf::from(root)),
+        _ => return usage(),
     };
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let check = match command.to_str() {
+        Some("glossary") => glossary::check,
+        Some("interfaces") => interfaces::check,
+        _ => return usage(),
+    };
     match check(&root) {
         Ok(diagnostics) if diagnostics.is_empty() => return ExitCode::SUCCESS,
         Ok(diagnostics) => {
@@ -29,5 +30,11 @@ fn main() -> ExitCode {
         }
         Err(error) => eprintln!("{error}"),
     }
+    ExitCode::FAILURE
+}
+
+#[expect(clippy::print_stderr, reason = "The xtask CLI prints usage to stderr")]
+fn usage() -> ExitCode {
+    eprintln!("Usage: cargo xtask <glossary|interfaces> [--root <path>]");
     ExitCode::FAILURE
 }

@@ -68,20 +68,7 @@ fn parse(glossary: &str) -> Result<Vec<Banned<'_>>, String> {
                     "GLOSSARY.md:{line_number}: put banned wording under a glossary term."
                 ));
             };
-            for phrase in list.split(',').map(str::trim) {
-                let segments = phrase_segments(phrase);
-                if segments.is_empty() {
-                    return Err(format!(
-                        "GLOSSARY.md:{line_number}: list a banned word or remove the empty item."
-                    ));
-                }
-                banned.push(Banned {
-                    phrase,
-                    segments,
-                    term: entry.term,
-                    term_line: entry.line,
-                });
-            }
+            banned.extend(parse_bans(list, entry, line_number)?);
         } else if in_definition
             && !line.is_empty()
             && let Some(entry) = entries.last_mut()
@@ -90,6 +77,35 @@ fn parse(glossary: &str) -> Result<Vec<Banned<'_>>, String> {
         }
     }
 
+    check_definitions(entries, &banned)?;
+    Ok(banned)
+}
+
+fn parse_bans<'a>(
+    list: &'a str,
+    entry: &Entry<'a>,
+    line: usize,
+) -> Result<Vec<Banned<'a>>, String> {
+    list.split(',')
+        .map(str::trim)
+        .map(|phrase| {
+            let segments = phrase_segments(phrase);
+            if segments.is_empty() {
+                return Err(format!(
+                    "GLOSSARY.md:{line}: list a banned word or remove the empty item."
+                ));
+            }
+            Ok(Banned {
+                phrase,
+                segments,
+                term: entry.term,
+                term_line: entry.line,
+            })
+        })
+        .collect()
+}
+
+fn check_definitions(entries: Vec<Entry<'_>>, banned: &[Banned<'_>]) -> Result<(), String> {
     let mut defined = HashMap::new();
     for entry in entries {
         if !entry.has_definition {
@@ -100,7 +116,7 @@ fn parse(glossary: &str) -> Result<Vec<Banned<'_>>, String> {
         }
         defined.insert(phrase_segments(entry.term), entry.line);
     }
-    for ban in &banned {
+    for ban in banned {
         if let Some(line) = defined.get(&ban.segments) {
             return Err(format!(
                 "GLOSSARY.md:{line}: {:?} is a defined term and is banned under {:?} on line {}. Remove the ban or resolve the conflicting terms.",
@@ -108,7 +124,7 @@ fn parse(glossary: &str) -> Result<Vec<Banned<'_>>, String> {
             ));
         }
     }
-    Ok(banned)
+    Ok(())
 }
 
 fn phrase_segments(phrase: &str) -> Vec<String> {
@@ -201,20 +217,9 @@ fn scan_source(
             })?;
         remaining = rest;
 
-        if matches!(token.kind, TokenKind::LineComment { doc_style: None })
-            && let Some(directive) = text
-                .strip_prefix("//")
-                .map(str::trim_start)
-                .and_then(|comment| comment.strip_prefix("glossary-allow:"))
-        {
-            if let Some((phrase, reason)) = directive.split_once("--")
-                && !phrase.trim().is_empty()
-                && !reason.trim().is_empty()
-            {
-                allowances
-                    .entry(line)
-                    .or_default()
-                    .push(phrase_segments(phrase));
+        if let Some(directive) = allowance_directive(token.kind, text) {
+            if let Some(phrase) = allowed_phrase(directive) {
+                allowances.entry(line).or_default().push(phrase);
             } else {
                 diagnostics.push(format!(
                     "{}:{line}:{character_number}: use // glossary-allow: <word> -- <reason> with a word and a reason.",
@@ -223,31 +228,11 @@ fn scan_source(
             }
         }
 
-        let identifier = if token.kind == TokenKind::Ident && !is_keyword(text) {
-            Some(text)
-        } else if matches!(
-            token.kind,
-            TokenKind::RawIdent
-                | TokenKind::RawLifetime
-                | TokenKind::Lifetime {
-                    starts_with_number: false
-                }
-        ) && text != "'static"
-        {
-            Some(text.trim_start_matches('\'').trim_start_matches("r#"))
-        } else {
-            None
-        };
-        if let Some(identifier) = identifier {
+        if let Some(identifier) = identifier(token.kind, text) {
             let segments = identifier_segments(identifier);
-            for ban in banned {
-                if segments
-                    .windows(ban.segments.len())
-                    .any(|window| window == ban.segments)
-                {
-                    identifiers.push((line, character_number, text, ban));
-                }
-            }
+            identifiers.extend(
+                matching_bans(banned, segments).map(|ban| (line, character_number, text, ban)),
+            );
         }
 
         let mut pieces = text.split('\n');
@@ -272,6 +257,49 @@ fn scan_source(
         ));
     }
     Ok(())
+}
+
+fn allowance_directive(kind: TokenKind, text: &str) -> Option<&str> {
+    if !matches!(kind, TokenKind::LineComment { doc_style: None }) {
+        return None;
+    }
+    text.strip_prefix("//")?
+        .trim_start()
+        .strip_prefix("glossary-allow:")
+}
+
+fn allowed_phrase(directive: &str) -> Option<Vec<String>> {
+    let (phrase, reason) = directive.split_once("--")?;
+    (!phrase.trim().is_empty() && !reason.trim().is_empty()).then(|| phrase_segments(phrase))
+}
+
+fn identifier(kind: TokenKind, text: &str) -> Option<&str> {
+    if kind == TokenKind::Ident && !is_keyword(text) {
+        Some(text)
+    } else if matches!(
+        kind,
+        TokenKind::RawIdent
+            | TokenKind::RawLifetime
+            | TokenKind::Lifetime {
+                starts_with_number: false
+            }
+    ) && text != "'static"
+    {
+        Some(text.trim_start_matches('\'').trim_start_matches("r#"))
+    } else {
+        None
+    }
+}
+
+fn matching_bans<'a, 'b>(
+    banned: &'a [Banned<'b>],
+    segments: Vec<String>,
+) -> impl Iterator<Item = &'a Banned<'b>> {
+    banned.iter().filter(move |ban| {
+        segments
+            .windows(ban.segments.len())
+            .any(|window| window == ban.segments)
+    })
 }
 
 #[cfg(test)]

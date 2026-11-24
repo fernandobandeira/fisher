@@ -67,14 +67,7 @@ impl fmt::Display for Response<'_> {
                     output.write_str(" multipv 1")?;
                 }
                 output.write_str(" score ")?;
-                match score {
-                    SearchScore::Centipawns(value) => write!(output, "cp {value}")?,
-                    SearchScore::Mate { plies, winning } => {
-                        let moves = i32::from(plies.div_ceil(2));
-                        let moves = if *winning { moves } else { -moves };
-                        write!(output, "mate {moves}")?;
-                    }
-                }
+                write!(output, "{score}")?;
                 if let Some(nodes) = nodes {
                     write!(output, " nodes {nodes}")?;
                 }
@@ -91,6 +84,19 @@ impl fmt::Display for Response<'_> {
                     }
                 }
                 Ok(())
+            }
+        }
+    }
+}
+
+impl fmt::Display for SearchScore {
+    fn fmt(&self, output: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Centipawns(value) => write!(output, "cp {value}"),
+            Self::Mate { plies, winning } => {
+                let moves = i32::from(plies.div_ceil(2));
+                let moves = if *winning { moves } else { -moves };
+                write!(output, "mate {moves}")
             }
         }
     }
@@ -221,6 +227,21 @@ mod tests {
     }
     use rules::Position;
     use shakmaty::{Chess, Position as _, uci::UciMove as ReferenceMove};
+
+    #[test]
+    fn promotion_uci_moves_match_shakmaty() {
+        for text in ["a7a8n", "a7a8b", "a7a8r", "a7a8q"] {
+            let expected = text.parse::<ReferenceMove>().unwrap();
+            assert_eq!(
+                UciMove::parse(text).unwrap().to_string(),
+                expected.to_string()
+            );
+        }
+        assert_eq!(
+            UciMove::parse("a7a8x").is_none(),
+            "a7a8x".parse::<ReferenceMove>().is_err()
+        );
+    }
 
     #[test]
     fn starting_position_has_every_legal_uci_move() {

@@ -1,3 +1,5 @@
+#![cfg(test)]
+
 use super::{parse, scan_source};
 use std::path::Path;
 
@@ -76,4 +78,45 @@ fn rejects_missing_definitions_and_banned_terms() {
 fn allows_definitions_with_guidance_and_without_bans() {
     let glossary = "**Rank**:\nA horizontal line.\n_Avoid_: row\n\n**Row**:\nA line in a table.";
     assert!(parse(glossary).unwrap().is_empty());
+}
+
+#[test]
+fn separates_acronyms_from_words_and_digits() {
+    use super::identifier_segments;
+
+    assert_eq!(
+        identifier_segments("row_RANK12Square_XMLRank_xMl"),
+        ["row", "rank12", "square", "xml", "rank", "x", "ml"]
+    );
+    assert_eq!(identifier_segments("RANK"), ["rank"]);
+}
+
+#[test]
+fn leaves_rust_keywords_out_of_identifier_checks() {
+    let banned = parse("**Example**:\nA definition.\n_Banned in code_: fn, static").unwrap();
+    let mut errors = Vec::new();
+    scan_source(
+        Path::new("fixture.rs"),
+        "fn example(value: &'static str) { let r#static = value; }",
+        &banned,
+        &mut errors,
+    )
+    .unwrap();
+    assert_eq!(errors.len(), 1);
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.contains("identifier \"r#static\""))
+    );
+}
+
+#[test]
+fn reports_the_character_after_a_multiline_comment() {
+    let errors = diagnostics("/* comment\nxy */row");
+    assert_eq!(errors.len(), 1);
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.starts_with("fixture.rs:2:6:"))
+    );
 }

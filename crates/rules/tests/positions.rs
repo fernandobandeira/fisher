@@ -1,6 +1,6 @@
 use std::{io, ops::RangeInclusive, time::Instant};
 
-use rules::{Move, Position, Promotion, Square};
+use rules::{Color, Move, PieceKind, Position, Promotion, Square};
 use shakmaty::{CastlingMode, Chess, EnPassantMode, Position as _, fen::Fen, uci::UciMove};
 
 const PERFT: &str = include_str!("../../../expectations/perft.epd");
@@ -61,6 +61,38 @@ fn starting_position_matches_reference_fen() {
 }
 
 #[test]
+fn side_to_move_and_pieces_match_shakmaty() {
+    let start = Chess::default();
+    let next = start
+        .clone()
+        .play("e2e4".parse::<UciMove>().unwrap().to_move(&start).unwrap())
+        .unwrap();
+    for (reference, expected_color) in [(start, Color::White), (next, Color::Black)] {
+        let fen = Fen::from_position(&reference, EnPassantMode::Always).to_string();
+        let position = Position::from_fen(&fen).unwrap();
+        assert_eq!(position.side_to_move(), expected_color);
+        for square in Square::all() {
+            let reference_square = square.to_string().parse().unwrap();
+            let expected = reference.board().piece_at(reference_square).map(|piece| {
+                let kind = match piece.role {
+                    shakmaty::Role::Pawn => PieceKind::Pawn,
+                    shakmaty::Role::Knight => PieceKind::Knight,
+                    shakmaty::Role::Bishop => PieceKind::Bishop,
+                    shakmaty::Role::Rook => PieceKind::Rook,
+                    shakmaty::Role::Queen => PieceKind::Queen,
+                    shakmaty::Role::King => PieceKind::King,
+                };
+                (piece.color.is_white(), kind)
+            });
+            let piece = position
+                .piece_at(square)
+                .map(|piece| (piece.color() == Color::White, piece.kind()));
+            assert_eq!(piece, expected, "{fen} on {square}");
+        }
+    }
+}
+
+#[test]
 fn canonical_fen_round_trips() {
     for (fen, _) in perft_positions() {
         assert_eq!(Position::from_fen(fen).unwrap().to_fen(), fen);
@@ -86,6 +118,7 @@ fn rejected_fens_identify_the_problem() {
         ("8/8/8/8/8/8/8/8 w - - 0", "six fields"),
         ("4k3/8/8/8/8/8/8/4Z3 w - - 0 1", "piece letter"),
         ("4k3/8/8/8/8/8/8/4K2 w - - 0 1", "eight files"),
+        ("4k3/8/8/8/8/8/8/8K w - - 0 1", "eight files"),
         ("4k3/8/8/8/8/8/8/4K3/8 w - - 0 1", "eight ranks"),
         ("4k3/8/8/8/8/8/8/4K3 x - - 0 1", "side to move"),
         ("4k3/8/8/8/8/8/8/4K3 w X - 0 1", "K, Q, k, q"),
@@ -179,6 +212,7 @@ fn king_can_step_beside_other_king_on_rank_or_file(reference: &Chess) -> bool {
 fn compare_with_reference(reference: &Chess) -> Result<(), Box<dyn std::error::Error>> {
     let fen = Fen::from_position(reference, EnPassantMode::Always).to_string();
     let position = Position::from_fen(&fen)?;
+    assert_eq!(position.is_in_check(), reference.is_check(), "{fen}");
     let mut actual: Vec<_> = position
         .legal_moves()
         .into_iter()
@@ -218,6 +252,7 @@ fn illegal_uci_moves_have_no_match() {
     let initial = Fen::from_position(&Chess::default(), EnPassantMode::Always).to_string();
     for (case, fen, from, to) in [
         ("three-square pawn advance", initial.as_str(), "e2", "e5"),
+        ("empty origin square", initial.as_str(), "e3", "e4"),
         (
             "missing promotion piece",
             "8/P7/8/8/8/6q1/5k2/7K w - - 0 1",

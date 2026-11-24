@@ -36,10 +36,10 @@ pub(crate) fn check(root: &Path) -> Result<Vec<String>, String> {
 
 fn public_modules(source: &str) -> Result<Vec<usize>, &'static str> {
     let source = source.strip_prefix('\u{feff}').unwrap_or(source);
-    let (shebang, mut remaining) = source
-        .split_at_checked(strip_shebang(source).unwrap_or_default())
+    let mut remaining = source
+        .get(strip_shebang(source).unwrap_or_default()..)
         .ok_or("invalid Rust shebang boundary")?;
-    let mut line = 1 + shebang.matches('\n').count();
+    let mut line = 1;
     let mut nesting = 0_usize;
     let mut public = None;
     let mut lines = Vec::new();
@@ -58,18 +58,7 @@ fn public_modules(source: &str) -> Result<Vec<usize>, &'static str> {
         ) {
             continue;
         }
-        if matches!(
-            token.kind,
-            TokenKind::OpenBrace | TokenKind::OpenBracket | TokenKind::OpenParen
-        ) {
-            nesting += 1;
-        }
-        if matches!(
-            token.kind,
-            TokenKind::CloseBrace | TokenKind::CloseBracket | TokenKind::CloseParen
-        ) {
-            nesting = nesting.saturating_sub(1);
-        }
+        nesting = next_nesting(nesting, token.kind);
         if text == "mod"
             && let Some(line) = public
         {
@@ -78,6 +67,22 @@ fn public_modules(source: &str) -> Result<Vec<usize>, &'static str> {
         public = (nesting == 0 && text == "pub").then_some(token_line);
     }
     Ok(lines)
+}
+
+fn next_nesting(nesting: usize, kind: TokenKind) -> usize {
+    if matches!(
+        kind,
+        TokenKind::OpenBrace | TokenKind::OpenBracket | TokenKind::OpenParen
+    ) {
+        nesting + 1
+    } else if matches!(
+        kind,
+        TokenKind::CloseBrace | TokenKind::CloseBracket | TokenKind::CloseParen
+    ) {
+        nesting.saturating_sub(1)
+    } else {
+        nesting
+    }
 }
 
 #[cfg(test)]

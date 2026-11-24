@@ -1,0 +1,9 @@
+{
+  "bench": 90.0,
+  "deepening": 98.0,
+  "fisher": 100.0,
+  "rules": 99.5,
+  "search": 100.0,
+  "uci": 95.5,
+  "xtask": 93.5
+}

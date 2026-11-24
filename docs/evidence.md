@@ -74,7 +74,9 @@ Below the table, list anything still undecided: a claim nobody could test, a fin
 
 - **Always:** perft against published counts, comparison with a reference engine on random positions, invariants as property tests.
 - **For every change to search, evaluation or time management:** the [bench signature](process.md#recording-the-bench-signature), and an SPRT result when the claim is strength.
-- **Only where a weak assertion could hide a serious defect:** mutation testing, on that code alone.
-- **Not by default:** full mutation runs, formal models.
+- **Pull requests:** mutation-test the whole workspace on the merge commit. Require per-crate region coverage at or above the [reviewed floors](../.cargo/coverage-floors.json).
+- **Weekly:** mutation-test the whole workspace. Recheck every reviewed equivalent mutant and require a current proof for each survivor.
+
+Mutation and coverage judge each crate using only its unit and integration tests.
 
 `scripts/check` has to stay fast enough to run on every commit and at the end of every agent turn. Slow evidence (deep perft, matches, SPRT) runs on its own and is recorded in the claims table with the revision it ran against.

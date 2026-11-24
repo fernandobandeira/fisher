@@ -1,4 +1,6 @@
-use super::*;
+#![cfg(test)]
+
+use super::super::*;
 use rules::Square;
 
 #[test]
@@ -94,4 +96,12 @@ fn uci_move(from: &str, to: &str) -> Result<UciMove, &'static str> {
         to: Square::parse(to).ok_or("invalid expected destination square")?,
         promotion: None,
     })
+}
+
+#[test]
+fn new_game_consumes_the_rest_of_the_line() {
+    assert_eq!(
+        parse_command("ucinewgame isready"),
+        Input::Handled(Command::UciNewGame)
+    );
 }

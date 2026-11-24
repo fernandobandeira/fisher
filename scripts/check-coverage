@@ -1,0 +1,326 @@
+#!/usr/bin/env python3
+"""Check LLVM region coverage against each crate's reviewed floor."""
+
+import argparse
+from collections import defaultdict
+from decimal import Decimal, InvalidOperation
+import json
+import os
+from pathlib import Path
+import re
+import shlex
+import subprocess
+import sys
+from tempfile import TemporaryDirectory
+
+ROOT = Path(__file__).resolve().parent.parent
+VERSION = "0.9.2"
+TEST_MODULE = re.compile(
+    r"(?m)^\s*#\[\s*cfg\s*\(\s*test\s*\)\s*\]"
+    r"(?:\s*#\[[^]\n]*\])*\s*mod\s+(\w+)\s*;"
+)
+
+
+def test_only_path(path):
+    return path.name == "tests.rs" or "tests" in path.parts[:-1]
+
+
+def test_layout_problems(root):
+    problems = [
+        f"{manifest.with_name('build.rs').relative_to(root)}: coverage cannot track generated source. "
+        "Remove the build script and keep Rust source under src/."
+        for manifest in sorted(root.glob("crates/*/Cargo.toml"))
+        if manifest.with_name("build.rs").is_file()
+    ]
+    for path in sorted(root.glob("crates/*/src/**/*.rs")):
+        source = path.read_text(encoding="utf-8")
+        relative = path.relative_to(root)
+        test_path = test_only_path(Path(*relative.parts[3:]))
+        marked = source.startswith("#![cfg(test)]\n")
+        if test_path and not marked:
+            problems.append(f"{relative}: start a wholly test-only source with #![cfg(test)] "
+                            "or move production code outside tests.rs and tests/.")
+        elif marked and not test_path:
+            problems.append(f"{relative}: put wholly test-only source in tests.rs or under tests/.")
+        if not test_path and any(name != "tests" for name in TEST_MODULE.findall(source)):
+            problems.append(f"{relative}: put out-of-line #[cfg(test)] modules in tests.rs or tests/. "
+                            "Declare mod tests and keep any submodules beneath it.")
+    return problems
+
+
+def production_source(filename, root):
+    path = Path(filename)
+    if path.is_absolute():
+        if not path.is_relative_to(root):
+            return None
+        path = path.relative_to(root)
+    parts = path.parts
+    normalized = Path(os.path.normpath(path))
+    if len(parts) >= 3 and parts[0] == "crates" and parts[2] == "src":
+        src = Path(*parts[:3])
+        if not normalized.is_relative_to(src):
+            raise ValueError(f"{path}: coverage source resolves outside {src}/. Move it under {src}/")
+    parts = normalized.parts
+    if len(parts) < 4 or parts[0] != "crates" or parts[2] != "src":
+        return None
+    if test_only_path(Path(*parts[3:])):
+        return None
+    return normalized
+
+
+def region_counts(report, root):
+    totals = defaultdict(lambda: (0, 0))
+    for unit in report["data"]:
+        for source in unit["files"]:
+            path = production_source(source["filename"], root)
+            if path is None:
+                continue
+            crate = path.parts[1]
+            regions = source["summary"]["regions"]
+            covered, count = totals[crate]
+            totals[crate] = covered + regions["covered"], count + regions["count"]
+    return totals
+
+
+def uncovered_regions(report, root, directory):
+    counts = defaultdict(int)
+    for unit in report["data"]:
+        for function in unit.get("functions", []):
+            for line, column, end_line, end_column, count, index, _, kind in function["regions"]:
+                if kind != 0:  # LLVM code regions
+                    continue
+                path = production_source(function["filenames"][index], root)
+                if path is not None and path.parts[1] == directory:
+                    counts[path, line, column, end_line, end_column] += count
+    # A shared region may occur in more than one instantiation.
+    return [
+        f"{path}:{line}:{column}-{end_line}:{end_column}"
+        for (path, line, column, end_line, end_column), count in sorted(counts.items())
+        if count == 0
+    ]
+
+
+def own_coverage(packages, root, artifacts, read_report):
+    totals = {}
+    uncovered = {}
+    for directory, package in sorted(packages.items()):
+        report = read_report(package, artifacts / directory)
+        counts = region_counts(report, root)
+        if directory in counts:
+            totals[directory] = counts[directory]
+            uncovered[directory] = uncovered_regions(report, root, directory)
+    return totals, uncovered
+
+
+def coverage_command(package):
+    return [
+        "cargo", "llvm-cov", "--locked", "--package", package, "--tests", "--json",
+        "--disable-default-ignore-filename-regex",
+    ]
+
+
+def coverage_environment(directory):
+    # llvm-cov scans executables for every workspace target in the build directories.
+    # Isolate both directories so there are only objects from this package's test run.
+    return {
+        "CARGO_LLVM_COV_TARGET_DIR": str(directory),
+        "CARGO_LLVM_COV_BUILD_DIR": str(directory),
+    }
+
+
+def coverage_report(package, directory):
+    environment = {**os.environ, **coverage_environment(directory)}
+    return json.loads(subprocess.check_output(
+        coverage_command(package), cwd=ROOT, env=environment,
+    ))
+
+
+def workspace_packages():
+    metadata = json.loads(subprocess.check_output(
+        ["cargo", "metadata", "--locked", "--no-deps", "--format-version", "1"], cwd=ROOT
+    ))
+    members = set(metadata["workspace_members"])
+    return {
+        Path(package["manifest_path"]).parent.name: package["name"]
+        for package in metadata["packages"] if package["id"] in members
+    }
+
+
+def compare(totals, floors, packages, artifacts, uncovered=None):
+    crates = packages.keys()
+    summaries = []
+    problems = []
+
+    for crate in sorted(crates - floors.keys()):
+        problems.append(f"{crate}: measure region coverage and add its floor to .cargo/coverage-floors.json.")
+    for crate in sorted(floors.keys() - crates):
+        problems.append(f"{crate}: remove the stale floor from .cargo/coverage-floors.json.")
+    for crate in sorted(crates & floors.keys()):
+        covered, count = totals.get(crate, (0, 0))
+        floor = Decimal(floors[crate])
+        if not 0 <= floor <= 100 or floor * 2 != (floor * 2).to_integral_value():
+            problems.append(f"{crate}: set a floor from 0% to 100% in half-point increments.")
+            continue
+        if not 0 <= covered <= count or count == 0:
+            problems.append(
+                f"{crate}: LLVM reported no usable regions. Run scripts/check-coverage with the crate’s own tests."
+            )
+            continue
+
+        measured = Decimal(100 * covered) / count
+        summary = f"{crate}: {measured:.3f}% ({covered}/{count} regions), floor {floor}%"
+        summaries.append(summary)
+        if 100 * covered < floor * count:
+            environment = coverage_environment(artifacts / crate)
+            command = shlex.join([
+                "env", *(f"{key}={value}" for key, value in environment.items()),
+                *coverage_command(packages[crate]),
+            ])
+            problems.append(f"{summary}. Restore coverage with tests. Reproduce with `{command}`.")
+            locations = uncovered.get(crate, []) if uncovered else []
+            if locations:
+                problems.append(
+                    "  Uncovered locations (generic instantiations merged). "
+                    "The region count above comes from LLVM's summary."
+                )
+                problems.extend(f"    {location}" for location in locations)
+    return summaries, problems
+
+
+def self_test():
+    def source(path, covered, count):
+        return {"filename": path, "summary": {"regions": {"covered": covered, "count": count}}}
+
+    root = Path("/work")
+    report = {"data": [{"files": [
+        source("/work/crates/rules/src/tests/../lib.rs", 2, 2),
+        source("/work/crates/rules/src/fen.rs", 97, 98),
+        source("/work/crates/search/src/lib.rs", 1000, 1000),
+        source("/work/crates/rules/tests/rules.rs", 80, 80),
+        source("/work/crates/rules/src/rules/tests/fixtures.rs", 80, 80),
+        source("/work/crates/rules/src/tests.rs", 80, 80),
+        source("/other/crates/rules/src/lib.rs", 90, 90),
+    ], "functions": [{
+        "filenames": [
+            "/work/crates/rules/src/fen.rs",
+            "/work/crates/rules/src/rules/tests/fixtures.rs",
+            "/work/crates/search/src/lib.rs",
+        ],
+        "regions": [
+            [10, 1, 10, 10, 0, 0, 0, 0],
+            [11, 1, 11, 10, 0, 0, 0, 0],
+            [11, 1, 11, 10, 1, 0, 0, 0],
+            [12, 1, 12, 10, 0, 1, 0, 0],
+            [13, 1, 13, 10, 0, 2, 0, 0],
+        ],
+    }]}]}
+    totals = region_counts(report, root)
+    assert totals == {"rules": (99, 100), "search": (1000, 1000)}
+    floors = {"rules": Decimal("99.5"), "search": 100}
+    packages = {"rules": "rules-package", "search": "search"}
+    artifacts = root / "target" / "coverage"
+    uncovered = {"rules": uncovered_regions(report, root, "rules")}
+    summaries, problems = compare(totals, floors, packages, artifacts, uncovered)
+    assert len(summaries) == 2
+    assert len(problems) == 3 and problems[0].startswith("rules: 99.000%")
+    assert "`env CARGO_LLVM_COV_TARGET_DIR=/work/target/coverage/rules " in problems[0]
+    assert shlex.join(coverage_command("rules-package")) in problems[0]
+    assert "generic instantiations merged" in problems[1]
+    assert problems[2] == "    crates/rules/src/fen.rs:10:1-10:10"
+
+    escaped_report = {"data": [{"files": [
+        source("/work/crates/search/src/../tests/support/production.rs", 0, 5),
+    ]}]}
+    try:
+        region_counts(escaped_report, root)
+    except ValueError as error:
+        assert "coverage source resolves outside crates/search/src/" in str(error)
+    else:
+        raise AssertionError("coverage accepted a source path escaping its crate's src/")
+
+    # A dependency can have full coverage while running the caller's tests.
+    caller_report = {"data": [{"files": [
+        source("/work/crates/rules/src/lib.rs", 100, 100),
+        source("/work/crates/search/src/lib.rs", 1000, 1000),
+    ]}]}
+    reports = {"rules-package": report, "search": caller_report}
+
+    def read_report(package, directory):
+        expected = "rules" if package == "rules-package" else "search"
+        assert directory == artifacts / expected
+        return reports.pop(package)
+
+    own_totals, _ = own_coverage(packages, root, artifacts, read_report)
+    assert not reports
+    assert own_totals == {"rules": (99, 100), "search": (1000, 1000)}
+    assert len(compare(own_totals, floors, packages, artifacts)[1]) == 1
+    assert not compare(region_counts(caller_report, root), floors, packages, artifacts)[1]
+
+    with TemporaryDirectory() as directory:
+        workspace = Path(directory)
+        src = workspace / "crates/example/src"
+        src.mkdir(parents=True)
+        (src.parent / "Cargo.toml").write_text('[package]\nname = "example"\nversion = "0.1.0"\n')
+        (src / "lib.rs").write_text("#[cfg(test)]\nmod test_helpers;\n")
+        (src / "test_helpers.rs").write_text("#![cfg(test)]\n")
+        assert len(test_layout_problems(workspace)) == 2
+        (src / "lib.rs").write_text("#[cfg(test)]\nmod tests;\n")
+        (src / "test_helpers.rs").rename(src / "tests.rs")
+        assert not test_layout_problems(workspace)
+        (src.parent / "build.rs").write_text("fn main() {}\n")
+        assert test_layout_problems(workspace)[0].startswith("crates/example/build.rs:")
+        (src.parent / "build.rs").unlink()
+        (src / "tests.rs").write_text("pub fn example() {}\n")
+        assert "move production code" in test_layout_problems(workspace)[0]
+
+    # Equality passes, while a missing report or an unregistered crate fails.
+    floors["rules"] = 99
+    assert not compare(totals, floors, packages, artifacts)[1]
+    assert "no usable regions" in compare({}, floors, packages, artifacts)[1][0]
+    assert "add its floor" in compare(totals, floors, {**packages, "bench": "bench"}, artifacts)[1][0]
+    assert "remove the stale floor" in compare(totals, floors, {"rules": "rules-package"}, artifacts)[1][0]
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--self-test", action="store_true")
+    if parser.parse_args().self_test:
+        self_test()
+        return 0
+
+    install = (
+        f"Install cargo-llvm-cov with `cargo install cargo-llvm-cov --version {VERSION} --locked` "
+        "and LLVM tools with `rustup component add llvm-tools`."
+    )
+    try:
+        version = subprocess.run(
+            ["cargo", "llvm-cov", "--version"], cwd=ROOT, capture_output=True, text=True
+        )
+        if version.returncode or version.stdout.strip() != f"cargo-llvm-cov {VERSION}":
+            print(install, file=sys.stderr)
+            return 1
+        problems = test_layout_problems(ROOT)
+        if problems:
+            print("\n".join(problems), file=sys.stderr)
+            return 1
+        floors = json.loads((ROOT / ".cargo/coverage-floors.json").read_text(), parse_float=Decimal)
+        packages = workspace_packages()
+        target = ROOT / "target"
+        target.mkdir(exist_ok=True)
+        with TemporaryDirectory(prefix="coverage-", dir=target) as artifacts:
+            directories = Path(artifacts)
+            totals, uncovered = own_coverage(packages, ROOT, directories, coverage_report)
+            summaries, problems = compare(totals, floors, packages, directories, uncovered)
+    except (OSError, subprocess.CalledProcessError, ValueError, KeyError, InvalidOperation) as error:
+        print(f"Could not check region coverage: {error}.", file=sys.stderr)
+        return 1
+
+    for summary in summaries:
+        print(summary)
+    for problem in problems:
+        print(problem, file=sys.stderr)
+    return int(bool(problems))
+
+
+if __name__ == "__main__":
+    sys.exit(main())

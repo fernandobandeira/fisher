@@ -207,6 +207,8 @@ fn read_number(tokens: &mut Peekable<SplitWhitespace<'_>>) -> Option<u64> {
 
 #[cfg(test)]
 mod tests {
+    mod commands;
+
     use super::*;
 
     #[test]
@@ -228,6 +230,3 @@ mod tests {
         }
     }
 }
-
-#[cfg(test)]
-mod commands;

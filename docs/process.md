@@ -21,6 +21,13 @@ A slice is thin and goes end to end. "The engine answers `go` with a legal move 
 
 Merge each slice into `main` when it is green. Do not build a tall stack of dependent branches and review it at the end.
 
+### Pull requests
+
+- **Squash-merge.** Each pull request becomes one commit on `main`. With the repository's settings the squash commit keeps the messages of the commits it replaces, so their `Guard-Change:` lines survive.
+- **Stack a slice that builds on one not merged yet.** Use GitHub's stacked pull requests through the `gh stack` extension (`gh extension install github/gh-stack`), not a base branch set by hand. `gh stack init` adopts existing branches, `gh stack link` joins pull requests that are already open, and `gh stack sync` rebases the layers above one that changed.
+- **Run it without prompts.** An agent passes `--auto` to `gh stack submit` and `--yes` to `gh stack merge`. The interactive editors wait forever in an agent's shell.
+- **Merge from the bottom.** `gh stack merge <pr> --squash --yes` merges every layer up to that pull request in one step, one squash commit per layer, and none of them if any layer cannot merge.
+
 ## Tiers
 
 Tier a change by how far it reaches, how easily a mistake in it would be noticed, and how hard it is to undo.

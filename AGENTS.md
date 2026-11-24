@@ -38,6 +38,10 @@ If it is red and you cannot fix it, say so plainly with the output. Do not weake
 - A change to a crate's public interface is a decision for the human. Propose it, do not slip it in.
 - Put logic in a library crate. `fisher` is [the binary](CODING_STANDARDS.md#the-binary): its `main.rs` only wires the other crates together.
 
+## Pull requests
+
+Squash-merge. A pull request that builds on another one not merged yet goes in a GitHub stack, through `gh stack`. [docs/process.md](docs/process.md#pull-requests) has the commands.
+
 ## The owner's attention
 
 Bring the owner what only the owner can decide: what fisher does for the person using it, which claims matter, what a crate is for and what it exports, a guard, and anything hard to reverse.

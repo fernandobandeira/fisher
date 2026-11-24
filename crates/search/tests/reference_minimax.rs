@@ -56,7 +56,7 @@ fn free_capture_scores_the_material_left() -> Result<(), Box<dyn Error>> {
 fn checkmated_position_has_no_move_or_nodes() -> Result<(), Box<dyn Error>> {
     let position = position("k7/1Q6/2K5/8/8/8/8/8 b - - 0 1")?;
     let result = minimax(&position, 1);
-    assert_eq!(result.chosen_move, None);
+    assert_eq!(result.best_move, None);
     assert_eq!(result.score, -100_000);
     assert_eq!(result.nodes, 0);
     Ok(())
@@ -67,7 +67,7 @@ fn equal_scores_keep_the_first_legal_move() {
     let position = Chess::default();
     // No legal move from the starting position changes the material.
     let first = position.legal_moves().into_iter().next();
-    assert_eq!(minimax(&position, 1).chosen_move, first);
+    assert_eq!(minimax(&position, 1).best_move, first);
 }
 
 #[test]
@@ -108,7 +108,7 @@ fn published_mate_in_two_scores_as_a_win_with_the_published_move() -> Result<(),
 
     assert_eq!(result.score, expected_score);
     let best_move = result
-        .chosen_move
+        .best_move
         .map(|movement| UciMove::from_standard(movement).to_string());
     assert_eq!(best_move.as_deref(), Some(record.published_move));
     Ok(())

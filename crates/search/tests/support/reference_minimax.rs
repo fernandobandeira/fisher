@@ -5,7 +5,7 @@ pub(super) const MATE_SCORE: i32 = 100_000;
 
 #[derive(Debug, PartialEq, Eq)]
 pub(super) struct ReferenceResult {
-    pub(super) chosen_move: Option<Move>,
+    pub(super) best_move: Option<Move>,
     pub(super) score: i32,
     pub(super) nodes: u64,
 }
@@ -14,9 +14,9 @@ pub(super) struct ReferenceResult {
 /// move, and the node count excluding the starting position. Mate scores are
 /// signed, with magnitude `MATE_SCORE` minus the plies to checkmate.
 pub(super) fn minimax(position: &Chess, depth: u8) -> ReferenceResult {
-    let (chosen_move, score, nodes) = search(position, depth, 0);
+    let (best_move, score, nodes) = search(position, depth, 0);
     ReferenceResult {
-        chosen_move,
+        best_move,
         score,
         nodes,
     }

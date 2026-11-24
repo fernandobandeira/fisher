@@ -310,7 +310,7 @@ impl<'a> Session<'a> {
                 search.info.push_back(info(depth));
                 search.last_move = depth.principal_variation.first().map(movement);
             }
-            SearchReport::Ended(chosen) => {
+            SearchReport::BestMove(chosen) => {
                 search.ended = Some(chosen.as_ref().map_or_else(|| "0000".to_owned(), movement));
             }
         }

@@ -25,7 +25,7 @@ use crate::{
 /// Runs a UCI session until quit, end of input, or an I/O error.
 ///
 /// The reader and search thread send events into one ordered stream. Only the
-/// command handler writes output. Each search must send one `SearchReport::Ended`
+/// command handler writes output. Each search must send one `SearchReport::BestMove`
 /// after its last finished depth and return.
 ///
 /// # Errors
@@ -102,7 +102,7 @@ impl SearchProgress {
             *self = Self::ReportedAfterEnd;
             return;
         }
-        if matches!(report, SearchReport::Ended(_)) {
+        if matches!(report, SearchReport::BestMove(_)) {
             *self = Self::Ended;
         }
         drop(events.send(Event::Report(report)));
@@ -120,7 +120,7 @@ impl SearchProgress {
 enum Active {
     Idle,
     Searching {
-        stop: Arc<AtomicBool>,
+        interrupt: Arc<AtomicBool>,
         infinite: bool,
     },
     Held(UciMove),
@@ -128,8 +128,8 @@ enum Active {
 
 impl Active {
     fn interrupt(&self) {
-        if let Self::Searching { stop, .. } = self {
-            stop.store(true, Ordering::Relaxed);
+        if let Self::Searching { interrupt, .. } = self {
+            interrupt.store(true, Ordering::Relaxed);
         }
     }
 }
@@ -221,7 +221,7 @@ impl Session {
         }
         let request = search_request(self.position, parameters);
         self.active = Active::Searching {
-            stop: Arc::clone(&request.stop),
+            interrupt: Arc::clone(&request.interrupt),
             infinite: parameters.infinite,
         };
         self.requests.send(request).map_err(io::Error::other)
@@ -230,7 +230,7 @@ impl Session {
     fn report(&mut self, output: &mut dyn Write, report: SearchReport) -> io::Result<()> {
         match report {
             SearchReport::FinishedDepth(depth) => send_search_info(output, &depth),
-            SearchReport::Ended(chosen) => {
+            SearchReport::BestMove(chosen) => {
                 let chosen = chosen.map_or(UciMove::Null, UciMove::from);
                 if matches!(self.active, Active::Searching { infinite: true, .. }) {
                     self.active = Active::Held(chosen);
@@ -285,7 +285,7 @@ fn search_request(position: Position, parameters: &GoParameters) -> SearchReques
             binc: parameters.binc.map(Duration::from_millis),
             movestogo: parameters.movestogo,
         },
-        stop: Arc::new(AtomicBool::new(false)),
+        interrupt: Arc::new(AtomicBool::new(false)),
         started: Instant::now(),
     }
 }

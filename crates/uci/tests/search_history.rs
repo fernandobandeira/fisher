@@ -39,7 +39,7 @@ fn forced_move(fen: &str) -> rules::Move {
 }
 
 fn ended(fen: &str) -> Event<'static> {
-    Report(SearchReport::Ended(Some(forced_move(fen))))
+    Report(SearchReport::BestMove(Some(forced_move(fen))))
 }
 
 fn finished_depth() -> Event<'static> {
@@ -110,7 +110,7 @@ fn rule_2_infinite_holds_its_move() {
     accepts(&[
         terminal.clone(),
         INFINITE,
-        Report(SearchReport::Ended(None)),
+        Report(SearchReport::BestMove(None)),
         STOP,
         null.clone(),
         QUIT,
@@ -121,7 +121,7 @@ fn rule_2_infinite_holds_its_move() {
         &[
             terminal,
             INFINITE,
-            Report(SearchReport::Ended(None)),
+            Report(SearchReport::BestMove(None)),
             null,
             STOP,
             QUIT,
@@ -203,7 +203,7 @@ fn rule_3_finished_depths_precede_bestmove() {
             depth,
             info,
             STOP,
-            Report(SearchReport::Ended(pawn_move("e3"))),
+            Report(SearchReport::BestMove(pawn_move("e3"))),
             Response("bestmove e2e3\n"),
             QUIT,
         ],
@@ -621,7 +621,7 @@ fn fen_fields_end_before_the_move_list() {
         accepts(&[
             Command(position),
             GO,
-            Report(SearchReport::Ended(movement)),
+            Report(SearchReport::BestMove(movement)),
             Response("bestmove e7e5\n"),
             QUIT,
         ]);
@@ -813,7 +813,7 @@ fn scripted_input_drives_the_session_entry() -> io::Result<()> {
             commands.send_line("isready").unwrap();
             report(SearchReport::FinishedDepth(depth.clone()));
             commands.send_line("stop").unwrap();
-            report(SearchReport::Ended(chosen));
+            report(SearchReport::BestMove(chosen));
             commands.send_line("quit").unwrap();
         })?;
         feeder.join().unwrap()
@@ -1253,7 +1253,7 @@ mod model {
                         elapsed: Duration::from_millis(1),
                         principal_variation: vec![movement],
                     })),
-                    ReportKind::Ended => Report(SearchReport::Ended(Some(movement))),
+                    ReportKind::Ended => Report(SearchReport::BestMove(Some(movement))),
                 }
             }
             Observation::Line(line) => match line {

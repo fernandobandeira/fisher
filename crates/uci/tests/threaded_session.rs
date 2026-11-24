@@ -160,7 +160,7 @@ impl Script {
                 }));
                 let _sent = sent.send(());
             }
-            report(SearchReport::Ended(chosen));
+            report(SearchReport::BestMove(chosen));
             let _sent = sent.send(());
         });
         (session, Self { steps, reported })
@@ -332,9 +332,9 @@ fn acknowledged_commands_reach_the_channel_before_the_next_report() -> io::Resul
     Ok(())
 }
 
-fn wait_for_stop(stop: &std::sync::atomic::AtomicBool) {
+fn wait_for_interrupt(interrupt: &std::sync::atomic::AtomicBool) {
     let deadline = Instant::now() + TIMEOUT;
-    while !stop.load(Ordering::Relaxed) {
+    while !interrupt.load(Ordering::Relaxed) {
         assert!(
             Instant::now() < deadline,
             "the session did not interrupt the search"
@@ -350,7 +350,7 @@ fn answers_ready_while_real_search_is_held_then_interrupts_on_stop() -> io::Resu
     let session = Session::start(move |request, report| {
         assert!(started.send(()).is_ok());
         assert!(receive(&released).is_ok());
-        wait_for_stop(&request.stop);
+        wait_for_interrupt(&request.interrupt);
         deepening::search(request, report);
     });
     session.command("go infinite")?;
@@ -373,7 +373,7 @@ fn isready_leaves_a_finite_real_search_running() -> io::Result<()> {
     let session = Session::start(move |request, report| {
         assert!(started.send(()).is_ok());
         assert!(receive(&released).is_ok());
-        assert!(!request.stop.load(Ordering::Relaxed));
+        assert!(!request.interrupt.load(Ordering::Relaxed));
         deepening::search(request, report);
     });
     session.command(A)?;
@@ -402,7 +402,7 @@ fn interrupt_real_search_on_exit(quit: bool) -> io::Result<()> {
     let (started, hold) = mpsc::channel();
     let mut session = Session::start(move |request, report| {
         assert!(started.send(()).is_ok());
-        wait_for_stop(&request.stop);
+        wait_for_interrupt(&request.interrupt);
         deepening::search(request, report);
     });
     session.command("go")?;
@@ -429,10 +429,10 @@ fn eof_interrupts_real_search_and_exits_after_bestmove() -> io::Result<()> {
 #[test]
 fn stop_crossing_the_end_of_real_search_releases_once() -> io::Result<()> {
     let session = Session::start(|request, report| {
-        let stop = Arc::clone(&request.stop);
+        let interrupt = Arc::clone(&request.interrupt);
         deepening::search(request, &mut |event| {
-            if matches!(event, SearchReport::Ended(_)) {
-                wait_for_stop(&stop);
+            if matches!(event, SearchReport::BestMove(_)) {
+                wait_for_interrupt(&interrupt);
             }
             report(event);
         });
@@ -486,7 +486,7 @@ fn a_search_thread_dying_during_shutdown_returns_an_error() -> io::Result<()> {
     let search = DiesOnDrop;
     let session = Session::start(move |request, report| {
         let _alive = &search;
-        report(SearchReport::Ended(
+        report(SearchReport::BestMove(
             request.position.legal_moves().into_iter().next(),
         ));
     });
@@ -503,7 +503,7 @@ fn a_search_thread_dying_during_shutdown_returns_an_error() -> io::Result<()> {
 #[test]
 fn reports_after_ended_are_errors_with_input_still_open() -> io::Result<()> {
     for extra_report in [
-        SearchReport::Ended(None),
+        SearchReport::BestMove(None),
         SearchReport::FinishedDepth(FinishedDepth {
             depth: 1,
             score: Score::Centipawns(0),
@@ -513,7 +513,7 @@ fn reports_after_ended_are_errors_with_input_still_open() -> io::Result<()> {
         }),
     ] {
         let session = Session::start(move |_, report| {
-            report(SearchReport::Ended(None));
+            report(SearchReport::BestMove(None));
             report(extra_report.clone());
         });
         session.command("go")?;

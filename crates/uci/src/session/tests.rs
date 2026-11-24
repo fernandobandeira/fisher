@@ -111,7 +111,7 @@ fn reader_error_during_release(command: &str) -> io::Result<()> {
         Event::Line("go".to_owned()),
         Event::Line(command.to_owned()),
         Event::EndOfInput(Err(io::ErrorKind::BrokenPipe.into())),
-        Event::Report(SearchReport::Ended(None)),
+        Event::Report(SearchReport::BestMove(None)),
     ] {
         sender.send(event).map_err(io::Error::other)?;
     }
@@ -119,7 +119,7 @@ fn reader_error_during_release(command: &str) -> io::Result<()> {
     let mut output = Vec::new();
     assert_read_error(session.run(&mut output, "test"), &output);
     let request = work.try_recv().map_err(io::Error::other)?;
-    assert!(request.stop.load(Ordering::Relaxed));
+    assert!(request.interrupt.load(Ordering::Relaxed));
     Ok(())
 }
 
@@ -186,7 +186,7 @@ fn a_report_write_error_ends_the_command_loop() -> io::Result<()> {
         .send(Event::Line("go".to_owned()))
         .map_err(io::Error::other)?;
     sender
-        .send(Event::Report(SearchReport::Ended(None)))
+        .send(Event::Report(SearchReport::BestMove(None)))
         .map_err(io::Error::other)?;
     drop(sender);
     struct ClosedOutput;

@@ -27,7 +27,7 @@ fn session_reports_the_scripted_search() -> io::Result<()> {
                     }
                 );
                 // D20. This root has exactly one legal move, as in go-infinite.uci.
-                report(SearchReport::Ended(request.position.legal_moves().into_iter().next()));
+                report(SearchReport::BestMove(request.position.legal_moves().into_iter().next()));
                 return;
             }
 
@@ -45,23 +45,23 @@ fn session_reports_the_scripted_search() -> io::Result<()> {
                     movestogo: Some(5),
                 }
             );
-            let chosen_move = legal_move(&request.position, "e7", "e5").unwrap();
-            let reply = legal_move(&chosen_move.play(), "g1", "f3").unwrap();
+            let best_move = legal_move(&request.position, "e7", "e5").unwrap();
+            let reply = legal_move(&best_move.play(), "g1", "f3").unwrap();
             report(SearchReport::FinishedDepth(FinishedDepth {
                 depth: 1,
                 score: Score::Centipawns(17),
                 nodes: 23,
                 elapsed: Duration::from_millis(2),
-                principal_variation: vec![chosen_move],
+                principal_variation: vec![best_move],
             }));
             report(SearchReport::FinishedDepth(FinishedDepth {
                 depth: 2,
                 score: Score::Centipawns(-6),
                 nodes: 440,
                 elapsed: Duration::from_millis(4),
-                principal_variation: vec![chosen_move, reply],
+                principal_variation: vec![best_move, reply],
             }));
-            report(SearchReport::Ended(Some(chosen_move)));
+            report(SearchReport::BestMove(Some(best_move)));
         },
     )?;
 
@@ -113,7 +113,7 @@ fn waits_for_stop_before_accepting_another_go_or_position() -> io::Result<()> {
         move |request, report| {
             assert!(!searched);
             searched = true;
-            report(SearchReport::Ended(legal_move(&request.position, "h8", "g8")));
+            report(SearchReport::BestMove(legal_move(&request.position, "h8", "g8")));
         },
     )?;
     let responses: Vec<_> = output.lines().collect();
@@ -138,7 +138,7 @@ fn rejected_positions_leave_the_last_accepted_position_in_place() -> io::Result<
         b"position fen 7k/8/5K1Q/8/8/8/8/8 b - - 0 1\n          position fen 7k/8/5K1Q/8/8/8/8/7 b - - 0 1\n          position startpos moves e2e4 e7e5 e4e6\n          position startpos moves e2e4 e7e9\n          position fen\nposition\nposition startpos e2e4\n          position startpos moves e2e4 0000\ngo\n",
         |request, report| {
             assert_eq!(request.position.to_fen(), "7k/8/5K1Q/8/8/8/8/8 b - - 0 1");
-            report(SearchReport::Ended(legal_move(&request.position, "h8", "g8")));
+            report(SearchReport::BestMove(legal_move(&request.position, "h8", "g8")));
         },
     )?;
     let mut responses = output.lines();
@@ -183,7 +183,7 @@ fn terminal_search_reports_omit_search_statistics_and_a_move() -> io::Result<()>
 // These tests examine output from finished work, including reports after
 // stop is queued. Keep the search independent of the interrupt in this fixture.
 fn finished_search(mut request: deepening::SearchRequest, report: &mut dyn FnMut(SearchReport)) {
-    request.stop = Arc::new(AtomicBool::new(false));
+    request.interrupt = Arc::new(AtomicBool::new(false));
     deepening::search(request, report);
 }
 
@@ -198,7 +198,7 @@ fn reports_the_read_error_from_the_gui() {
     let input = io::Read::chain(&b"go infinite\n"[..], BrokenInput);
     let mut output = Vec::new();
     let error = uci::run_session(input, &mut output, "test", |_, report| {
-        report(SearchReport::Ended(None));
+        report(SearchReport::BestMove(None));
     })
     .unwrap_err();
     assert_eq!(error.kind(), io::ErrorKind::BrokenPipe);

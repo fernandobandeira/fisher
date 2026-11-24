@@ -8,11 +8,11 @@ fn interrupt_inside_the_depth_discards_it() -> std::io::Result<()> {
 
     let (at_node, reached) = mpsc::channel();
     let (resume, may_resume) = mpsc::channel();
-    let stop = Arc::new(AtomicBool::new(false));
+    let interrupt = Arc::new(AtomicBool::new(false));
     let request = SearchRequest {
         position: Position::starting(),
         limits: Limits::default(),
-        stop: Arc::clone(&stop),
+        interrupt: Arc::clone(&interrupt),
         started: Instant::now(),
     };
     let expected = request.position.legal_moves().into_iter().next();
@@ -36,13 +36,13 @@ fn interrupt_inside_the_depth_discards_it() -> std::io::Result<()> {
     reached
         .recv_timeout(Duration::from_secs(5))
         .map_err(io::Error::other)?;
-    stop.store(true, Ordering::Relaxed);
+    interrupt.store(true, Ordering::Relaxed);
     resume.send(()).map_err(io::Error::other)?;
     let (interrupt_checks, reports) = worker
         .join()
         .map_err(|_| io::Error::other("search thread died"))?;
     assert_eq!(interrupt_checks, 3);
-    assert_eq!(reports, [SearchReport::Ended(expected)]);
+    assert_eq!(reports, [SearchReport::BestMove(expected)]);
     Ok(())
 }
 
@@ -52,7 +52,7 @@ fn reports_elapsed_time_from_the_clock() -> std::io::Result<()> {
     let request = SearchRequest {
         position: Position::starting(),
         limits: Limits::default(),
-        stop: Arc::new(AtomicBool::new(false)),
+        interrupt: Arc::new(AtomicBool::new(false)),
         started: origin + Duration::from_micros(250),
     };
     let mut reports = Vec::new();
@@ -66,7 +66,7 @@ fn reports_elapsed_time_from_the_clock() -> std::io::Result<()> {
 
     let [
         SearchReport::FinishedDepth(depth),
-        SearchReport::Ended(chosen),
+        SearchReport::BestMove(chosen),
     ] = reports.as_slice()
     else {
         return Err(std::io::Error::other(format!(

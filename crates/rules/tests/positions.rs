@@ -179,6 +179,7 @@ fn king_can_step_beside_other_king_on_rank_or_file(reference: &Chess) -> bool {
 fn compare_with_reference(reference: &Chess) -> Result<(), Box<dyn std::error::Error>> {
     let fen = Fen::from_position(reference, EnPassantMode::Always).to_string();
     let position = Position::from_fen(&fen)?;
+    assert_eq!(position.is_in_check(), reference.is_check(), "{fen}");
     let mut actual: Vec<_> = position
         .legal_moves()
         .into_iter()

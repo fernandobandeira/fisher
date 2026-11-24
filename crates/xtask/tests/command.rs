@@ -90,3 +90,55 @@ fn reports_missing_inputs_and_invalid_commands() -> io::Result<()> {
     rejects(&workspace.run("unknown")?, "Usage: cargo xtask");
     Ok(())
 }
+
+#[test]
+fn uses_the_workspace_by_default_and_rejects_an_unknown_option() -> io::Result<()> {
+    let command = || Command::new(env!("CARGO_BIN_EXE_xtask"));
+    accepts(&command().arg("glossary").output()?);
+    accepts(&command().arg("interfaces").output()?);
+    let workspace = Workspace::new()?;
+    rejects(
+        &command()
+            .args(["glossary", "--other"])
+            .arg(&workspace.0)
+            .output()?,
+        "Usage: cargo xtask",
+    );
+    Ok(())
+}
+
+#[test]
+fn glossary_checks_only_rust_sources_and_skips_fixture_and_build_paths() -> io::Result<()> {
+    let workspace = Workspace::new()?;
+    for directory in ["crates/example/target", "crates/xtask/fixtures"] {
+        fs::create_dir_all(workspace.0.join(directory))?;
+        fs::write(workspace.0.join(directory).join("bad.rs"), "fn row() {}")?;
+    }
+    fs::write(workspace.0.join("crates/example/notes.txt"), "fn row() {}")?;
+    accepts(&workspace.run("glossary")?);
+    Ok(())
+}
+
+#[test]
+fn interfaces_skips_binary_crates_but_reports_other_read_errors() -> io::Result<()> {
+    let workspace = Workspace::new()?;
+    fs::write(
+        workspace.0.join("crates/example/src/main.rs"),
+        "fn main() {}",
+    )?;
+    accepts(&workspace.run("interfaces")?);
+    fs::create_dir(workspace.0.join("crates/example/src/lib.rs"))?;
+    rejects(&workspace.run("interfaces")?, "crates/example/src/lib.rs:");
+    Ok(())
+}
+
+#[test]
+fn interfaces_counts_the_shebang_before_the_public_module() -> io::Result<()> {
+    let workspace = Workspace::new()?;
+    workspace.write_root("#!/usr/bin/env script\npub mod implementation;")?;
+    rejects(
+        &workspace.run("interfaces")?,
+        "crates/example/src/lib.rs:2: use a private module",
+    );
+    Ok(())
+}

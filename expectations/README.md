@@ -174,7 +174,8 @@ with depths 1 through 4 followed by `readyok` passes in that order.
 Start one absolute five-second read bound when each observation starts.
 It covers all matches and the delimiter read, including stdout EOF for
 `! exit`. Matching lines do not renew it. The process exit-status wait
-keeps its own separate bound.
+keeps its own separate five-second bound, which starts at stdout EOF,
+as it does for `! exit` today.
 
 To check silence after a command, synchronize with a search or held move
 and use a strict exit. A repetition before exit alone cannot establish

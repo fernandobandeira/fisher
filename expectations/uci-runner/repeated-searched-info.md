@@ -13,7 +13,8 @@ The active runner reads sessions from `expectations/uci/`.
 - `transcript` is an array of lines. Append LF to each and concatenate
   them to obtain the input to the transcript loader.
 - `script` lists batches of events. Each batch uses `after_send`, the
-  one-based ordinal of a transcript send. Release its events only after
+  one-based ordinal of a transcript send, counting every `>` record
+including one that ends in CR. Release its events only after
   that send has been flushed. There is no unsolicited output.
 - Each `events` entry is `[milliseconds, kind, value]`. `stdout` emits
   the string followed by LF, `eof` closes stdout (value is null), and
@@ -26,7 +27,8 @@ The active runner reads sessions from `expectations/uci/`.
   time for the timed batches.
 - `expected.verdict` is `accept`, `load-reject`, or `run-reject`.
   `expected.reason` describes the observation that determines the verdict,
-  independent of error wording. For load rejection require no sends.
+  independent of error wording. For load rejection require no sends; the script of a load-reject case
+is never released.
   When the transcript rejects early, later scripted events need not run.
 
 The two `readyok` timing cases differ only in when the delimiter

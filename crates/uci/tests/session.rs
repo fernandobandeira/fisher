@@ -1,13 +1,13 @@
 use std::{io, sync::atomic::Ordering, time::Duration};
 
-use deepening::{FinishedDepth, Limits, Score};
+use deepening::{FinishedDepth, Limits, Score, SearchReport};
 use rules::{Move, Position, Square};
 
 #[test]
 fn session_reports_the_scripted_search() -> io::Result<()> {
     let mut output = Vec::new();
     uci::run_session(
-        &b"position startpos moves e2e4\ngo depth 2 nodes 440 movetime 50 infinite\nstop\n\
+        &b"position startpos moves e2e4\ngo depth 2 nodes 440 movetime 50 wtime 1000 btime 2000 winc 30 binc 40 movestogo 5 infinite\nstop\n\
            position fen 7k/8/5K1Q/8/8/8/8/8 b - - 0 1\ngo nodes 0\nquit\n"[..],
         &mut output,
         "test",
@@ -22,7 +22,8 @@ fn session_reports_the_scripted_search() -> io::Result<()> {
                     }
                 );
                 // D20. This root has exactly one legal move, as in go-infinite.uci.
-                return request.position.legal_moves().into_iter().next();
+                report(SearchReport::Ended(request.position.legal_moves().into_iter().next()));
+                return;
             }
 
             assert_eq!(
@@ -32,27 +33,30 @@ fn session_reports_the_scripted_search() -> io::Result<()> {
                     nodes: Some(440),
                     movetime: Some(Duration::from_millis(50)),
                     infinite: true,
+                    wtime: Some(Duration::from_millis(1000)),
+                    btime: Some(Duration::from_millis(2000)),
+                    winc: Some(Duration::from_millis(30)),
+                    binc: Some(Duration::from_millis(40)),
+                    movestogo: Some(5),
                 }
             );
-            let chosen_move = legal_move(&request.position, "e7", "e5")?;
-            let reply = legal_move(&chosen_move.play(), "g1", "f3")?;
-            report(FinishedDepth {
+            let chosen_move = legal_move(&request.position, "e7", "e5").unwrap();
+            let reply = legal_move(&chosen_move.play(), "g1", "f3").unwrap();
+            report(SearchReport::FinishedDepth(FinishedDepth {
                 depth: 1,
                 score: Score::Centipawns(17),
                 nodes: 23,
                 elapsed: Duration::from_millis(2),
                 principal_variation: vec![chosen_move],
-                chosen_move: Some(chosen_move),
-            });
-            report(FinishedDepth {
+            }));
+            report(SearchReport::FinishedDepth(FinishedDepth {
                 depth: 2,
                 score: Score::Centipawns(-6),
                 nodes: 440,
                 elapsed: Duration::from_millis(4),
                 principal_variation: vec![chosen_move, reply],
-                chosen_move: Some(chosen_move),
-            });
-            Some(chosen_move)
+            }));
+            report(SearchReport::Ended(Some(chosen_move)));
         },
     )?;
 

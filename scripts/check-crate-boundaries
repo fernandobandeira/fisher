@@ -19,6 +19,7 @@ ALLOWED = {
 
 
 # The binary retains its pre-existing minimax reference tests.
+# TODO(fisher-0as): Remove this exception when the minimax tests move to search.
 TEST_ONLY = {"fisher": {"rules", "search"}}
 
 

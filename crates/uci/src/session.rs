@@ -5,8 +5,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-use deepening::{FinishedDepth, Limits, Score, SearchRequest};
-use rules::{Move, Position};
+use deepening::{FinishedDepth, Limits, Score, SearchReport, SearchRequest};
+use rules::Position;
 
 use crate::{
     Response, SearchScore, UciMove,
@@ -17,8 +17,7 @@ use crate::{
 ///
 /// The reader can block independently of the command handler. Search runs on
 /// the command thread and receives an owned request for each accepted go.
-/// The callback takes finished depths in order. Returning the chosen move ends
-/// the work, including when the search finishes without reporting a depth.
+/// The callback queues finished depths and the end report in order.
 ///
 /// # Errors
 ///
@@ -28,7 +27,7 @@ pub fn run_session(
     input: impl Read + Send + 'static,
     mut output: impl Write,
     version: &str,
-    search: impl FnMut(SearchRequest, &mut dyn FnMut(FinishedDepth)) -> Option<Move> + Send + 'static,
+    search: impl FnMut(SearchRequest, &mut dyn FnMut(SearchReport)) + Send + 'static,
 ) -> io::Result<()> {
     let (sender, lines) = mpsc::channel();
     thread::Builder::new().spawn(move || {
@@ -37,14 +36,15 @@ pub fn run_session(
         }
     })?;
 
-    answer_commands(lines, &mut output, version, search)
+    answer_commands(lines, &mut output, version, search, Instant::now)
 }
 
 fn answer_commands(
     lines: impl IntoIterator<Item = io::Result<String>>,
     output: &mut impl Write,
     version: &str,
-    mut search: impl FnMut(SearchRequest, &mut dyn FnMut(FinishedDepth)) -> Option<Move>,
+    mut search: impl FnMut(SearchRequest, &mut dyn FnMut(SearchReport)),
+    now: impl Fn() -> Instant,
 ) -> io::Result<()> {
     let mut position = Position::starting();
     let mut held_move = None;
@@ -82,10 +82,9 @@ fn answer_commands(
                 }
             }
             Input::Handled(Command::Go(parameters)) => {
-                let started = Instant::now();
+                let started = now();
                 // TODO(fisher-7vo): Obey searchmoves and mate.
                 // TODO(fisher-2ha): Wait for ponderhit when pondering.
-                // TODO(fisher-5sg.10): Pass the clocks to the search.
                 let request = SearchRequest {
                     position,
                     limits: Limits {
@@ -93,22 +92,31 @@ fn answer_commands(
                         nodes: parameters.nodes,
                         movetime: parameters.movetime.map(Duration::from_millis),
                         infinite: parameters.infinite,
+                        wtime: parameters.wtime.map(Duration::from_millis),
+                        btime: parameters.btime.map(Duration::from_millis),
+                        winc: parameters.winc.map(Duration::from_millis),
+                        binc: parameters.binc.map(Duration::from_millis),
+                        movestogo: parameters.movestogo,
                     },
                     stop: Arc::new(AtomicBool::new(false)),
                     started,
                 };
-                let mut written = Ok(());
-                let chosen = search(request, &mut |depth| {
-                    if written.is_ok() {
-                        written = send_search_info(output, &depth);
+                // While search runs on this thread, drain its reports before
+                // reading the next command.
+                let mut reports = Vec::new();
+                search(request, &mut |report| reports.push(report));
+                for report in reports {
+                    match report {
+                        SearchReport::FinishedDepth(depth) => send_search_info(output, &depth)?,
+                        SearchReport::Ended(chosen) => {
+                            let chosen = chosen.map_or(UciMove::Null, UciMove::from);
+                            if parameters.infinite {
+                                held_move = Some(chosen);
+                            } else {
+                                send(output, &Response::BestMove(chosen))?;
+                            }
+                        }
                     }
-                });
-                written?;
-                let chosen = chosen.map_or(UciMove::Null, UciMove::from);
-                if parameters.infinite {
-                    held_move = Some(chosen);
-                } else {
-                    send(output, &Response::BestMove(chosen))?;
                 }
             }
             Input::Handled(Command::Stop) => {
@@ -133,11 +141,7 @@ fn send_search_info(output: &mut impl Write, result: &FinishedDepth) -> io::Resu
         .copied()
         .map(UciMove::from)
         .collect();
-    let (depth, nodes) = if result.chosen_move.is_some() {
-        (result.depth, Some(result.nodes))
-    } else {
-        (0, None)
-    };
+    let nodes = (result.depth > 0).then_some(result.nodes);
     let score = match result.score {
         Score::Centipawns(value) => SearchScore::Centipawns(value),
         Score::Mate { plies, winning } => SearchScore::Mate { plies, winning },
@@ -145,12 +149,12 @@ fn send_search_info(output: &mut impl Write, result: &FinishedDepth) -> io::Resu
     send(
         output,
         &Response::SearchInfo {
-            depth,
+            depth: result.depth,
             score,
             nodes,
             time_ms: nodes.map(|_| time_ms),
             nps: nodes.map(|nodes| nodes_per_second(nodes, time_ms)),
-            pv: &pv,
+            pv: if result.depth == 0 { &[] } else { &pv },
         },
     )
 }
@@ -253,22 +257,24 @@ mod tests {
 
     fn assert_search_info_time(micros: u64, time: u64, nps: u64) -> io::Result<()> {
         let mut output = Vec::new();
+        let accepted = Instant::now();
         answer_commands(
             ["go infinite", "stop"].map(|command| Ok(command.to_owned())),
             &mut output,
             "test",
             |request, report| {
                 let chosen_move = request.position.legal_moves().into_iter().next();
-                report(FinishedDepth {
+                assert_eq!(request.started, accepted);
+                report(SearchReport::FinishedDepth(FinishedDepth {
                     depth: 4,
                     score: Score::Centipawns(0),
                     nodes: 206_603,
                     elapsed: Duration::from_micros(micros),
                     principal_variation: chosen_move.into_iter().collect(),
-                    chosen_move,
-                });
-                chosen_move
+                }));
+                report(SearchReport::Ended(chosen_move));
             },
+            || accepted,
         )?;
         let text = String::from_utf8(output).map_err(io::Error::other)?;
         assert!(
@@ -277,6 +283,38 @@ mod tests {
             )),
             "{text}"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn infinite_search_holds_the_move_until_stop() -> io::Result<()> {
+        let (sender, lines) = mpsc::channel();
+        sender.send(Ok("go infinite".to_owned())).unwrap();
+        let mut output = Vec::new();
+
+        answer_commands(
+            lines,
+            &mut output,
+            "test",
+            move |request, report| {
+                let chosen = request
+                    .position
+                    .legal_move(
+                        rules::Square::parse("e2").unwrap(),
+                        rules::Square::parse("e4").unwrap(),
+                        None,
+                    )
+                    .unwrap();
+                report(SearchReport::Ended(Some(chosen)));
+                for command in ["isready", "stop", "quit"] {
+                    sender.send(Ok(command.to_owned())).unwrap();
+                }
+            },
+            Instant::now,
+        )?;
+
+        // The readiness response witnesses that the session still held the move.
+        assert_eq!(output, b"readyok\nbestmove e2e4\n");
         Ok(())
     }
 

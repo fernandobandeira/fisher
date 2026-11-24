@@ -10,7 +10,7 @@ use rules::Position;
 
 use crate::{
     Response, SearchScore, UciMove,
-    command::{Command, Input, PositionCommand, PositionSource, parse_command},
+    command::{Command, GoParameters, Input, PositionCommand, PositionSource, parse_command},
 };
 
 /// Runs a UCI session until quit, end of input, or an I/O error.
@@ -85,41 +85,7 @@ fn answer_commands(
             }
             Input::Handled(Command::Go(parameters)) => {
                 let started = now();
-                // TODO(fisher-7vo): Obey searchmoves and mate.
-                // TODO(fisher-2ha): Wait for ponderhit when pondering.
-                let request = SearchRequest {
-                    position,
-                    limits: Limits {
-                        depth: parameters.depth,
-                        nodes: parameters.nodes,
-                        movetime: parameters.movetime.map(Duration::from_millis),
-                        infinite: parameters.infinite,
-                        wtime: parameters.wtime.map(Duration::from_millis),
-                        btime: parameters.btime.map(Duration::from_millis),
-                        winc: parameters.winc.map(Duration::from_millis),
-                        binc: parameters.binc.map(Duration::from_millis),
-                        movestogo: parameters.movestogo,
-                    },
-                    stop: Arc::new(AtomicBool::new(false)),
-                    started,
-                };
-                // While search runs on this thread, drain its reports before
-                // reading the next command.
-                let mut reports = Vec::new();
-                search(request, &mut |report| reports.push(report));
-                for report in reports {
-                    match report {
-                        SearchReport::FinishedDepth(depth) => send_search_info(output, &depth)?,
-                        SearchReport::Ended(chosen) => {
-                            let chosen = chosen.map_or(UciMove::Null, UciMove::from);
-                            if parameters.infinite {
-                                held_move = Some(chosen);
-                            } else {
-                                send(output, &Response::BestMove(chosen))?;
-                            }
-                        }
-                    }
-                }
+                held_move = answer_go(output, position, &parameters, started, &mut search)?;
             }
             Input::Handled(Command::Stop) => {
                 if let Some(chosen) = held_move.take() {
@@ -131,6 +97,52 @@ fn answer_commands(
         }
     }
     Ok(())
+}
+
+fn answer_go(
+    output: &mut impl Write,
+    position: Position,
+    parameters: &GoParameters,
+    started: Instant,
+    search: &mut impl FnMut(SearchRequest, &mut dyn FnMut(SearchReport)),
+) -> io::Result<Option<UciMove>> {
+    let mut held_move = None;
+    // TODO(fisher-7vo): Obey searchmoves and mate.
+    // TODO(fisher-2ha): Wait for ponderhit when pondering.
+    let request = SearchRequest {
+        position,
+        limits: Limits {
+            depth: parameters.depth,
+            nodes: parameters.nodes,
+            movetime: parameters.movetime.map(Duration::from_millis),
+            infinite: parameters.infinite,
+            wtime: parameters.wtime.map(Duration::from_millis),
+            btime: parameters.btime.map(Duration::from_millis),
+            winc: parameters.winc.map(Duration::from_millis),
+            binc: parameters.binc.map(Duration::from_millis),
+            movestogo: parameters.movestogo,
+        },
+        stop: Arc::new(AtomicBool::new(false)),
+        started,
+    };
+    // While search runs on this thread, drain its reports before
+    // reading the next command.
+    let mut reports = Vec::new();
+    search(request, &mut |report| reports.push(report));
+    for report in reports {
+        match report {
+            SearchReport::FinishedDepth(depth) => send_search_info(output, &depth)?,
+            SearchReport::Ended(chosen) => {
+                let chosen = chosen.map_or(UciMove::Null, UciMove::from);
+                if parameters.infinite {
+                    held_move = Some(chosen);
+                } else {
+                    send(output, &Response::BestMove(chosen))?;
+                }
+            }
+        }
+    }
+    Ok(held_move)
 }
 
 /// Terminal positions report `info depth 0 score mate 0` for checkmate

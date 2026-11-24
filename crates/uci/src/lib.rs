@@ -67,14 +67,7 @@ impl fmt::Display for Response<'_> {
                     output.write_str(" multipv 1")?;
                 }
                 output.write_str(" score ")?;
-                match score {
-                    SearchScore::Centipawns(value) => write!(output, "cp {value}")?,
-                    SearchScore::Mate { plies, winning } => {
-                        let moves = i32::from(plies.div_ceil(2));
-                        let moves = if *winning { moves } else { -moves };
-                        write!(output, "mate {moves}")?;
-                    }
-                }
+                write!(output, "{score}")?;
                 if let Some(nodes) = nodes {
                     write!(output, " nodes {nodes}")?;
                 }
@@ -91,6 +84,19 @@ impl fmt::Display for Response<'_> {
                     }
                 }
                 Ok(())
+            }
+        }
+    }
+}
+
+impl fmt::Display for SearchScore {
+    fn fmt(&self, output: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Centipawns(value) => write!(output, "cp {value}"),
+            Self::Mate { plies, winning } => {
+                let moves = i32::from(plies.div_ceil(2));
+                let moves = if *winning { moves } else { -moves };
+                write!(output, "mate {moves}")
             }
         }
     }

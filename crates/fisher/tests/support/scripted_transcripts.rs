@@ -70,18 +70,22 @@ fn repeated_searched_info_fixtures() -> io::Result<()> {
                 "{name}: expected {verdict} ({reason}), got {observed}: {result:?}"
             ));
         }
-        if matches!(name, "delimiter-at-5100ms" | "flood-without-delimiter")
-            && (result.as_ref().err().map(io::Error::kind) != Some(io::ErrorKind::TimedOut)
-                || script.now.duration_since(script.start) != Duration::from_secs(5))
-        {
-            let elapsed = script.now.duration_since(script.start);
-            failures.push(format!(
-                "{name}: expected stdout timeout at 5s, got {result:?} at {elapsed:?}"
-            ));
-        }
+        failures.extend(timeout_failure(name, &result, &script));
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
     Ok(())
+}
+
+fn timeout_failure(
+    name: &str,
+    result: &io::Result<Vec<String>>,
+    script: &Script<'_>,
+) -> Option<String> {
+    let timed_out = result.as_ref().err().map(io::Error::kind) == Some(io::ErrorKind::TimedOut);
+    let elapsed = script.now.duration_since(script.start);
+    (matches!(name, "delimiter-at-5100ms" | "flood-without-delimiter")
+        && !(timed_out && elapsed == Duration::from_secs(5)))
+    .then(|| format!("{name}: expected stdout timeout at 5s, got {result:?} at {elapsed:?}"))
 }
 
 fn field<'a>(fields: &mut impl Iterator<Item = &'a str>) -> io::Result<&'a str> {

@@ -86,6 +86,14 @@ _Avoid_: half-move (except in the name halfmove clock), level
 The number of leaf nodes in the tree of legal moves to a fixed depth from a position, used to check move generation against published counts.
 _Avoid_: move count, node test
 
+**Variation**:
+A sequence of moves from a position, each one legal after the one before.
+_Avoid_: line, continuation, sequence
+
+**Principal variation**:
+The moves the search expects both colors to play from the position it searched, starting with the move it chose.
+_Avoid_: best line, main line, expected line
+
 ### The book
 
 **Book**:

@@ -38,10 +38,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "deepening"
+version = "0.1.0"
+dependencies = [
+ "rules",
+ "search",
+]
+
+[[package]]
 name = "fisher"
 version = "0.1.0"
 dependencies = [
  "bench",
+ "deepening",
  "rules",
  "search",
  "shakmaty",
@@ -169,7 +178,9 @@ dependencies = [
 name = "uci"
 version = "0.1.0"
 dependencies = [
+ "deepening",
  "rules",
+ "shakmaty",
 ]
 
 [[package]]

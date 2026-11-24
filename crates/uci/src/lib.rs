@@ -3,14 +3,12 @@ use std::fmt;
 use rules::{Move, Promotion, Square};
 
 mod command;
+mod session;
 
-pub use command::{
-    Command, GoParameters, Input, PositionCommand, PositionSource, PositionSyntaxError,
-    parse_command,
-};
+pub use session::run_session;
 
 #[derive(Debug, PartialEq, Eq)]
-pub enum Response<'a> {
+enum Response<'a> {
     IdName(&'a str),
     IdAuthor(&'a str),
     UciOk,
@@ -32,13 +30,13 @@ pub enum Response<'a> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SearchScore {
+enum SearchScore {
     Centipawns(i32),
     Mate { plies: u8, winning: bool },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum UciMove {
+enum UciMove {
     Normal {
         from: Square,
         to: Square,
@@ -220,5 +218,25 @@ mod tests {
             pv: &[],
         };
         assert_eq!(response.to_string(), "info depth 0 score mate 0");
+    }
+    use rules::Position;
+    use shakmaty::{Chess, Position as _, uci::UciMove as ReferenceMove};
+
+    #[test]
+    fn starting_position_has_every_legal_uci_move() {
+        let mut expected: Vec<_> = Chess::default()
+            .legal_moves()
+            .into_iter()
+            .map(|movement| ReferenceMove::from_standard(movement).to_string())
+            .collect();
+        let mut actual: Vec<_> = Position::starting()
+            .legal_moves()
+            .into_iter()
+            .map(|movement| UciMove::from(movement).to_string())
+            .collect();
+        expected.sort_unstable();
+        actual.sort_unstable();
+
+        assert_eq!(actual, expected);
     }
 }

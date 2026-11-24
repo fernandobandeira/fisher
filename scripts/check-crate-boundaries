@@ -8,13 +8,19 @@ import subprocess
 import sys
 
 ALLOWED = {
-    "fisher": {"bench", "rules", "search", "uci"},
+    "fisher": {"bench", "deepening", "uci"},
     "bench": {"rules", "search"},
     "search": {"rules"},
-    "uci": {"rules"},
+    "uci": {"deepening", "rules"},
+    "deepening": {"rules", "search"},
     "rules": set(),
     "xtask": set(),
 }
+
+
+# The binary retains its pre-existing minimax reference tests.
+# TODO(fisher-0as): Remove this exception when the minimax tests move to search.
+TEST_ONLY = {"fisher": {"rules", "search"}}
 
 
 def violations(metadata):
@@ -63,9 +69,12 @@ def violations(metadata):
             if path is None:
                 continue
             target = members_by_path.get(Path(path).resolve())
-            if target is None or target in ALLOWED[name]:
+            permitted = ALLOWED[name]
+            if kind == "dev":
+                permitted = permitted | TEST_ONLY.get(name, set())
+            if target is None or target in permitted:
                 continue
-            allowed = ", ".join(sorted(ALLOWED[name])) or "none"
+            allowed = ", ".join(sorted(permitted)) or "none"
             problems.append(
                 f"{name} -> {target} ({declaration}) is forbidden. "
                 f"Allowed workspace dependencies for {name}: {allowed}. "
@@ -90,17 +99,21 @@ def self_test():
     uci = dict(rules, name="uci", path="/workspace/crates/uci")
     search = dict(rules, name="search", path="/workspace/crates/search")
     bench = dict(rules, name="bench", path="/workspace/crates/bench")
+    deepening = dict(rules, name="deepening", path="/workspace/crates/deepening")
     shakmaty = dict(name="shakmaty", kind="dev", rename=None, target=None)
     metadata = {
         "workspace_root": "/workspace",
-        "workspace_members": ["fisher", "uci", "rules", "xtask", "search", "bench"],
+        "workspace_members": ["fisher", "uci", "rules", "xtask", "search", "bench", "deepening"],
         "packages": [
-            package("fisher", [bench, rules, search, uci]),
-            package("uci", [dict(rules, kind="dev", rename="chess", target="cfg(unix)")]),
+            package("fisher", [
+                bench, deepening, uci, dict(rules, kind="dev"), dict(search, kind="dev")
+            ]),
+            package("uci", [deepening, dict(rules, kind="dev", rename="chess", target="cfg(unix)")]),
             package("rules", [dict(uci, path="/other/crates/uci"), shakmaty]),
             package("xtask", []),
             package("search", [rules]),
             package("bench", [rules, search]),
+            package("deepening", [rules, search]),
         ],
     }
     if problems := violations(metadata):
@@ -108,6 +121,9 @@ def self_test():
 
     metadata["workspace_members"].append("new-crate")
     metadata["packages"].append(package("new-crate", []))
+    metadata["packages"][0]["dependencies"].extend([rules, search])
+    metadata["packages"][1]["dependencies"].append(search)
+    metadata["packages"][6]["dependencies"].append(uci)
     metadata["packages"][3]["dependencies"] = [
         rules,
         dict(rules, kind="build"),
@@ -119,6 +135,10 @@ def self_test():
     metadata["packages"][1]["targets"][0]["src_path"] = "/workspace/crates/uci/unchecked.rs"
     expected = [
         "bench -> uci (normal dependency) is forbidden.",
+        "deepening -> uci (normal dependency) is forbidden.",
+        "fisher -> rules (normal dependency) is forbidden.",
+        "fisher -> search (normal dependency) is forbidden.",
+        "uci -> search (normal dependency) is forbidden.",
         "search -> uci (normal dependency) is forbidden.",
         "uci: keep the library entry point",
         "new-crate: register its allowed workspace dependencies",

@@ -8,11 +8,12 @@ pub enum Score {
     Mate { plies: u8, winning: bool },
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SearchResult {
     pub chosen_move: Option<Move>,
     pub score: Score,
     pub nodes: u64,
+    pub principal_variation: Vec<Move>,
 }
 
 /// Searches every legal move to the given depth in plies.
@@ -21,11 +22,15 @@ pub struct SearchResult {
 #[must_use]
 pub fn minimax(position: &Position, depth: u8) -> SearchResult {
     let mut nodes = 0;
-    let (chosen, score) = search(position, depth, 0, &mut nodes);
+    // Reuse one buffer per ply across sibling searches.
+    let mut variations: Vec<_> = (0..depth).map(|_| Vec::new()).collect();
+    let score = search(position, 0, &mut nodes, &mut variations);
+    let principal_variation = variations.into_iter().next().unwrap_or_default();
     SearchResult {
-        chosen_move: chosen,
+        chosen_move: principal_variation.first().copied(),
         score: mate_within_depth_or_centipawns(score, depth),
         nodes,
+        principal_variation,
     }
 }
 
@@ -44,29 +49,32 @@ fn mate_within_depth_or_centipawns(score: i32, depth: u8) -> Score {
     }
 }
 
-fn search(position: &Position, depth: u8, ply: u8, nodes: &mut u64) -> (Option<Move>, i32) {
-    if depth == 0 {
-        return (None, material(position));
-    }
-    let mut best_move = None;
+fn search(position: &Position, ply: u8, nodes: &mut u64, variations: &mut [Vec<Move>]) -> i32 {
+    let Some((best_variation, replies)) = variations.split_first_mut() else {
+        return material(position);
+    };
+    best_variation.clear();
     let mut best_score = i32::MIN;
     for movement in position.legal_moves() {
         *nodes += 1;
-        let (_, reply_score) = search(&movement.play(), depth - 1, ply + 1, nodes);
-        let score = -reply_score;
+        let score = -search(&movement.play(), ply + 1, nodes, replies);
         if score > best_score {
             best_score = score;
-            best_move = Some(movement);
+            best_variation.clear();
+            best_variation.push(movement);
+            if let Some(reply) = replies.first() {
+                best_variation.extend_from_slice(reply);
+            }
         }
     }
-    if best_move.is_none() {
-        best_score = if position.is_in_check() {
+    if best_variation.is_empty() {
+        return if position.is_in_check() {
             i32::from(ply) - CHECKMATE
         } else {
             0
         };
     }
-    (best_move, best_score)
+    best_score
 }
 
 fn material(position: &Position) -> i32 {

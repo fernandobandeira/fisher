@@ -302,15 +302,13 @@ mod tests {
 
     #[test]
     fn infinite_search_holds_the_move_until_stop() -> io::Result<()> {
-        let (sender, lines) = mpsc::channel();
-        sender.send(Ok("go infinite".to_owned())).unwrap();
         let mut output = Vec::new();
 
         answer_commands(
-            lines,
+            ["go infinite", "isready", "stop", "quit"].map(|command| Ok(command.to_owned())),
             &mut output,
             "test",
-            move |request, report| {
+            |request, report| {
                 let chosen = request
                     .position
                     .legal_move(
@@ -320,9 +318,6 @@ mod tests {
                     )
                     .unwrap();
                 report(SearchReport::Ended(Some(chosen)));
-                for command in ["isready", "stop", "quit"] {
-                    sender.send(Ok(command.to_owned())).unwrap();
-                }
             },
             Instant::now,
         )?;

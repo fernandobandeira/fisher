@@ -229,6 +229,18 @@ mod tests {
     use shakmaty::{Chess, Position as _, uci::UciMove as ReferenceMove};
 
     #[test]
+    fn promotion_uci_moves_match_shakmaty() {
+        for text in ["a7a8n", "a7a8b", "a7a8r", "a7a8q"] {
+            let expected = text.parse::<ReferenceMove>().unwrap();
+            assert_eq!(
+                UciMove::parse(text).unwrap().to_string(),
+                expected.to_string()
+            );
+        }
+        assert!(UciMove::parse("a7a8x").is_none());
+    }
+
+    #[test]
     fn starting_position_has_every_legal_uci_move() {
         let mut expected: Vec<_> = Chess::default()
             .legal_moves()

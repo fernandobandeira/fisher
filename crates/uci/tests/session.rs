@@ -75,3 +75,139 @@ fn session_reports_the_scripted_search() -> io::Result<()> {
 fn legal_move(position: &Position, from: &str, to: &str) -> Option<Move> {
     position.legal_move(Square::parse(from)?, Square::parse(to)?, None)
 }
+
+fn session_output(
+    input: &'static [u8],
+    search: impl FnMut(deepening::SearchRequest, &mut dyn FnMut(SearchReport)) + Send + 'static,
+) -> io::Result<String> {
+    let mut output = Vec::new();
+    uci::run_session(input, &mut output, "test", search)?;
+    String::from_utf8(output).map_err(io::Error::other)
+}
+
+#[test]
+fn answers_the_handshake_and_quits_before_a_later_command() -> io::Result<()> {
+    // Identification and readiness responses come from handshake.uci.
+    assert_eq!(
+        session_output(
+            b"ucinewgame\nunknown\nuci\r\nisready\rquit\nisready\n",
+            |_, _| {}
+        )?,
+        "id name fisher test\nid author Fernando Bandeira\nuciok\nreadyok\n"
+    );
+    assert_eq!(session_output(b"isready", |_, _| {})?, "readyok\n");
+    Ok(())
+}
+
+#[test]
+fn waits_for_stop_before_accepting_another_go_or_position() -> io::Result<()> {
+    // Held move and rejected commands from go-infinite.uci.
+    let mut searched = false;
+    let output = session_output(
+        b"position fen 7k/8/5K1Q/8/8/8/8/8 b - - 0 1\ngo infinite\ngo\n          position startpos\nisready\nstop\nstop\n",
+        move |request, report| {
+            assert!(!searched);
+            searched = true;
+            report(SearchReport::Ended(legal_move(&request.position, "h8", "g8")));
+        },
+    )?;
+    assert_eq!(
+        output,
+        concat!(
+            "info string go rejected: waiting for stop\n",
+            "info string position rejected: waiting for stop\n",
+            "readyok\nbestmove h8g8\n"
+        )
+    );
+    Ok(())
+}
+
+#[test]
+fn rejected_positions_leave_the_last_accepted_position_in_place() -> io::Result<()> {
+    // Diagnostics and retained sole legal move from rejected-position.uci.
+    let output = session_output(
+        b"position fen 7k/8/5K1Q/8/8/8/8/8 b - - 0 1\n          position fen 7k/8/5K1Q/8/8/8/8/7 b - - 0 1\n          position startpos moves e2e4 e7e5 e4e6\n          position startpos moves e2e4 e7e9\n          position fen\nposition\nposition startpos e2e4\n          position startpos moves e2e4 0000\ngo\n",
+        |request, report| {
+            assert_eq!(request.position.to_fen(), "7k/8/5K1Q/8/8/8/8/8 b - - 0 1");
+            report(SearchReport::Ended(legal_move(&request.position, "h8", "g8")));
+        },
+    )?;
+    let mut responses = output.lines();
+    for expected in [
+        "eight files",
+        "illegal UCI move e4e6",
+        "malformed UCI move",
+        "expected FEN",
+        "expected startpos or fen",
+        "expected moves",
+        "null move",
+    ] {
+        let response = responses.next().unwrap();
+        assert!(
+            response.starts_with("info string ") && response.contains(expected),
+            "{response}"
+        );
+    }
+    assert_eq!(responses.next(), Some("bestmove h8g8"));
+    assert_eq!(responses.next(), None);
+    Ok(())
+}
+
+#[test]
+fn terminal_search_reports_omit_search_statistics_and_a_move() -> io::Result<()> {
+    // The owner-approved responses in terminal-positions.uci.
+    assert_eq!(
+        session_output(
+            b"position fen 7k/6Q1/5K2/8/8/8/8/8 b - - 0 1\ngo\n              position fen 7k/5K2/6Q1/8/8/8/8/8 b - - 0 1\ngo\n",
+            deepening::search,
+        )?,
+        concat!("info depth 0 score mate 0\nbestmove 0000\n", "info depth 0 score cp 0\nbestmove 0000\n")
+    );
+    Ok(())
+}
+
+#[test]
+fn reports_the_read_error_from_the_gui() {
+    struct BrokenInput;
+    impl io::Read for BrokenInput {
+        fn read(&mut self, _: &mut [u8]) -> io::Result<usize> {
+            Err(io::ErrorKind::BrokenPipe.into())
+        }
+    }
+    let error = uci::run_session(BrokenInput, io::sink(), "test", |_, _| {}).unwrap_err();
+    assert_eq!(error.kind(), io::ErrorKind::BrokenPipe);
+}
+
+#[test]
+fn reports_a_flush_failure_on_each_protocol_response() -> io::Result<()> {
+    struct FailOnFlush(usize);
+    impl io::Write for FailOnFlush {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            self.0 = self.0.checked_sub(1).ok_or(io::ErrorKind::BrokenPipe)?;
+            Ok(())
+        }
+    }
+
+    // Handshake and readiness, a rejected position, the held-move guards,
+    // and the searched and terminal responses are specified in expectations/uci.
+    const COMMANDS: &[u8] = b"uci\nisready\nposition\n        position fen 7k/8/5K1Q/8/8/8/8/8 b - - 0 1\n        go infinite\nposition startpos\ngo\nstop\ngo depth\nquit\n";
+    let successful = session_output(COMMANDS, deepening::search)?;
+    // Three IDs/uciok responses, readyok, the position diagnostic, one info,
+    // two rejected commands, the released move, and info/bestmove for finite go.
+    assert_eq!(successful.lines().count(), 11);
+
+    for response in 0..11 {
+        let error = uci::run_session(COMMANDS, FailOnFlush(response), "test", deepening::search)
+            .unwrap_err();
+        assert_eq!(
+            error.kind(),
+            io::ErrorKind::BrokenPipe,
+            "response {response}"
+        );
+    }
+    Ok(())
+}

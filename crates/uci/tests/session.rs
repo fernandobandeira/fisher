@@ -6,8 +6,10 @@ use rules::{Move, Position, Square};
 #[test]
 fn session_reports_the_scripted_search() -> io::Result<()> {
     let mut output = Vec::new();
+    // The April 2006 UCI specification says to ignore unknown tokens and
+    // continue parsing the rest of the command. See https://backscattering.de/chess/uci/.
     uci::run_session(
-        &b"position startpos moves e2e4\ngo depth 2 nodes 440 movetime 50 wtime 1000 btime 2000 winc 30 binc 40 movestogo 5 infinite\nstop\n\
+        &b"position startpos moves e2e4\ngo depth 2 unknown nodes 440 movetime 50 wtime 1000 btime 2000 winc 30 binc 40 movestogo 5 infinite\nstop\n\
            position fen 7k/8/5K1Q/8/8/8/8/8 b - - 0 1\ngo nodes 0\nquit\n"[..],
         &mut output,
         "test",
@@ -222,4 +224,29 @@ fn reports_a_flush_failure_on_each_protocol_response() -> io::Result<()> {
         );
     }
     Ok(())
+}
+
+#[test]
+fn returns_the_writer_error_when_reporting_a_terminal_position() {
+    struct ClosedOutput;
+    impl io::Write for ClosedOutput {
+        fn write(&mut self, _: &[u8]) -> io::Result<usize> {
+            Err(io::ErrorKind::BrokenPipe.into())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    // terminal-positions.uci specifies a response for this position.
+    // run_session's I/O contract requires it to return the injected error.
+    let error = uci::run_session(
+        &b"position fen 7k/6Q1/5K2/8/8/8/8/8 b - - 0 1\ngo\n"[..],
+        ClosedOutput,
+        "test",
+        deepening::search,
+    )
+    .unwrap_err();
+    assert_eq!(error.kind(), io::ErrorKind::BrokenPipe);
 }

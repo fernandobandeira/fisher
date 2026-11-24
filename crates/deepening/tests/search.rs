@@ -4,7 +4,7 @@ use std::{
     time::Instant,
 };
 
-use deepening::{FinishedDepth, Limits, Score, SearchReport, SearchRequest};
+use deepening::{FinishedDepth, Limits, Score, SearchReport, SearchRequest, search};
 use rules::Position;
 
 fn reports_for(fen: &str) -> Result<Vec<SearchReport>, Box<dyn Error>> {
@@ -75,5 +75,19 @@ fn reports_the_finished_depth_before_ending_the_search() -> Result<(), Box<dyn E
     );
     assert_eq!(format!("{}{}", chosen.from(), chosen.to()), "h8g8");
     assert_eq!(report.principal_variation.first(), Some(chosen));
+    Ok(())
+}
+
+#[test]
+fn interrupt_before_the_root_of_a_terminal_position() -> Result<(), Box<dyn std::error::Error>> {
+    let request = SearchRequest {
+        position: Position::from_fen("7k/6Q1/5K2/8/8/8/8/8 b - - 0 1")?,
+        limits: Limits::default(),
+        stop: Arc::new(AtomicBool::new(true)),
+        started: Instant::now(),
+    };
+    let mut reports = Vec::new();
+    search(request, &mut |report| reports.push(report));
+    assert_eq!(reports, [SearchReport::Ended(None)]);
     Ok(())
 }

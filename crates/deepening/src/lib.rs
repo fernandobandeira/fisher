@@ -1,10 +1,13 @@
 use std::{
-    sync::{Arc, atomic::AtomicBool},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
     time::{Duration, Instant},
 };
 
 use rules::{Move, Position};
-use search::minimax;
+use search::minimax_with_permission;
 
 pub use search::Score;
 
@@ -52,30 +55,43 @@ pub enum SearchReport {
     FinishedDepth(FinishedDepth),
     /// The move to send as `bestmove`: the chosen move of the last finished
     /// depth, or the first legal move when no depth finished. `None` only when
-    /// the root has no legal move, after a `FinishedDepth` at depth 0.
+    /// the root has no legal move.
     Ended(Option<Move>),
 }
 
 /// Reports each finished depth, then `Ended` with the move to send.
 /// If interrupted before finishing a depth, the move is the first legal move.
-/// A terminal root reports depth 0 followed by `Ended(None)`.
+/// A completed search of a terminal root reports depth 0 then `Ended(None)`.
 #[expect(
     clippy::needless_pass_by_value,
     reason = "The worker owns the request and the current fixed-depth search only borrows it"
 )]
 pub fn search(request: SearchRequest, report: &mut dyn FnMut(SearchReport)) {
-    search_with_clock(&request, report, Instant::now);
+    search_with_clock(&request, report, &Instant::now, &mut || {
+        !request.stop.load(Ordering::Relaxed)
+    });
 }
 
 fn search_with_clock(
     request: &SearchRequest,
     report: &mut dyn FnMut(SearchReport),
-    now: impl FnOnce() -> Instant,
+    now: &dyn Fn() -> Instant,
+    may_enter: &mut dyn FnMut() -> bool,
 ) {
-    // TODO(fisher-5sg.4): Deepen under the limits of the go and read the stop flag.
+    // TODO(fisher-5sg.4): Deepen under the limits of the go.
     // TODO(fisher-5sg.10): Use the clocks and moves to go to set the time limit.
     const DEPTH: u8 = 4;
-    let result = minimax(&request.position, DEPTH);
+    let result = if request.stop.load(Ordering::Relaxed) {
+        None
+    } else {
+        minimax_with_permission(&request.position, DEPTH, may_enter)
+    };
+    let Some(result) = result else {
+        report(SearchReport::Ended(
+            request.position.legal_moves().into_iter().next(),
+        ));
+        return;
+    };
     let (depth, elapsed) = if result.chosen_move.is_some() {
         (DEPTH, now().duration_since(request.started))
     } else {
@@ -92,39 +108,4 @@ fn search_with_clock(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn reports_elapsed_time_from_the_clock() -> std::io::Result<()> {
-        let origin = Instant::now();
-        let request = SearchRequest {
-            position: Position::starting(),
-            limits: Limits::default(),
-            stop: Arc::new(AtomicBool::new(false)),
-            started: origin + Duration::from_micros(250),
-        };
-        let mut reports = Vec::new();
-
-        search_with_clock(&request, &mut |report| reports.push(report), || {
-            origin + Duration::from_micros(3250)
-        });
-
-        let [
-            SearchReport::FinishedDepth(depth),
-            SearchReport::Ended(chosen),
-        ] = reports.as_slice()
-        else {
-            return Err(std::io::Error::other(format!(
-                "unexpected reports: {reports:?}"
-            )));
-        };
-        assert_eq!(depth.depth, 4);
-        assert_eq!(depth.elapsed, Duration::from_millis(3));
-        assert_eq!(depth.score, Score::Centipawns(0));
-        // Published perft counts for plies 1 to 4, as in startpos.uci.
-        assert_eq!(depth.nodes, 20 + 400 + 8_902 + 197_281);
-        assert_eq!(depth.principal_variation.first().copied(), *chosen);
-        Ok(())
-    }
-}
+mod tests;

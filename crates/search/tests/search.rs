@@ -171,3 +171,39 @@ fn move_text(movement: rules::Move) -> String {
     };
     format!("{}{}{promotion}", movement.from(), movement.to())
 }
+
+#[test]
+fn permission_is_required_before_each_node() {
+    use search::minimax_with_permission;
+
+    let position = Position::starting();
+    // Published starting-position perft counts.
+    let nodes = 20 + 400;
+    for refusal in [1, 2, 22, nodes] {
+        let mut permission_checks = 0;
+        let result = minimax_with_permission(&position, 2, &mut || {
+            permission_checks += 1;
+            permission_checks < refusal
+        });
+        assert!(result.is_none(), "refusal at node {refusal}");
+        assert_eq!(permission_checks, refusal);
+    }
+    let mut permission_checks = 0;
+    let result = minimax_with_permission(&position, 2, &mut || {
+        permission_checks += 1;
+        true
+    });
+    assert_eq!(permission_checks, nodes);
+    assert_eq!(result, Some(minimax(&position, 2)));
+}
+
+#[test]
+fn permission_is_unused_if_only_the_root_is_searched() {
+    use search::minimax_with_permission;
+
+    let position = Position::starting();
+    assert_eq!(
+        minimax_with_permission(&position, 0, &mut || false),
+        Some(minimax(&position, 0))
+    );
+}

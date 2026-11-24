@@ -197,7 +197,7 @@ A move as UCI writes it: the square a piece leaves, the square it reaches, and a
 _Avoid_: long algebraic notation, coordinate move, move string
 
 **Held move**:
-The selected move or `0000` withheld after `go infinite` until `stop`. The engine discards it on `quit` or EOF.
+The selected move or `0000` withheld after `go infinite` until `stop`.
 
 ### Quality checks
 

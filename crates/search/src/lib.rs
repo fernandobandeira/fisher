@@ -20,18 +20,36 @@ pub struct SearchResult {
 /// At depth zero the result has no chosen move, even if legal moves exist.
 /// The score is from the starting side to move, and nodes exclude the starting position.
 #[must_use]
+#[expect(
+    clippy::missing_panics_doc,
+    reason = "the permission never refuses a node"
+)]
 pub fn minimax(position: &Position, depth: u8) -> SearchResult {
+    #[expect(clippy::expect_used, reason = "the permission never refuses a node")]
+    let result =
+        minimax_with_permission(position, depth, &mut || true).expect("search cannot stop");
+    result
+}
+
+/// Searches one depth, asking permission before playing the move that reaches each node.
+/// Returns no result if permission is refused anywhere in the depth.
+#[must_use]
+pub fn minimax_with_permission(
+    position: &Position,
+    depth: u8,
+    may_enter: &mut dyn FnMut() -> bool,
+) -> Option<SearchResult> {
     let mut nodes = 0;
     // Reuse one buffer per ply across sibling searches.
     let mut variations: Vec<_> = (0..depth).map(|_| Vec::new()).collect();
-    let score = search(position, 0, &mut nodes, &mut variations);
+    let score = search(position, 0, &mut nodes, &mut variations, may_enter)?;
     let principal_variation = variations.into_iter().next().unwrap_or_default();
-    SearchResult {
+    Some(SearchResult {
         chosen_move: principal_variation.first().copied(),
         score: mate_within_depth_or_centipawns(score, depth),
         nodes,
         principal_variation,
-    }
+    })
 }
 
 /// Returns a mate score if the mate is within the search depth, or a centipawn score otherwise.
@@ -49,15 +67,24 @@ fn mate_within_depth_or_centipawns(score: i32, depth: u8) -> Score {
     }
 }
 
-fn search(position: &Position, ply: u8, nodes: &mut u64, variations: &mut [Vec<Move>]) -> i32 {
+fn search(
+    position: &Position,
+    ply: u8,
+    nodes: &mut u64,
+    variations: &mut [Vec<Move>],
+    may_enter: &mut dyn FnMut() -> bool,
+) -> Option<i32> {
     let Some((best_variation, replies)) = variations.split_first_mut() else {
-        return material(position);
+        return Some(material(position));
     };
     best_variation.clear();
     let mut best_score = i32::MIN;
     for movement in position.legal_moves() {
+        if !may_enter() {
+            return None;
+        }
         *nodes += 1;
-        let score = -search(&movement.play(), ply + 1, nodes, replies);
+        let score = -search(&movement.play(), ply + 1, nodes, replies, may_enter)?;
         if score > best_score {
             best_score = score;
             best_variation.clear();
@@ -68,13 +95,13 @@ fn search(position: &Position, ply: u8, nodes: &mut u64, variations: &mut [Vec<M
         }
     }
     if best_variation.is_empty() {
-        return if position.is_in_check() {
+        return Some(if position.is_in_check() {
             i32::from(ply) - CHECKMATE
         } else {
             0
-        };
+        });
     }
-    best_score
+    Some(best_score)
 }
 
 fn material(position: &Position) -> i32 {

@@ -26,7 +26,12 @@ def test_only_path(path):
 
 
 def test_layout_problems(root):
-    problems = []
+    problems = [
+        f"{manifest.with_name('build.rs').relative_to(root)}: coverage cannot track generated source. "
+        "Remove the build script and keep Rust source under src/."
+        for manifest in sorted(root.glob("crates/*/Cargo.toml"))
+        if manifest.with_name("build.rs").is_file()
+    ]
     for path in sorted(root.glob("crates/*/src/**/*.rs")):
         source = path.read_text(encoding="utf-8")
         relative = path.relative_to(root)
@@ -50,11 +55,17 @@ def production_source(filename, root):
             return None
         path = path.relative_to(root)
     parts = path.parts
+    normalized = Path(os.path.normpath(path))
+    if len(parts) >= 3 and parts[0] == "crates" and parts[2] == "src":
+        src = Path(*parts[:3])
+        if not normalized.is_relative_to(src):
+            raise ValueError(f"{path}: coverage source resolves outside {src}/. Move it under {src}/")
+    parts = normalized.parts
     if len(parts) < 4 or parts[0] != "crates" or parts[2] != "src":
         return None
     if test_only_path(Path(*parts[3:])):
         return None
-    return path
+    return normalized
 
 
 def region_counts(report, root):
@@ -166,8 +177,13 @@ def compare(totals, floors, packages, artifacts, uncovered=None):
                 *coverage_command(packages[crate]),
             ])
             problems.append(f"{summary}. Restore coverage with tests. Reproduce with `{command}`.")
-            if uncovered:
-                problems.extend(f"  Uncovered region {region}" for region in uncovered.get(crate, []))
+            locations = uncovered.get(crate, []) if uncovered else []
+            if locations:
+                problems.append(
+                    "  Uncovered locations (generic instantiations merged). "
+                    "The region count above comes from LLVM's summary."
+                )
+                problems.extend(f"    {location}" for location in locations)
     return summaries, problems
 
 
@@ -177,7 +193,7 @@ def self_test():
 
     root = Path("/work")
     report = {"data": [{"files": [
-        source("/work/crates/rules/src/lib.rs", 2, 2),
+        source("/work/crates/rules/src/tests/../lib.rs", 2, 2),
         source("/work/crates/rules/src/fen.rs", 97, 98),
         source("/work/crates/search/src/lib.rs", 1000, 1000),
         source("/work/crates/rules/tests/rules.rs", 80, 80),
@@ -206,10 +222,21 @@ def self_test():
     uncovered = {"rules": uncovered_regions(report, root, "rules")}
     summaries, problems = compare(totals, floors, packages, artifacts, uncovered)
     assert len(summaries) == 2
-    assert len(problems) == 2 and problems[0].startswith("rules: 99.000%")
+    assert len(problems) == 3 and problems[0].startswith("rules: 99.000%")
     assert "`env CARGO_LLVM_COV_TARGET_DIR=/work/target/coverage/rules " in problems[0]
     assert shlex.join(coverage_command("rules-package")) in problems[0]
-    assert problems[1] == "  Uncovered region crates/rules/src/fen.rs:10:1-10:10"
+    assert "generic instantiations merged" in problems[1]
+    assert problems[2] == "    crates/rules/src/fen.rs:10:1-10:10"
+
+    escaped_report = {"data": [{"files": [
+        source("/work/crates/search/src/../tests/support/production.rs", 0, 5),
+    ]}]}
+    try:
+        region_counts(escaped_report, root)
+    except ValueError as error:
+        assert "coverage source resolves outside crates/search/src/" in str(error)
+    else:
+        raise AssertionError("coverage accepted a source path escaping its crate's src/")
 
     # A dependency can have full coverage while running the caller's tests.
     caller_report = {"data": [{"files": [
@@ -233,12 +260,16 @@ def self_test():
         workspace = Path(directory)
         src = workspace / "crates/example/src"
         src.mkdir(parents=True)
+        (src.parent / "Cargo.toml").write_text('[package]\nname = "example"\nversion = "0.1.0"\n')
         (src / "lib.rs").write_text("#[cfg(test)]\nmod test_helpers;\n")
         (src / "test_helpers.rs").write_text("#![cfg(test)]\n")
         assert len(test_layout_problems(workspace)) == 2
         (src / "lib.rs").write_text("#[cfg(test)]\nmod tests;\n")
         (src / "test_helpers.rs").rename(src / "tests.rs")
         assert not test_layout_problems(workspace)
+        (src.parent / "build.rs").write_text("fn main() {}\n")
+        assert test_layout_problems(workspace)[0].startswith("crates/example/build.rs:")
+        (src.parent / "build.rs").unlink()
         (src / "tests.rs").write_text("pub fn example() {}\n")
         assert "move production code" in test_layout_problems(workspace)[0]
 
@@ -281,7 +312,7 @@ def main():
             totals, uncovered = own_coverage(packages, ROOT, directories, coverage_report)
             summaries, problems = compare(totals, floors, packages, directories, uncovered)
     except (OSError, subprocess.CalledProcessError, ValueError, KeyError, InvalidOperation) as error:
-        print(f"Could not check region coverage: {error}. {install}", file=sys.stderr)
+        print(f"Could not check region coverage: {error}.", file=sys.stderr)
         return 1
 
     for summary in summaries:

@@ -40,7 +40,7 @@ If it is red and you cannot fix it, say so plainly with the output. Do not weake
 
 ## Pull requests
 
-Squash-merge. A pull request that builds on another one not merged yet goes in a GitHub stack, through `gh stack`. [docs/process.md](docs/process.md#pull-requests) has the commands.
+Squash-merge. A pull request that builds on another one not merged yet goes in a GitHub stack, through `gh stack`. Title each layer `[n/m] (<ticket ID>) <title>`. [docs/process.md](docs/process.md#pull-requests) has the commands.
 
 ## The owner's attention
 

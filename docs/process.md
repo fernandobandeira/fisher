@@ -25,6 +25,7 @@ Merge each slice into `main` when it is green. Do not build a tall stack of depe
 
 - **Squash-merge.** Each pull request becomes one commit on `main`. With the repository's settings the squash commit keeps the messages of the commits it replaces, so their `Guard-Change:` lines survive.
 - **Stack a slice that builds on one not merged yet.** Use GitHub's stacked pull requests through the `gh stack` extension (`gh extension install github/gh-stack`), not a base branch set by hand. `gh stack init` adopts existing branches, `gh stack link` joins pull requests that are already open, and `gh stack sync` rebases the layers above one that changed.
+- **Title each layer by its place and its ticket.** A layer's title starts with its position from the bottom of the stack, its size and its ticket ID, as in `[1/4] (fisher-5sg.1) Add a transcript record for any number of info lines`. When a layer is added or removed, renumber the others with `gh pr edit <number> --title`.
 - **Run it without prompts.** An agent passes `--auto` to `gh stack submit` and `--yes` to `gh stack merge`. The interactive editors wait forever in an agent's shell.
 - **Merge from the bottom.** `gh stack merge <pr> --squash --yes` merges every layer up to that pull request in one step, one squash commit per layer, and none of them if any layer cannot merge.
 

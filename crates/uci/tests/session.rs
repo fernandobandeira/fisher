@@ -180,14 +180,17 @@ fn reports_the_read_error_from_the_gui() {
 
 #[test]
 fn reports_a_flush_failure_on_each_protocol_response() -> io::Result<()> {
-    struct FailOnFlush(usize);
+    struct FailOnFlush(Option<usize>);
     impl io::Write for FailOnFlush {
         fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
             Ok(bytes.len())
         }
 
         fn flush(&mut self) -> io::Result<()> {
-            self.0 = self.0.checked_sub(1).ok_or(io::ErrorKind::BrokenPipe)?;
+            // Taking the countdown clears it even when this flush fails.
+            if let Some(remaining) = self.0.take() {
+                self.0 = Some(remaining.checked_sub(1).ok_or(io::ErrorKind::BrokenPipe)?);
+            }
             Ok(())
         }
     }
@@ -201,8 +204,13 @@ fn reports_a_flush_failure_on_each_protocol_response() -> io::Result<()> {
     assert_eq!(successful.lines().count(), 11);
 
     for response in 0..11 {
-        let error = uci::run_session(COMMANDS, FailOnFlush(response), "test", deepening::search)
-            .unwrap_err();
+        let error = uci::run_session(
+            COMMANDS,
+            FailOnFlush(Some(response)),
+            "test",
+            deepening::search,
+        )
+        .unwrap_err();
         assert_eq!(
             error.kind(),
             io::ErrorKind::BrokenPipe,

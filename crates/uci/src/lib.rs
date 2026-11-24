@@ -17,6 +17,10 @@ pub enum Response<'a> {
     ReadyOk,
     BestMove(UciMove),
     InfoString(&'a str),
+    /// A searched `info` line in Stockfish's spelling: depth, `multipv 1`,
+    /// score, nodes, nps, time and pv, each optional field written only when
+    /// present. A depth of 0 is the response for a root with no legal move and
+    /// carries no `multipv`.
     SearchInfo {
         depth: u8,
         score: SearchScore,
@@ -161,7 +165,7 @@ fn promotion_suffix(promotion: Promotion) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::{Response, SearchScore};
+    use super::{Response, SearchScore, UciMove};
 
     #[test]
     fn search_info_reports_mate_in_signed_moves() {
@@ -180,6 +184,26 @@ mod tests {
             };
             assert_eq!(response.to_string(), expected);
         }
+    }
+
+    #[test]
+    fn search_info_spells_every_field_in_stockfish_order() {
+        let pv = [
+            UciMove::parse("e2e4").unwrap(),
+            UciMove::parse("e7e5").unwrap(),
+        ];
+        let response = Response::SearchInfo {
+            depth: 2,
+            score: SearchScore::Centipawns(-15),
+            nodes: Some(420),
+            time_ms: Some(3),
+            nps: Some(140_000),
+            pv: &pv,
+        };
+        assert_eq!(
+            response.to_string(),
+            "info depth 2 multipv 1 score cp -15 nodes 420 nps 140000 time 3 pv e2e4 e7e5"
+        );
     }
 
     #[test]

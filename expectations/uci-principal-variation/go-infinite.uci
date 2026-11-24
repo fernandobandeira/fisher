@@ -1,7 +1,8 @@
 # Four-ply info spelling: April 2006 UCI specification, info and Move format
 # https://backscattering.de/chess/uci/#engine-info and fisher-8hc question 1
-# (owner approval 2026-11-24). D3–D6 supply the allowances for the principal
-# variation, time and nodes per second. The fisher-2aj.2 sources and
+# (order of fields approved by the owner 2026-11-24; these sessions staged
+# 2026-11-24 and awaiting the owner's approval). D3–D6 supply the
+# allowances for the principal variation, time and nodes per second. The fisher-2aj.2 sources and
 # comments below supply the retained scores, node counts and reply order.
 # Sources: April 2006 UCI specification https://backscattering.de/chess/uci/
 # and fisher-l7f owner decisions from 2026-11-22.

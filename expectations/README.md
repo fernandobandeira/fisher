@@ -95,11 +95,12 @@ in the pattern is a single ASCII space. For a literal score or node count,
 require that exact text in place of its allowance. Only `position-moves.uci`
 uses the unrestricted score and node allowances.
 
-| Allowance | Pattern |
-|---|---|
-| `{score}` | `(?:cp (?:0\|-?[1-9][0-9]*)\|mate -?[1-9][0-9]*)` |
-| `{time}`, `{nodes}`, `{nps}` | `(?:0\|[1-9][0-9]*)` |
-| `{pv}` | `[a-h][1-8][a-h][1-8][qrbn]?(?: [a-h][1-8][a-h][1-8][qrbn]?){0,3}` |
+The full line, with every allowance in place, is this anchored regular
+expression:
+
+```regex
+^info depth 4 score (?:cp (?:0|-?[1-9][0-9]*)|mate -?[1-9][0-9]*) time (?:0|[1-9][0-9]*) nodes (?:0|[1-9][0-9]*) nps (?:0|[1-9][0-9]*) pv [a-h][1-8][a-h][1-8][qrbn]?(?: [a-h][1-8][a-h][1-8][qrbn]?){0,3}$
+```
 
 The principal variation contains one to four UCI moves with single spaces
 between them. The line ends immediately after the last move. Each move

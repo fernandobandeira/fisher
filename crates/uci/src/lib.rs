@@ -21,6 +21,9 @@ pub enum Response<'a> {
         depth: u8,
         score: SearchScore,
         nodes: Option<u64>,
+        time_ms: Option<u64>,
+        nps: Option<u64>,
+        pv: &'a [UciMove],
     },
 }
 
@@ -53,6 +56,9 @@ impl fmt::Display for Response<'_> {
                 depth,
                 score,
                 nodes,
+                time_ms,
+                nps,
+                pv,
             } => {
                 write!(output, "info depth {depth} score ")?;
                 match score {
@@ -63,8 +69,20 @@ impl fmt::Display for Response<'_> {
                         write!(output, "mate {moves}")?;
                     }
                 }
+                if let Some(time_ms) = time_ms {
+                    write!(output, " time {time_ms}")?;
+                }
                 if let Some(nodes) = nodes {
                     write!(output, " nodes {nodes}")?;
+                }
+                if let Some(nps) = nps {
+                    write!(output, " nps {nps}")?;
+                }
+                if !pv.is_empty() {
+                    output.write_str(" pv")?;
+                    for movement in *pv {
+                        write!(output, " {movement}")?;
+                    }
                 }
                 Ok(())
             }
@@ -152,6 +170,9 @@ mod tests {
                 depth: 4,
                 score: SearchScore::Mate { plies, winning },
                 nodes: Some(20),
+                time_ms: None,
+                nps: None,
+                pv: &[],
             };
             assert_eq!(response.to_string(), expected);
         }
@@ -166,6 +187,9 @@ mod tests {
                 winning: false,
             },
             nodes: None,
+            time_ms: None,
+            nps: None,
+            pv: &[],
         };
         assert_eq!(response.to_string(), "info depth 0 score mate 0");
     }

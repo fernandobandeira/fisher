@@ -1,3 +1,8 @@
+#[path = "support/principal_variation.rs"]
+mod principal_variation;
+#[path = "support/reference_minimax.rs"]
+mod reference;
+
 use std::{
     fs,
     io::{self, BufRead, BufReader, Write},
@@ -125,8 +130,25 @@ fn play_transcript(name: &str) -> io::Result<()> {
 }
 
 fn collect_legal_bestmove_replies(name: &str) -> io::Result<Vec<String>> {
+    let directory = match name {
+        "end-of-input-while-held"
+        | "equal-scores"
+        | "go-infinite"
+        | "go-parameters"
+        | "halfmove-clock"
+        | "mate-in-one"
+        | "material-zero"
+        | "new-game"
+        | "position-moves"
+        | "quit-while-held"
+        | "rejected-position-opposite-check"
+        | "rejected-position"
+        | "startpos" => "uci-principal-variation",
+        _ => "uci",
+    };
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../expectations/uci")
+        .join("../../expectations")
+        .join(directory)
         .join(format!("{name}.uci"));
     let transcript = fs::read_to_string(path)?;
     let mut session = Session::start()?;
@@ -252,7 +274,7 @@ fn reply_matches(expected: &str, actual: &str, position: &Chess) -> bool {
         LEGAL_BESTMOVE => actual
             .strip_prefix("bestmove ")
             .is_some_and(|text| reference_move(position, text).is_some()),
-        "info depth 4 score {score} nodes {nodes}" => search_info_matches(actual),
+        _ if expected.starts_with("info depth 4 score ") => search_info_matches(expected, actual),
         "info string {message}" => actual.starts_with("info string "),
         _ if let Some(required) = expected
             .strip_prefix("info string {message:")
@@ -268,45 +290,121 @@ fn reply_matches(expected: &str, actual: &str, position: &Chess) -> bool {
 
 #[test]
 fn info_allowance_matches_the_documented_grammar() {
-    let expected = "info depth 4 score {score} nodes {nodes}";
-    let position = Chess::default();
+    let expected = "info depth 4 score {score} time {time} nodes {nodes} nps {nps} pv {pv}";
     // The allowance pattern in expectations/README.md sets these results.
     let cases = [
-        ("info depth 4 score cp 0 nodes 0", true),
-        ("info depth 4 score cp 100 nodes 197281", true),
-        ("info depth 4 score cp -100 nodes 197281", true),
-        ("info depth 4 score mate 2 nodes 197281", true),
-        ("info depth 4 score mate -2 nodes 197281", true),
-        ("info depth 4 score cp 0 nodes 0777461", false),
-        ("info depth 4 score cp +-100 nodes 197281", false),
-        ("info depth 4 score mate 0 nodes 197281", false),
-        ("info depth 4 score cp 0 nodes 197281 extra", false),
+        ("cp 0 time 0 nodes 0 nps 0 pv a7a8q", true),
+        (
+            "cp 100 time 1 nodes 197281 nps 197281000 pv b1a3 b8a6",
+            true,
+        ),
+        ("cp -100 time 1 nodes 20 nps 20000 pv b1a3", true),
+        ("mate 2 time 1 nodes 20 nps 20000 pv b1a3", true),
+        (
+            "mate -2 time 1 nodes 20 nps 20000 pv b1a3 b8a6 g1f3 g8f6",
+            true,
+        ),
+        ("cp 0 time 1 nodes 020 nps 20000 pv b1a3", false),
+        ("cp +-100 time 1 nodes 20 nps 20000 pv b1a3", false),
+        ("mate 0 time 1 nodes 20 nps 20000 pv b1a3", false),
+        ("cp 0 time 01 nodes 20 nps 20000 pv b1a3", false),
+        ("cp 0 time 1 nodes 20 nps -1 pv b1a3", false),
+        ("cp 0 time 1 nodes 20 nps 20000 pv 0000", false),
+        ("cp 0 time 1 nodes 20 nps 20000 pv a7a8K", false),
+        ("cp 0 time 1 nodes 20 nps 20000 pv b1a3 ", false),
+        ("cp 0 time 1 nodes 20 nps 20000 pv b1a3  b8a6", false),
+        (
+            "cp 0 time 1 nodes 20 nps 20000 pv b1a3 b8a6 g1f3 g8f6 a2a3",
+            false,
+        ),
     ];
 
-    for (actual, matches) in cases {
-        assert_eq!(
-            reply_matches(expected, actual, &position),
-            matches,
-            "{actual}"
-        );
+    for (suffix, matches) in cases {
+        let actual = format!("info depth 4 score {suffix}");
+        assert_eq!(search_info_matches(expected, &actual), matches, "{actual}");
     }
 }
 
-fn search_info_matches(line: &str) -> bool {
-    let Some((score, nodes)) = line
-        .strip_prefix("info depth 4 score ")
-        .and_then(|line| line.split_once(" nodes "))
-    else {
+struct SearchInfo<'a> {
+    score: &'a str,
+    time: &'a str,
+    nodes: &'a str,
+    nps: &'a str,
+    pv: &'a str,
+}
+
+fn search_info(text: &str) -> Option<SearchInfo<'_>> {
+    let (score, rest) = text
+        .strip_prefix("info depth 4 score ")?
+        .split_once(" time ")?;
+    let (time, rest) = rest.split_once(" nodes ")?;
+    let (nodes, rest) = rest.split_once(" nps ")?;
+    let (nps, pv) = rest.split_once(" pv ")?;
+    Some(SearchInfo {
+        score,
+        time,
+        nodes,
+        nps,
+        pv,
+    })
+}
+
+fn search_info_matches(expected: &str, actual: &str) -> bool {
+    let (Some(expected), Some(actual)) = (search_info(expected), search_info(actual)) else {
         return false;
     };
-    let score_matches = if let Some(cp) = score.strip_prefix("cp ") {
+    let score_matches = if let Some(cp) = actual.score.strip_prefix("cp ") {
         cp == "0" || positive_decimal(cp.strip_prefix('-').unwrap_or(cp))
-    } else if let Some(mate) = score.strip_prefix("mate ") {
+    } else if let Some(mate) = actual.score.strip_prefix("mate ") {
         positive_decimal(mate.strip_prefix('-').unwrap_or(mate))
     } else {
         false
     };
-    score_matches && (nodes == "0" || positive_decimal(nodes))
+    score_matches
+        && (expected.score == "{score}" || expected.score == actual.score)
+        && (expected.nodes == "{nodes}" || expected.nodes == actual.nodes)
+        && [actual.time, actual.nodes, actual.nps]
+            .into_iter()
+            .all(|text| text == "0" || positive_decimal(text))
+        && actual.pv.split(' ').count() <= 4
+        && actual.pv.split(' ').all(uci_move_matches)
+}
+
+fn uci_move_matches(text: &str) -> bool {
+    let ([file_from, rank_from, file_to, rank_to]
+    | [
+        file_from,
+        rank_from,
+        file_to,
+        rank_to,
+        b'q' | b'r' | b'b' | b'n',
+    ]) = text.as_bytes()
+    else {
+        return false;
+    };
+    (b'a'..=b'h').contains(file_from)
+        && (b'a'..=b'h').contains(file_to)
+        && (b'1'..=b'8').contains(rank_from)
+        && (b'1'..=b'8').contains(rank_to)
+}
+
+fn reported_score(text: &str) -> io::Result<i32> {
+    if let Some(cp) = text.strip_prefix("cp ") {
+        return cp.parse().map_err(io::Error::other);
+    }
+    let mate = text
+        .strip_prefix("mate ")
+        .ok_or_else(|| io::Error::other("missing score"))?
+        .parse::<i32>()
+        .map_err(io::Error::other)?;
+    // At depth four only mates in one or two can be reported.
+    if !(1..=2).contains(&mate.unsigned_abs()) {
+        return Err(io::Error::other(format!(
+            "mate {mate} exceeds the search depth"
+        )));
+    }
+    let plies = 2 * mate.abs() - i32::from(mate > 0);
+    Ok(mate.signum() * (reference::MATE_SCORE - plies))
 }
 
 fn positive_decimal(text: &str) -> bool {
@@ -319,6 +417,7 @@ struct Session {
     output: Receiver<io::Result<String>>,
     position: Chess,
     holding: bool,
+    first_variation_move: Option<String>,
     legal_bestmove_replies: Vec<String>,
 }
 
@@ -341,6 +440,7 @@ impl Session {
             output,
             position: Chess::default(),
             holding: false,
+            first_variation_move: None,
             legal_bestmove_replies: Vec::new(),
         };
         let stdout = session
@@ -412,6 +512,28 @@ impl Session {
             io::Error::other(format!("stdout closed while expecting {expected:?}"))
         })?;
         if reply_matches(expected, &actual, &self.position) {
+            if let Some(info) = search_info(&actual) {
+                let score = reported_score(info.score)?;
+                if expected.starts_with("info depth 4 score {score}") {
+                    let best = reference::minimax(&self.position, 4).score;
+                    if score != best {
+                        return Err(io::Error::other(format!(
+                            "reported score {score} differs from reference {best}"
+                        )));
+                    }
+                }
+                principal_variation::verify(&self.position, 4, score, info.pv.split(' '))
+                    .map_err(io::Error::other)?;
+                self.first_variation_move = info.pv.split(' ').next().map(str::to_owned);
+            }
+            if let Some(bestmove) = actual.strip_prefix("bestmove ")
+                && let Some(first) = self.first_variation_move.take()
+                && first != bestmove
+            {
+                return Err(io::Error::other(format!(
+                    "principal variation starts with {first}, got bestmove {bestmove}"
+                )));
+            }
             if expected == LEGAL_BESTMOVE {
                 self.legal_bestmove_replies.push(actual);
             }

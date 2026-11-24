@@ -1,5 +1,7 @@
 #[path = "support/mate_in_two.rs"]
 mod mate_in_two;
+#[path = "support/principal_variation.rs"]
+mod principal_variation;
 #[path = "support/reference_minimax.rs"]
 mod reference;
 mod support;
@@ -7,7 +9,7 @@ mod support;
 use std::error::Error;
 
 use rules::Position;
-use search::{Score, minimax};
+use search::{Score, SearchResult, minimax};
 use shakmaty::{Chess, EnPassantMode, Position as _, fen::Fen};
 use support::{check_perft, reference_position};
 use uci::UciMove;
@@ -31,7 +33,8 @@ fn check_mate_in_two(
     records: impl IntoIterator<Item = mate_in_two::Record>,
 ) -> Result<(), Box<dyn Error>> {
     for record in records {
-        let result = minimax(&Position::from_fen(record.fen)?, 4);
+        let position = reference_position(record.fen)?;
+        let result = assert_matches_reference(&position, 4)?;
         assert_eq!(
             result.score,
             Score::Mate {
@@ -84,7 +87,7 @@ fn stalemate_on_the_horizon_scores_as_material() -> Result<(), Box<dyn Error>> {
     let chosen = reference::minimax(&position, 1).chosen_move;
     let chosen = chosen.ok_or("reference found no legal move")?;
     assert!(position.clone().play(chosen)?.is_stalemate());
-    assert_matches_reference(&position, 1)
+    assert_matches_reference(&position, 1).map(drop)
 }
 
 #[test]
@@ -118,7 +121,23 @@ fn score_and_nodes_match_reference_on_random_reachable_positions() -> Result<(),
     Ok(())
 }
 
-fn assert_matches_reference(position: &Chess, depth: u8) -> Result<(), Box<dyn Error>> {
+#[test]
+fn terminal_positions_and_depth_zero_have_empty_variations() -> Result<(), Box<dyn Error>> {
+    for fen in [
+        "7k/6Q1/6K1/8/8/8/8/8 b - - 0 1",
+        "7k/5Q2/6K1/8/8/8/8/8 b - - 0 1",
+    ] {
+        let position = reference_position(fen)?;
+        assert!(position.is_checkmate() || position.is_stalemate(), "{fen}");
+        let result = assert_matches_reference(&position, 4)?;
+        assert_eq!(result.principal_variation, [], "{fen}");
+    }
+    let result = assert_matches_reference(&Chess::default(), 0)?;
+    assert_eq!(result.principal_variation, []);
+    Ok(())
+}
+
+fn assert_matches_reference(position: &Chess, depth: u8) -> Result<SearchResult, Box<dyn Error>> {
     let expected = reference::minimax(position, depth);
     let fen = Fen::from_position(position, EnPassantMode::Always).to_string();
     let result = minimax(&Position::from_fen(&fen)?, depth);
@@ -131,5 +150,20 @@ fn assert_matches_reference(position: &Chess, depth: u8) -> Result<(), Box<dyn E
     };
     assert_eq!(score, expected.score, "{fen}");
     assert_eq!(result.nodes, expected.nodes, "{fen}");
-    Ok(())
+    assert_eq!(
+        result.principal_variation.first().copied(),
+        result.chosen_move,
+        "{fen}"
+    );
+
+    principal_variation::verify(
+        position,
+        depth,
+        expected.score,
+        result
+            .principal_variation
+            .iter()
+            .map(|&movement| UciMove::from(movement).to_string()),
+    )?;
+    Ok(result)
 }

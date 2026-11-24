@@ -2,6 +2,7 @@ use std::{
     io::{self, BufRead, Write},
     sync::mpsc,
     thread,
+    time::{Duration, Instant},
 };
 
 use rules::Position;
@@ -18,12 +19,14 @@ fn main() -> io::Result<()> {
         }
     })?;
 
-    answer_commands(lines, &mut io::stdout().lock())
+    let clock_start = Instant::now();
+    answer_commands(lines, &mut io::stdout().lock(), || clock_start.elapsed())
 }
 
 fn answer_commands(
     lines: impl IntoIterator<Item = io::Result<String>>,
     output: &mut impl Write,
+    now: impl Fn() -> Duration,
 ) -> io::Result<()> {
     let mut position = Position::starting();
     let mut held_move = None;
@@ -67,8 +70,17 @@ fn answer_commands(
                 // TODO(fisher-7vo): Obey the supplied search limits.
                 // TODO(fisher-2ha): Wait for ponderhit when pondering.
                 const DEPTH: u8 = 4;
+                let started = now();
                 let result = minimax(&position, DEPTH);
-                send(output, &search_info(DEPTH, result))?;
+                let elapsed = now().saturating_sub(started);
+                let time_ms = u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX);
+                let pv: Vec<_> = result
+                    .principal_variation
+                    .iter()
+                    .copied()
+                    .map(UciMove::from)
+                    .collect();
+                send(output, &search_info(DEPTH, &result, time_ms, &pv))?;
                 let chosen = result.chosen_move.map_or(UciMove::Null, UciMove::from);
                 if parameters.infinite {
                     held_move = Some(chosen);
@@ -90,7 +102,12 @@ fn answer_commands(
 
 /// Terminal positions report `info depth 0 score mate 0` for checkmate
 /// or `info depth 0 score cp 0` for stalemate.
-fn search_info(depth: u8, result: SearchResult) -> Response<'static> {
+fn search_info<'a>(
+    depth: u8,
+    result: &SearchResult,
+    time_ms: u64,
+    pv: &'a [UciMove],
+) -> Response<'a> {
     let (depth, nodes) = if result.chosen_move.is_some() {
         (depth, Some(result.nodes))
     } else {
@@ -104,7 +121,16 @@ fn search_info(depth: u8, result: SearchResult) -> Response<'static> {
         depth,
         score,
         nodes,
+        time_ms: nodes.map(|_| time_ms),
+        nps: nodes.map(|nodes| nodes_per_second(nodes, time_ms)),
+        pv,
     }
+}
+
+fn nodes_per_second(nodes: u64, time_ms: u64) -> u64 {
+    (u128::from(nodes) * 1000)
+        .checked_div(u128::from(time_ms))
+        .map_or(0, |rate| u64::try_from(rate).unwrap_or(u64::MAX))
 }
 
 fn setup_position(command: PositionCommand) -> Result<Position, String> {
@@ -179,6 +205,41 @@ mod tests {
     use std::io::BufReader;
 
     use super::*;
+
+    #[test]
+    fn node_rate_uses_reported_milliseconds() {
+        assert_eq!(nodes_per_second(10, 0), 0);
+        assert_eq!(nodes_per_second(10, 2), 5000);
+        assert_eq!(nodes_per_second(10, 3), 3333);
+        assert_eq!(nodes_per_second(u64::MAX, 1000), u64::MAX);
+    }
+
+    #[test]
+    fn search_info_uses_elapsed_time_from_the_clock() -> io::Result<()> {
+        // The starting position visits 206603 nodes (sum of published perft counts).
+        let readings = std::cell::Cell::new([4000, 7250].into_iter());
+        let now = || {
+            let mut remaining = readings.take();
+            let micros = remaining
+                .next()
+                .expect("one clock reading on each side of minimax");
+            readings.set(remaining);
+            Duration::from_micros(micros)
+        };
+        let mut output = Vec::new();
+        answer_commands(
+            ["go infinite", "stop"].map(|command| Ok(command.to_owned())),
+            &mut output,
+            now,
+        )?;
+        assert!(readings.take().next().is_none());
+        let text = String::from_utf8(output).map_err(io::Error::other)?;
+        assert!(
+            text.starts_with("info depth 4 score cp 0 time 3 nodes 206603 nps 68867666 pv "),
+            "{text}"
+        );
+        Ok(())
+    }
 
     #[test]
     fn crlf_split_across_reads_sends_one_line() -> io::Result<()> {

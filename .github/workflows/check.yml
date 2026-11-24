@@ -1,6 +1,7 @@
 name: Check
 on:
   push:
+    branches: [main]
   pull_request:
   schedule:
     - cron: '17 7 * * 1'
@@ -23,7 +24,6 @@ jobs:
       - run: scripts/check
 
   mutation:
-    if: github.event_name == 'pull_request' || github.event_name == 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: ${{ github.event_name == 'schedule' && 180 || 45 }}
     steps:
@@ -38,7 +38,6 @@ jobs:
       - run: scripts/check-mutants
 
   coverage:
-    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:

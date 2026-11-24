@@ -11,3 +11,4 @@
 ^rustfmt\.toml$
 ^rust-toolchain\.toml$
 ^deny\.toml$
+^crates/uci/tests/support/search_history\.rs$

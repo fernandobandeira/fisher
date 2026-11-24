@@ -41,7 +41,7 @@ The following expected lines have special meanings. All other responses are exac
 | `< info string {message}` | Match one `info string` line with any message. |
 | `< info string {message:fragment}` | Match one `info string` line whose message contains the case-sensitive fragment. |
 | `< bestmove {legal}` | Match one `bestmove` carrying a UCI move that an independent implementation lists as legal in the current position. |
-| `< info depth 4 multipv 1 score {score} nodes {nodes} nps {nps} time {time} pv {pv}` | Match one searched `info` line against the [allowance pattern](#searched-moves). |
+| `< info depth D multipv 1 score {score} nodes {nodes} nps {nps} time {time} pv {pv}` | For a literal positive depth D, match one searched `info` line against the [allowance pattern](#searched-moves). |
 | `< info depth 4 score {score} nodes {nodes}` | Used only by the scripted runner fixtures. Match one short searched `info` line with the S and N forms of [Repeated searched info](#repeated-searched-info). |
 
 For `{legal}`, the reference starts at the starting position and follows
@@ -79,16 +79,51 @@ text for any literal score or node count. Only `position-moves.uci` uses
 the score and node allowances together.
 
 ```regex
-^info depth 4 multipv 1 score (?:cp (?:0|-?[1-9][0-9]*)|mate -?[1-9][0-9]*) nodes (?:0|[1-9][0-9]*) nps (?:0|[1-9][0-9]*) time [1-9][0-9]* pv [a-h][1-8][a-h][1-8][qrbn]?(?: [a-h][1-8][a-h][1-8][qrbn]?){0,3}$
+^info depth [1-9][0-9]* multipv 1 score (?:cp (?:0|-?[1-9][0-9]*)|mate -?[1-9][0-9]*) nodes (?:0|[1-9][0-9]*) nps (?:0|[1-9][0-9]*) time [1-9][0-9]* pv [a-h][1-8][a-h][1-8][qrbn]?(?: [a-h][1-8][a-h][1-8][qrbn]?){0,3}$
 ```
 
-`multipv` is the literal 1. Time is a whole number of milliseconds of
-at least 1 with no leading zero. The principal variation contains one to
-four UCI moves separated by single spaces. Each move contains two squares
+The depth in the expected line is a literal; `{depth}` belongs to the
+repeated record alone. `multipv` is the literal 1. Time is a whole number
+of milliseconds of at least 1 with no leading zero. The principal
+variation contains one to D UCI moves separated by single spaces, where D
+is the depth. Each move contains two squares
 and an optional lowercase promotion suffix. The move pattern excludes
 `0000`. Digits in every allowance are ASCII. The runner checks the nodes
-per second from the reported nodes and time and checks the principal
-variation under D5.
+per second from the reported nodes and time. At depths 1 to 4 it also
+checks a `{score}` against the reference minimax at that depth, and the
+principal variation under D5. Deeper lines get the spelling and length
+checks only, because the reference minimax prunes nothing.
+
+### Staged iterative deepening transcripts
+
+fisher-5sg.13 staged the [successors in `uci-iterative-deepening/`](uci-iterative-deepening/)
+on 2026-11-24 for fisher-5sg.4. The current runner reads only `uci/`.
+Each staged file with the same name succeeds its active file. The `go depth`,
+`go nodes` and `go movetime` cases of `go-parameters.uci` each start a fresh
+session in `go-depth.uci`, `go-nodes.uci` and `go-movetime.uci`. They use
+the default depth of four until their limits are implemented.
+
+Each completed depth has its own required reply with a literal depth.
+For depth D, the node total adds the counts of every search from depth 1
+through D. Each individual search counts the nodes at plies 1 through its
+depth. For example, the starting position reports 20, 440, 9762 and 216365
+nodes. The three score allowances in `position-moves.uci` retain `{score}`
+at every depth and use independently enumerated node totals. The derivation
+script and its results are on fisher-5sg.13.
+
+Keep the two fresh processes and compare their moves when adopting
+`equal-scores.uci`. The `terminal-positions.uci` successor retains one
+depth-zero line for each position. The `go-infinite.uci` successor stages
+the bare searches in that session and keeps the single depth-4 line of
+its two held searches. It is not adopted on its own: fisher-5sg.3 stages
+the `go infinite` successor of the same file and folds these bare searches
+into it.
+
+Rules 2 and 3 of fisher-2aj score a position at the horizon by material
+without asking whether it has a legal move. A mate one ply beyond the
+depth searched therefore reads as material: the mate-in-one position
+reports `cp 900` at depth 1 and `mate 1` from depth 2. Stockfish would
+report `mate 1` at depth 1.
 
 ### Repeated searched info
 

@@ -1,5 +1,4 @@
 {
-  "crates": ["bench", "deepening", "fisher", "rules", "search", "uci", "xtask"],
   "equivalent": [
     {
       "file": "crates/search/src/lib.rs",

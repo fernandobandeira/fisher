@@ -68,6 +68,10 @@ _Banned in code_: valid move
 Said of a position in which the king of the color that is not the side to move is attacked. No legal move leads to one, so a FEN that describes one is rejected.
 _Avoid_: other king in check, illegal check
 
+**Reply**:
+A move that answers the move before it, played by the other color. What fisher sends over UCI is a response, never a reply.
+_Avoid_: answer, counter-move, response (for a move)
+
 **Fullmove**:
 A move by White followed by a move by Black. The fullmove number starts at 1 and goes up after Black moves.
 _Avoid_: turn, round
@@ -81,6 +85,26 @@ _Avoid_: fifty-move counter, draw counter
 **Ply**:
 One move by one color, used as the unit of distance in the game tree. Depth is counted in plies.
 _Avoid_: half-move (except in the name halfmove clock), level
+
+**Root**:
+The position a search starts from, at ply 0.
+_Avoid_: starting position (which names the position a game of chess starts from), search position
+
+**Root move**:
+A legal move of the root. The search chooses one, and every variation it reports starts with one.
+_Avoid_: first move, candidate move, top-level move
+
+**Horizon**:
+The ply at which a search stops playing moves. A position there is scored as it stands, without asking whether it has a legal move.
+_Avoid_: frontier, search edge, leaf depth
+
+**Bound**:
+A value that a position's score is known to be at least, or at most, when the score itself is not known. A bound is never reported or compared as a score.
+_Avoid_: estimate, approximate score
+
+**Cutoff**:
+Leaving the remaining moves of a position unplayed, because a reply already found proves the position cannot change the result at the root. It does not interrupt the search: the depth in hand still finishes, with the same score.
+_Avoid_: cut, refutation, witness
 
 **Perft**:
 The number of leaf nodes in the tree of legal moves to a fixed depth from a position, used to check move generation against published counts.

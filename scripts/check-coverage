@@ -5,6 +5,7 @@ import argparse
 from collections import defaultdict
 from decimal import Decimal, InvalidOperation
 import json
+import os
 from pathlib import Path
 import re
 import subprocess
@@ -63,20 +64,27 @@ def region_counts(report, root):
     return totals
 
 
-def own_region_counts(packages, root, read_report):
+def own_region_counts(packages, root, artifacts, read_report):
     totals = {}
     for directory, package in sorted(packages.items()):
-        report = region_counts(read_report(package), root)
+        report = region_counts(read_report(package, artifacts / directory), root)
         if directory in report:
             totals[directory] = report[directory]
     return totals
 
 
-def coverage_report(package):
+def coverage_report(package, directory):
+    # llvm-cov scans executables for every workspace target in the build directories.
+    # Isolate both directories so there are only objects from this package's test run.
+    environment = dict(
+        os.environ,
+        CARGO_LLVM_COV_TARGET_DIR=str(directory),
+        CARGO_LLVM_COV_BUILD_DIR=str(directory),
+    )
     return json.loads(subprocess.check_output(
         ["cargo", "llvm-cov", "--locked", "--package", package, "--tests", "--json", "--summary-only",
          "--ignore-filename-regex", TEST_PATH_REGEX],
-        cwd=ROOT,
+        cwd=ROOT, env=environment,
     ))
 
 
@@ -155,7 +163,14 @@ def self_test():
     ]}]}
     packages = {"rules": "rules-package", "search": "search"}
     reports = {"rules-package": report, "search": caller_report}
-    own_totals = own_region_counts(packages, root, reports.pop)
+    artifacts = root / "target" / "coverage"
+
+    def read_report(package, directory):
+        expected = "rules" if package == "rules-package" else "search"
+        assert directory == artifacts / expected
+        return reports.pop(package)
+
+    own_totals = own_region_counts(packages, root, artifacts, read_report)
     assert not reports
     assert own_totals == {"rules": (99, 100), "search": (1000, 1000)}
     assert len(compare(own_totals, floors, packages.keys())[1]) == 1
@@ -206,7 +221,10 @@ def main():
             return 1
         floors = json.loads((ROOT / ".cargo/coverage-floors.json").read_text(), parse_float=Decimal)
         packages = workspace_packages()
-        totals = own_region_counts(packages, ROOT, coverage_report)
+        target = ROOT / "target"
+        target.mkdir(exist_ok=True)
+        with TemporaryDirectory(prefix="coverage-", dir=target) as artifacts:
+            totals = own_region_counts(packages, ROOT, Path(artifacts), coverage_report)
         summaries, problems = compare(totals, floors, packages.keys())
     except (OSError, subprocess.CalledProcessError, ValueError, KeyError, InvalidOperation) as error:
         print(f"Could not check region coverage: {error}. {install}", file=sys.stderr)

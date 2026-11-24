@@ -1,6 +1,7 @@
-#[path = "support/principal_variation.rs"]
+// Replay the same reference used by the search crate tests.
+#[path = "../../search/tests/support/principal_variation.rs"]
 mod principal_variation;
-#[path = "support/reference_minimax.rs"]
+#[path = "../../search/tests/support/reference_minimax.rs"]
 mod reference;
 #[path = "support/scripted_transcripts.rs"]
 mod scripted_transcripts;

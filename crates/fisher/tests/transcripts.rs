@@ -130,26 +130,15 @@ fn play_transcript(name: &str) -> io::Result<()> {
 }
 
 fn collect_legal_bestmove_replies(name: &str) -> io::Result<Vec<String>> {
-    let directory = match name {
-        "end-of-input-while-held"
-        | "equal-scores"
-        | "go-infinite"
-        | "go-parameters"
-        | "halfmove-clock"
-        | "mate-in-one"
-        | "material-zero"
-        | "new-game"
-        | "position-moves"
-        | "quit-while-held"
-        | "rejected-position-opposite-check"
-        | "rejected-position"
-        | "startpos" => "uci-principal-variation",
-        _ => "uci",
-    };
-    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../expectations")
-        .join(directory)
+    let expectations = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../expectations");
+    let prospective = expectations
+        .join("uci-principal-variation")
         .join(format!("{name}.uci"));
+    let path = if prospective.is_file() {
+        prospective
+    } else {
+        expectations.join("uci").join(format!("{name}.uci"))
+    };
     let transcript = fs::read_to_string(path)?;
     let mut session = Session::start()?;
     let mut ended = false;

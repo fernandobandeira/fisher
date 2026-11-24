@@ -212,6 +212,7 @@ mod tests {
         assert_eq!(nodes_per_second(10, 2), 5000);
         assert_eq!(nodes_per_second(10, 3), 3333);
         assert_eq!(nodes_per_second(u64::MAX, 1000), u64::MAX);
+        assert_eq!(nodes_per_second(u64::MAX, 1), u64::MAX);
     }
 
     #[test]

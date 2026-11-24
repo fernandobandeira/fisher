@@ -101,8 +101,8 @@ The three other sessions cover
 the commands after `stop` under D24 and an immediate `quit` or end of input.
 The held-move transcripts read the last `info` line before the next command.
 The scripted histories can also observe the search reporting `Ended`.
-The two held-move sessions and `stop-position-go.uci` each assume one
-depth-4 search and will be restaged when fisher-5sg.4 lands.
+The two held-move sessions and `stop-position-go.uci` have staged
+successors for fisher-5sg.4 in [`uci-deepen-until-stop/`](uci-deepen-until-stop/).
 
 ### Staged iterative deepening transcripts
 
@@ -139,11 +139,14 @@ report `mate 1` at depth 1.
 
 fisher-5sg.3 staged [these successors and controlled schedules](uci-deepen-until-stop/)
 on 2026-11-24 for fisher-5sg.4. The current runner reads only `uci/`.
-The four paths with active names succeed those sessions. The new
-`quit-while-deepening.uci` and `end-of-input-while-deepening.uci` add
-searches that may report progress before exit. Adopt the
-`go-infinite.uci` in this directory as the single successor. It folds in
-the bare searches staged by fisher-5sg.13.
+
+| Staged session | What it covers |
+|---|---|
+| [`go-infinite.uci`](uci-deepen-until-stop/go-infinite.uci) | Succeeds the active session and folds in the bare searches staged by fisher-5sg.13. |
+| [`go-infinite-terminal.uci`](uci-deepen-until-stop/go-infinite-terminal.uci) | Succeeds the active session for a terminal position. |
+| [`stop-position-go.uci`](uci-deepen-until-stop/stop-position-go.uci) | Succeeds the active D24 session and checks that a rejected position leaves the root unchanged. |
+| [`quit-while-held.uci`](uci-deepen-until-stop/quit-while-held.uci) and [`end-of-input-while-held.uci`](uci-deepen-until-stop/end-of-input-while-held.uci) | Succeed the active sessions for exit with a held move. |
+| [`quit-while-deepening.uci`](uci-deepen-until-stop/quit-while-deepening.uci) and [`end-of-input-while-deepening.uci`](uci-deepen-until-stop/end-of-input-while-deepening.uci) | Add searches that may report progress before exit. |
 
 ### Repeated searched info
 

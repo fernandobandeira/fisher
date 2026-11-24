@@ -110,6 +110,30 @@ pattern excludes `0000`. Digits in every allowance are ASCII. Fisher-8hc.2
 checks replay and scoring under D5. The fresh-process comparison still
 applies to the prospective `equal-scores.uci` session.
 
+### Stockfish spelling (fisher-8hc.6)
+
+The successors in [`uci-stockfish-spelling/`](uci-stockfish-spelling/)
+use fisher-r6y D41 and Stockfish sf_19 (edb0d9d), read on 2026-11-24.
+See [`UCIEngine::on_update_full`](https://github.com/official-stockfish/Stockfish/blob/edb0d9d/src/uci.cpp#L654)
+and [`SearchManager::output_pv`](https://github.com/official-stockfish/Stockfish/blob/edb0d9d/src/search.cpp#L2273).
+Fisher-8hc.7 selects these sessions. The depth-zero responses for roots
+with no legal move keep their current spelling.
+
+```text
+< info depth 4 multipv 1 score {score} nodes {nodes} nps {nps} time {time} pv {pv}
+```
+
+Match the entire output line after removing its line ending. With every
+allowance in place, the anchored regular expression is:
+
+```regex
+^info depth 4 multipv 1 score (?:cp (?:0|-?[1-9][0-9]*)|mate -?[1-9][0-9]*) nodes (?:0|[1-9][0-9]*) nps (?:0|[1-9][0-9]*) time [1-9][0-9]* pv [a-h][1-8][a-h][1-8][qrbn]?(?: [a-h][1-8][a-h][1-8][qrbn]?){0,3}$
+```
+
+`multipv` is the literal 1. Time is a whole number of milliseconds of
+at least 1 with no leading zero. The other allowances and the one-to-four
+move bound keep the forms above.
+
 ### Repeated searched info
 
 Source: fisher-r6y D15 and fisher-5sg decision 1, approved by the owner on
@@ -123,6 +147,22 @@ match, independently of the engine revision.
 info depth D score S nodes N
 info depth D score S time T nodes N nps R pv P
 ```
+
+The [staged successor fixtures](uci-stockfish-spelling/repeated-searched-info.json)
+use this full spelling under D41:
+
+```text
+info depth D multipv 1 score S nodes N nps R time T pv P
+```
+
+For the staged full spelling, `multipv` is the literal 1 and T is a
+positive ASCII decimal, `[1-9][0-9]*`. The other slot forms and the
+depth-dependent principal variation bound below apply.
+
+Only `full-spelling` changes verdict, from accept to run-reject, because
+its first output line reports `time 0`. The two fixtures for an overlong
+principal variation use positive time so their verdicts still test the
+move bound.
 
 Match the entire line, excluding its ending, with single ASCII spaces.
 Each slot accepts its corresponding allowance or a literal of the same

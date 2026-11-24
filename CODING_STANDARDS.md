@@ -8,7 +8,7 @@ A rule lands here only while it waits for a check, or because it cannot be one.
 
 ### Rust compilation and lints
 
-`scripts/check` uses `cargo clippy --locked --workspace --all-targets --all-features -- -D warnings` for the compile and lint gate. It checks libraries, binaries and test targets with optional features enabled. The test step also exercises the default feature configuration. Workspace crates deny compiler warnings in both configurations.
+`scripts/check` uses `cargo clippy --locked --workspace --all-targets --all-features -- -D warnings` for the compile and lint gate. It checks libraries, binaries and test targets with optional features enabled. The test step also exercises the default feature configuration. Workspace crates deny compiler warnings in both configurations. The pinned Clippy toolchain also denies cognitive complexity above 8. Split a function at a meaningful boundary and keep its behavior pinned by the existing tests.
 
 ### Crate interfaces
 
@@ -17,9 +17,9 @@ A deep module gives callers a small interface for a complete job. In Fisher, `Po
 - Use `src/lib.rs` as the single public entry point for each library crate. Declare implementation modules with `mod` and explicitly re-export the operations and types callers need. Other crates import those names from the crate root.
 - Start types, fields and helpers private. Use the narrowest visibility that reaches the caller. When proposing an export, name the external caller and the job it needs to do, or the agreed ticket that will need it. Revisit an export when its last caller disappears.
 - Keep each capability with its owner. Before adding a crate dependency, identify the operation the caller needs. Keep shared work behind that operation so callers can use it without assembling the same internal steps themselves.
-- Exercise public behavior through the same interface the application uses. An integration test alone is insufficient reason to export an implementation detail. Private tests can live beside the code.
+- Exercise public behavior through the same interface the application uses. An integration test alone is insufficient reason to export an implementation detail. Private tests can live beside the code. Keep tests of a public library interface in the crate that owns it. Tests that exercise the wired binary through UCI stay in `fisher`.
 
-`scripts/check-crate-boundaries` checks declared workspace dependencies, including build, test, optional and target-specific ones. Its dependency table is the one list of permitted directions. The independent reference, `shakmaty`, is a development dependency only. When proposing a new direction, change the dependency table and its `--self-test` fixtures in the same script.
+`scripts/check-crate-boundaries` checks declared workspace dependencies, including build, test, optional and target-specific ones. Its dependency table is the one list of permitted directions. The independent reference, `shakmaty`, is a development dependency only. The same dependency table applies to integration tests. When proposing a new direction, change the dependency table and its `--self-test` fixtures in the same script.
 
 `cargo xtask interfaces` checks library roots for public module declarations. Rust also checks unnecessarily public items inside private modules with `unreachable_pub`. Review macro-generated exports and re-exports for exposed implementation modules. A reviewer checks that each public item has a caller.
 
@@ -43,11 +43,17 @@ A `TODO` and a ticket always come as a pair, so the code shows what is missing a
 
 The first line cannot be a check. The other two wait for one.
 
+### Mutation testing and region coverage
+
+Run [`scripts/check-mutants --in-diff origin/main`](scripts/check-mutants) to exercise changes from the merge base to HEAD, or run [`scripts/check-mutants`](scripts/check-mutants) for all mutations in scope. Tests run across the workspace. Add a test for a surviving mutant or propose a proof of equivalence in the [reviewed registry](.cargo/mutation-gate.json). Pull requests check changed lines. The weekly run also rejects stale entries and checks the reviewed mutants again.
+
+Run [`scripts/check-coverage`](scripts/check-coverage) to compare each crate's source regions with its [coverage floor](.cargo/coverage-floors.json). Restore lost coverage with tests. The two full tools run outside `scripts/check`.
+
 ## From review comment to check
 
-A comment becomes a rule on its second independent occurrence, or on the first defect that mattered. Before that it is one person's remark about one change.
+A comment becomes a rule on its second independent occurrence, or on the first defect that mattered. The owner can also approve a check as baseline policy. Either route requires a bad example and a legitimate near miss.
 
-To promote one, get two examples from the reviewer: a bad one, and a legitimate near miss that must keep passing. Then pick the cheapest check that tells them apart:
+Get both examples from the reviewer or derive them from the owner's approved policy. Pick the cheapest check that tells them apart.
 
 | The comment is about | It becomes |
 |---|---|

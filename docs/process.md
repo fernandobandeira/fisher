@@ -19,7 +19,7 @@ The human is in the loop at the start (what to build, which claims matter) and a
 
 A slice is thin and goes end to end. "The engine answers `go` with a legal move from the starting position" is a slice: it touches the position, move generation, search and the protocol, and it can be run. "All of move generation" is a layer, not a slice.
 
-Merge each slice into `main` when it is green. Do not build a tall stack of dependent branches and review it at the end.
+Merge each slice into `main` after `scripts/check`, the pull-request mutation and coverage jobs, and the review required by its tier pass. See [guardrails](guardrails.md). Do not build a tall stack of dependent branches and review it at the end.
 
 ### Pull requests
 
@@ -35,7 +35,7 @@ Tier a change by how far it reaches, how easily a mistake in it would be noticed
 
 | Tier | Examples | Gate |
 |---|---|---|
-| **Local** | The inside of one crate, where existing evidence pins the behaviour: perft still matches, the bench signature is unchanged | Merge when green. The human does not read it. |
+| **Local** | The inside of one crate, where existing evidence pins the behaviour: perft still matches, the bench signature is unchanged | Merge when the local and pull-request checks pass. The human does not read the code. |
 | **Behaviour** | Search, evaluation, time management | The human reads the claims table and plays or watches a game. Not the code. |
 | **Commitment** | A crate's public interface; how a position or a move is represented; what the engine says over UCI; a file format; a new dependency; `unsafe`; anything under a protected path | The human approves before merge. An ADR if it is hard to reverse. |
 

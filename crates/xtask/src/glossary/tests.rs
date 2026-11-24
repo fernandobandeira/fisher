@@ -1,3 +1,5 @@
+#![cfg(test)]
+
 use super::{parse, scan_source};
 use std::path::Path;
 

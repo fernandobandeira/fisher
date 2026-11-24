@@ -1,4 +1,6 @@
-use super::*;
+#![cfg(test)]
+
+use super::super::*;
 use rules::Square;
 
 #[test]

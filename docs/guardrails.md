@@ -1,6 +1,6 @@
 # Guardrails
 
-Starting with this PR’s merge, the `main gates` ruleset requires the GitHub Actions `check`, `mutation`, and `coverage` jobs to pass and the pull request to be up to date with `main`. GitHub blocks red and out-of-date pull requests, force-pushes to `main`, and deletion of `main`. Nobody is on a bypass list. See the [merge process](process.md#pull-requests).
+The `main gates` ruleset on `main` requires the GitHub Actions `check`, `mutation`, and `coverage` jobs to pass and the pull request to be up to date with `main`. GitHub blocks red and out-of-date pull requests, force-pushes to `main`, and deletion of `main`. Nobody is on a bypass list. See the [merge process](process.md#pull-requests).
 
 | Guardrail | What it stops | Why it matters with agent-written code | Where enforced | When |
 |---|---|---|---|---|
@@ -32,7 +32,6 @@ Starting with this PR’s merge, the `main gates` ruleset requires the GitHub Ac
 | Mutation testing | A crate’s own tests passing despite a behavior change | A surviving mutant identifies an assertion or proof the owner needs | [`scripts/check-mutants`](../scripts/check-mutants), [reviewed equivalents](../.cargo/mutation-gate.json) | Whole workspace on PRs and weekly |
 | Per-crate region coverage | Losing coverage supplied by a crate’s own tests | Each crate has a separate report and floor. Dedicated test-only files are excluded | [`scripts/check-coverage`](../scripts/check-coverage), [reviewed floors](../.cargo/coverage-floors.json) | PR |
 
-
-Coverage floors use the measured regions and half-point rounding. The bench uses valid, checked-in perft positions, so the invalid-FEN path cannot be exercised through its public entry point with those inputs. The rules constructors require kings and valid square coordinates, leaving defensive paths for a missing king or an out-of-bounds square outside public tests. UCI tests inject read and output errors and leave the operating system’s thread-spawn failure path uncovered. The binary’s own bench and transcript tests cover both paths through `main`, including a failed bench write.
+Coverage floors use the measured regions and half-point rounding. The bench tests exercise a failed position write. The final total write and the final flush can also fail, but testing both would add two complete four-ply benches to `scripts/check`. The fixed perft data also leaves the invalid-FEN path uncovered. The rules constructors require kings and valid square coordinates, leaving defensive paths for a missing king or an out-of-bounds square outside public tests. Deepening’s remaining gap is in its inline test code. UCI’s uncovered regions include error propagation in response and move formatting, reader exit after the receiver disconnects, an unrecognized go parameter, OS thread-spawn failure, and inline test code. The binary’s own bench and transcript tests cover both paths through `main`, including a failed bench write.
 
 The pull-request mutation job runs the whole workspace. Diff scoping was removed because changes to shared tests, manifests, expected data and the gate itself can affect mutants outside the diff. Reintroduce scoping if the hosted run grows past about 15 minutes.

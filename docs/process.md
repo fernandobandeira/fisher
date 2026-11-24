@@ -23,7 +23,7 @@ Merge each slice into `main` after `scripts/check`, the pull-request mutation an
 
 ### Pull requests
 
-Starting with this PR’s merge, GitHub enforces the `main gates` ruleset on `main`. A pull request can merge only when its branch is up to date with `main` and the Actions `check`, `mutation`, and `coverage` jobs pass. The ruleset blocks force-pushes and deletion of `main` and has no bypass list. The project also requires the review for the change’s tier. The weekly schedule runs full mutation testing.
+GitHub enforces the `main gates` ruleset on `main`. A pull request can merge only when its branch is up to date with `main` and the Actions `check`, `mutation`, and `coverage` jobs pass. The ruleset blocks force-pushes and deletion of `main` and has no bypass list. The project also requires the review for the change’s tier. The weekly schedule runs full mutation testing.
 
 - **Squash-merge.** Each pull request becomes one commit on `main`. With the repository's settings the squash commit keeps the messages of the commits it replaces, so their `Guard-Change:` lines survive.
 - **Stack a slice that builds on one not merged yet.** Use GitHub's stacked pull requests through the `gh stack` extension (`gh extension install github/gh-stack`), not a base branch set by hand. `gh stack init` adopts existing branches, `gh stack link` joins pull requests that are already open, and `gh stack sync` rebases the layers above one that changed.

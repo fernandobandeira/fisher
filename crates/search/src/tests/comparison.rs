@@ -8,7 +8,7 @@ use rules::{Move, Position, Promotion};
 use shakmaty::{CastlingMode, Chess, fen::Fen};
 
 use super::{
-    mate_in_two,
+    mate_in_two, open_scores,
     perft::records,
     plain_minimax::plain_minimax,
     principal_variation::{self, MATE_SCORE},
@@ -19,7 +19,8 @@ type TestResult = Result<(), Box<dyn Error>>;
 
 /// Checks the exported search against plain minimax at one depth: the score,
 /// the chosen root move, no chosen move at a root with no legal move, the
-/// bounds on the node count, and the principal variation under D5.
+/// bounds on the node count, the principal variation under D5, and the score
+/// of every prefix of the principal variation.
 fn assert_same_as_plain_minimax(
     position: &Position,
     depth: u8,
@@ -66,7 +67,60 @@ fn assert_same_as_plain_minimax(
         score_value(result.score),
         result.principal_variation.iter().copied().map(move_text),
     )?;
+    check_each_prefix(position, depth, result.score, &result.principal_variation)?;
     Ok(result)
+}
+
+/// Plays the principal variation one move at a time. After each move, plain
+/// minimax searches what is left of the depth, and its score, seen from the
+/// root, must equal the score the search reported. A variation that reaches
+/// the score through a reply worse than the best one fails here.
+fn check_each_prefix(
+    root: &Position,
+    depth: u8,
+    score: Score,
+    variation: &[Move],
+) -> Result<(), String> {
+    let mut position = *root;
+    for (ply, &movement) in (1_u8..).zip(variation) {
+        let text = move_text(movement);
+        if !position.legal_moves().contains(&movement) {
+            return Err(format!(
+                "{}: {text} is not legal after {} plies",
+                root.to_fen(),
+                ply - 1
+            ));
+        }
+        position = movement.play();
+        let remaining = depth.checked_sub(ply).ok_or_else(|| {
+            format!(
+                "{}: the principal variation exceeds depth {depth}",
+                root.to_fen()
+            )
+        })?;
+        let from_root = seen_from_root(plain_minimax(&position, remaining).score, ply);
+        if from_root != score {
+            return Err(format!(
+                "{} at depth {depth}: after {text}, {ply} plies into the principal variation, \
+                 plain minimax scores {from_root:?}, not {score:?}",
+                root.to_fen()
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Turns a score from the side to move `ply` plies after the root into a score
+/// from the root's color, counting those plies in the distance to checkmate.
+fn seen_from_root(score: Score, ply: u8) -> Score {
+    let same_color = ply.is_multiple_of(2);
+    match score {
+        Score::Centipawns(value) => Score::Centipawns(if same_color { value } else { -value }),
+        Score::Mate { plies, winning } => Score::Mate {
+            plies: plies.saturating_add(ply),
+            winning: winning == same_color,
+        },
+    }
 }
 
 fn score_value(score: Score) -> i32 {
@@ -160,6 +214,49 @@ fn examples_at_depths_one_to_three() -> TestResult {
     for fen in EXAMPLES {
         compare_at_depths(fen, 1..=3)?;
     }
+    Ok(())
+}
+
+#[test]
+fn positions_whose_score_a_transcript_leaves_open() -> TestResult {
+    for fen in open_scores::POSITIONS {
+        compare_at_depths(fen, 1..=open_scores::DEEPEST)?;
+    }
+    Ok(())
+}
+
+#[test]
+fn prefix_check_rejects_a_variation_through_a_worse_reply() -> TestResult {
+    // Perft position 2. The search scores cp 300 with e2a6 at depth 3. After
+    // e2a6 h8g8 a6c8 the material count is also cp 300, so the D5 replay
+    // accepts the variation, but h8g8 is a worse reply for Black: after it,
+    // White can reach cp 600.
+    let fen = "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1";
+    let root = Position::from_fen(fen)?;
+    let result = minimax(&root, 3);
+    assert_eq!(result.score, Score::Centipawns(300));
+    check_each_prefix(&root, 3, result.score, &result.principal_variation)?;
+
+    let mut variation = Vec::new();
+    let mut position = root;
+    for text in ["e2a6", "h8g8", "a6c8"] {
+        let movement = position
+            .legal_moves()
+            .into_iter()
+            .find(|&movement| move_text(movement) == text)
+            .ok_or("missing legal move")?;
+        variation.push(movement);
+        position = movement.play();
+    }
+    let chess = fen
+        .parse::<Fen>()?
+        .into_position::<Chess>(CastlingMode::Standard)?;
+    principal_variation::verify(&chess, 3, 300, variation.iter().copied().map(move_text))?;
+    let error = check_each_prefix(&root, 3, result.score, &variation)
+        .err()
+        .ok_or("the prefix check accepted e2a6 h8g8 a6c8")?;
+    assert!(error.contains("after h8g8, 2 plies"), "{error}");
+    assert!(error.contains("Centipawns(600)"), "{error}");
     Ok(())
 }
 

@@ -1,4 +1,6 @@
-// Replay principal variations as the search crate tests do.
+// The positions whose score the search crate checks, and the replay it uses.
+#[path = "../../search/src/tests/support/open_scores.rs"]
+mod open_scores;
 #[path = "../../search/src/tests/support/principal_variation.rs"]
 mod principal_variation;
 #[path = "support/scripted_transcripts.rs"]
@@ -17,7 +19,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use shakmaty::{CastlingMode, Chess, Move, Position, fen::Fen, uci::UciMove};
+use shakmaty::{CastlingMode, Chess, EnPassantMode, Move, Position, fen::Fen, uci::UciMove};
 use wait_timeout::ChildExt;
 
 const LEGAL_BESTMOVE: &str = "bestmove {legal}";
@@ -649,6 +651,18 @@ fn reported_score(text: &str) -> io::Result<i32> {
     Ok(mate.signum() * (principal_variation::MATE_SCORE - plies))
 }
 
+fn verify_open_score_is_covered(position: &Chess, depth: u8) -> io::Result<()> {
+    let fen = Fen::from_position(position, EnPassantMode::Legal).to_string();
+    if depth <= open_scores::DEEPEST && open_scores::POSITIONS.contains(&fen.as_str()) {
+        Ok(())
+    } else {
+        Err(io::Error::other(format!(
+            "{{score}} at depth {depth} from {fen} is not compared with plain minimax. \
+             Add the position to POSITIONS in crates/search/src/tests/support/open_scores.rs"
+        )))
+    }
+}
+
 fn positive_decimal(text: &str) -> bool {
     matches!(text.as_bytes().first(), Some(b'1'..=b'9'))
         && text.bytes().all(|byte| byte.is_ascii_digit())
@@ -831,7 +845,7 @@ impl<I: TranscriptIo> Session<I> {
             if let Some((pattern, info)) = pattern.zip(info.as_ref())
                 && pattern.matches(info)
             {
-                self.verify_search_info(info)?;
+                self.verify_search_info(pattern.score, info)?;
             } else {
                 break actual;
             }
@@ -869,8 +883,8 @@ impl<I: TranscriptIo> Session<I> {
                 "expected {expected:?}, got {actual:?}"
             )));
         }
-        if let Some(info) = search_info(expected).and(search_info(&actual)) {
-            self.verify_search_info(&info)?;
+        if let Some((pattern, info)) = search_info(expected).zip(search_info(&actual)) {
+            self.verify_search_info(pattern.score, &info)?;
         }
         if let Some(bestmove) = actual.strip_prefix("bestmove ")
             && let Some(first) = self.first_variation_move.take()
@@ -886,9 +900,15 @@ impl<I: TranscriptIo> Session<I> {
         Ok(())
     }
 
-    fn verify_search_info(&mut self, info: &SearchInfo<'_>) -> io::Result<()> {
+    fn verify_search_info(
+        &mut self,
+        expected_score: &str,
+        info: &SearchInfo<'_>,
+    ) -> io::Result<()> {
         // Depths 1 to 4 have the replay check of D5. Deeper lines have the
-        // documented spelling and length checks only.
+        // documented spelling and length checks only. The runner does not
+        // know the right score: the tests of `search` compare it with plain
+        // minimax, so a score left open must be at a position they cover.
         let Some((full, depth)) = info.full.as_ref().zip(
             info.depth
                 .parse::<u8>()
@@ -898,6 +918,9 @@ impl<I: TranscriptIo> Session<I> {
             self.first_variation_move = None;
             return Ok(());
         };
+        if expected_score == "{score}" {
+            verify_open_score_is_covered(&self.position, depth)?;
+        }
         let score = reported_score(info.score)?;
         principal_variation::verify(&self.position, depth, score, full.pv.split(' '))
             .map_err(io::Error::other)?;

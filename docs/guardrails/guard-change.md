@@ -11,11 +11,26 @@ unless the message has a `Guard-Change:` line giving a reason. An agent
 can write the line itself. The owner can find it with
 `git log --grep '^Guard-Change:'`.
 
-`git commit --no-verify` skips the hook, and the hook exempts merge
-commits. No CI job checks for the line. Commits reach `main` through
-GitHub squash merges, where the hook never runs. By default, the squash
-message keeps the original commit messages. Whoever merges can edit it
-and remove a line without the hook seeing the edit.
+The required CI check reads each commit in a pull request and each new
+commit in a push to `main`. It uses the protected paths from both the base
+and head revisions, so removing a path from the list does not lift its
+protection for that change. It runs the base revision's checker when
+available and uses the head revision's checker during bootstrap. The
+weekly run skips the commit-message check.
+
+The local hook reads the working-tree list. `git commit --no-verify`
+skips it, and it exempts merge commits. CI checks paths whose result
+differs from every merge parent. The hook can accept a reason below
+Git's scissors line even if Git then strips it. CI reads the recorded
+message.
+
+A pull request that edits the workflow can remove the check. Retargeting
+a pull request to `main` does not rerun the workflow, so a green result
+from another base can carry over. The squash message normally keeps the
+original commit messages, but the person merging can edit it. If a
+retargeted pull request brings unchecked changes and its squash message
+has no reason, or someone removes the reason while merging, the push
+check catches the missing line after the squash lands on `main`.
 See the [merge process](../process.md#pull-requests).
 
 See [where the ideas came from](origin.md).

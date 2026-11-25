@@ -30,10 +30,11 @@ jobs:
             exit 1
           fi
           script_revision=$BASE
-          if ! git cat-file -e "$BASE:scripts/check-guard-change" 2>/dev/null; then
+          base_entry=$(git ls-tree "$BASE" -- scripts/check-guard-change)
+          if [ -z "$base_entry" ]; then
             script_revision=$HEAD
           fi
-          git show "$script_revision:scripts/check-guard-change" |
+          git cat-file blob "$script_revision:scripts/check-guard-change" |
             python3 -I - --event "$GITHUB_EVENT_NAME" "$BASE" "$HEAD"
       - uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2.90.8
         with:

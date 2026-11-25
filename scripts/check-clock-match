@@ -1,0 +1,235 @@
+#!/usr/bin/env python3
+"""Build, play and verify the weekly real-clock match.
+
+Usage: scripts/check-clock-match FASTCHESS NEW_EVIDENCE_DIRECTORY
+Install the pinned PGN replay library and its build tool as in .github/workflows/clock-match.yml.
+"""
+import collections
+import io
+import json
+import os
+from pathlib import Path
+import platform
+import re
+import shlex
+import signal
+import subprocess
+import sys
+import time
+
+import chess.pgn
+
+
+GAME_COUNT = 1000
+MATCH_SECONDS = 3600
+STOP_SECONDS = 10
+RESULT = r"(?:1-0|0-1|1/2-1/2)"
+MOVE = r"[a-h][1-8][a-h][1-8][qrbn]?"
+ENGINE = r"fisher-[ab]"
+PAIR = rf"\({ENGINE} vs {ENGINE}\)"
+NUMBER = r"-?(?:\d+(?:\.\d+)?|inf|nan)"
+IDS = set(range(1, GAME_COUNT + 1))
+REPETITION = re.compile(rf"Warning; PV continues after threefold repetition - move {MOVE} from {ENGINE}")
+RESULT_MARKER = re.compile(rf"(?:^|\s)({RESULT})$")
+# These are the console shapes reviewed for the pinned fastchess release.
+# Review the list when deliberately changing the pin. Everything else fails.
+CONSOLE = tuple(map(re.compile, (
+    r"",
+    r"-{50}",
+    rf"Started game \d+ of {GAME_COUNT} {PAIR}",
+    rf"Finished game \d+ {PAIR}: {RESULT} \{{(?:White mates|Black mates|"
+    r"Draw by (?:3-fold repetition|insufficient mating material|fifty moves rule|stalemate)|"
+    r"(?:White|Black) loses on time \(\d+ms overrun\))\}",
+    r"Info; info depth \d+ multipv \d+ score (?:cp|mate) -?\d+ "
+    rf"nodes \d+ nps \d+ time \d+ pv {MOVE}(?: {MOVE})*",
+    rf"Moves;(?: {MOVE})*",
+    r"Position; fen [prnbqkPRNBQK1-8/]+ [wb] (?:[KQkq]+|-) (?:[a-h][36]|-) \d+ \d+",
+    r"Results of fisher-a vs fisher-b \(10/1, NULL, NULL, openings\.epd\):",
+    rf"Elo: {NUMBER} \+/- {NUMBER}, nElo: {NUMBER} \+/- {NUMBER}",
+    rf"LOS: {NUMBER} %, DrawRatio: {NUMBER} %, PairsRatio: {NUMBER}",
+    rf"Games: \d+, Wins: \d+, Losses: \d+, Draws: \d+, Points: {NUMBER} \({NUMBER} %\)",
+    rf"Ptnml\(0-2\): \[\d+(?:, \d+){{4}}\], WL/DD Ratio: {NUMBER}",
+    rf"Player: {ENGINE}",
+    r"  (?:Timeouts|Crashed): \d+",
+    r"Tournament was interrupted\. To resume the tournament, run: [^\r\n]+ -config file=config\.json",
+    r"Finished match",
+    r"Total Time: \d+:\d{2}:\d{2} \(hours:minutes:seconds\)",
+)))
+ANSI_COLOR = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def runner_cores():
+    if sys.platform == "linux":
+        return int(subprocess.check_output(["nproc"]))
+    return os.cpu_count() or 1
+
+
+def run_match(command, evidence):
+    started = time.monotonic()
+    deadline_reached = False
+    with (evidence / "fastchess.log").open("w") as stream:
+        with subprocess.Popen(command, cwd=evidence, stdout=stream, stderr=subprocess.STDOUT) as process:
+            try:
+                process.wait(timeout=MATCH_SECONDS)
+            except subprocess.TimeoutExpired:
+                deadline_reached = True
+                process.send_signal(signal.SIGINT)
+                try:
+                    process.wait(timeout=STOP_SECONDS)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait()
+    return process.returncode, deadline_reached, time.monotonic() - started
+
+
+def read_log(path, report):
+    terminations = collections.Counter()
+    events = {}
+    finish_reasons = []
+
+    for raw in path.read_text(errors="replace").split("\n"):
+        line = ANSI_COLOR.sub("", raw).rstrip("\r")
+        if REPETITION.fullmatch(line):
+            report["repetition_warnings"] += 1
+            continue
+        if any(shape.fullmatch(line) for shape in CONSOLE):
+            continue
+        try:
+            event = json.loads(line)
+        except ValueError:
+            event = {}
+        kind = event.get("event") if isinstance(event, dict) else None
+        if kind in ("tournament_started", "game_started", "move"):
+            continue
+        if kind == "game_aborted":
+            terminations["interrupted"] += 1
+            continue
+        if kind == "tournament_finished":
+            finish_reasons.append(event.get("reason"))
+            continue
+        if kind == "game_finished" and (
+            type(event.get("game")) is int and event["game"] not in events
+            and type(event.get("plies")) is int and isinstance(event.get("result"), str)
+            and isinstance(event.get("termination"), str)
+        ):
+            events[event["game"]] = (event["plies"], event["result"])
+            terminations[event["termination"]] += 1
+            continue
+        report["unexpected"] += 1
+        if len(report["unexpected_examples"]) < 5:
+            report["unexpected_examples"].append(raw)
+    return terminations, events, finish_reasons
+
+
+def replay_pgn(path, events):
+    game_ids = set()
+    terminations = collections.Counter()
+    replay_errors = 0
+    if not path.exists():
+        return game_ids, terminations, replay_errors
+    # Fastchess begins every record with Event and writes the result as its last token.
+    preamble, *records = re.split(r"(?m)(?=^\[Event )", path.read_text(errors="replace"))
+    replay_errors += bool(preamble.strip())
+    for record in records:
+        game = chess.pgn.read_game(io.StringIO(record))
+        if game is None:
+            replay_errors += 1
+            continue
+        terminations[game.headers.get("Termination", "missing")] += 1
+        game_id = game.headers.get("GameId", "")
+        if not game_id.isascii() or not game_id.isdecimal() or game.errors:
+            replay_errors += 1
+            continue
+        number = int(game_id)
+        if number in game_ids:
+            replay_errors += 1
+            continue
+        game_ids.add(number)
+        result = game.headers["Result"]
+        marker = RESULT_MARKER.search(record.rstrip())
+        plies = 0
+        position = game.board()
+        for move in game.mainline_moves():
+            if not position.is_legal(move):
+                break
+            position.push(move)
+            plies += 1
+        else:
+            if marker and marker[1] == result and events.get(number) == (plies, result):
+                continue
+        replay_errors += 1
+    return game_ids, terminations, replay_errors
+
+
+def main():
+    if len(sys.argv) != 3:
+        sys.exit(__doc__)
+    fastchess = Path(sys.argv[1]).resolve(strict=True)
+    evidence = Path(sys.argv[2]).resolve()
+    evidence.mkdir()
+    root = Path(__file__).resolve().parent.parent
+    subprocess.run(["cargo", "build", "--locked", "--release", "-p", "fisher"], cwd=root, check=True)
+
+    fisher = root / "target/release/fisher"
+    openings = root / "strength/openings.epd"
+    cores = runner_cores()
+    concurrency = max(1, cores // 2)
+    cpu = subprocess.check_output(
+        ["lscpu"] if sys.platform == "linux" else ["sysctl", "-n", "machdep.cpu.brand_string"],
+        text=True,
+    )
+    (evidence / "runner.txt").write_text(
+        f"Available cores: {cores}\nRunner image: {os.getenv('ImageOS', 'local')} "
+        f"{os.getenv('ImageVersion', '')}\n{platform.platform()}\n{cpu}"
+    )
+    version = subprocess.check_output([str(fastchess), "--version"], text=True)
+    (evidence / "fastchess-version.txt").write_text(version)
+    print(f"Playing {GAME_COUNT} games at concurrency {concurrency}", flush=True)
+    command = [
+        str(fastchess), "-engine", f"cmd={fisher}", "name=fisher-a",
+        "-engine", f"cmd={fisher}", "name=fisher-b",
+        "-each", "proto=uci", "tc=10/1", "timemargin=0",
+        "-openings", f"file={openings}", "format=epd", "order=sequential",
+        "-rounds", str(GAME_COUNT // 2), "-games", "2", "-concurrency", str(concurrency),
+        "-pgnout", "file=games.pgn", "append=false", "timeleft=true", "latency=true",
+        "-events", "file=-", "info=false", "-autosaveinterval", "0", "-ratinginterval", "0",
+    ]
+    (evidence / "command.sh").write_text(shlex.join(command) + "\n")
+    status, deadline_reached, duration = run_match(command, evidence)
+    report = {"repetition_warnings": 0, "unexpected": 0, "unexpected_examples": []}
+    terminations, events, finish_reasons = read_log(evidence / "fastchess.log", report)
+    pgn_ids, pgn_terminations, replay_errors = replay_pgn(evidence / "games.pgn", events)
+    finished = len(events)
+    abnormal = finished - terminations["normal"]
+    summary = [
+        f"Games finished: {finished} of {GAME_COUNT}",
+        f"Abnormal endings: {abnormal}",
+        f"Losses on time: {terminations['time_forfeit']}",
+        f"Interrupted games: {terminations['interrupted']}",
+        f"PGN games: {sum(pgn_terminations.values())}",
+        f"PGN replay or record errors: {replay_errors}",
+        f"Exact game IDs in log and PGN: {events.keys() == pgn_ids == IDS}",
+        f"Tournament finish reasons: {finish_reasons}",
+        f"Unexpected output lines: {report['unexpected']}",
+        f"Repetition warnings: {report['repetition_warnings']}",
+        f"Terminations by kind: {dict(terminations)}",
+        f"Match duration: {duration:.2f} seconds",
+        f"Match deadline reached ({MATCH_SECONDS} seconds): {'yes' if deadline_reached else 'no'}",
+        f"fastchess exit status: {status}",
+    ]
+    if report["unexpected_examples"]:
+        summary.extend(["First unexpected output lines:", *report["unexpected_examples"]])
+    output = "\n".join(summary) + "\n"
+    (evidence / "summary.txt").write_text(output)
+    print(output, end="")
+    passed = (
+        status == 0 and not deadline_reached and not abnormal
+        and not terminations["interrupted"] and not report["unexpected"]
+        and not replay_errors and pgn_terminations == {"normal": GAME_COUNT}
+        and events.keys() == pgn_ids == IDS and finish_reasons == ["completed"]
+    )
+    return 0 if passed else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

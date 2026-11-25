@@ -86,15 +86,16 @@ move-count adjudication, tablebase adjudication, or resignation.
 ### Play a range by hand
 
 Put fastchess v1.8.3-alpha (`d7b47e8`) on `PATH`, then install the pinned
-Python dependency and run the series from a checkout with both revisions
-and their history. Both revisions must include `4fd3002`, where fisher
+Python dependencies and run the series from a checkout with two distinct
+revisions and their history. Both revisions must include `4fd3002`, where fisher
 began to obey `go nodes`.
 
 ```sh
 python3 -m venv /tmp/fisher-series-venv
 . /tmp/fisher-series-venv/bin/activate
-python3 -m pip install --require-hashes -r strength/series-requirements.txt
-strength/series a5dac71 4fd3002 3 1 100 /tmp/fisher-series-3 --concurrency 4
+python3 -m pip install --only-binary :all: --require-hashes -r strength/series-build-requirements.txt
+python3 -m pip install --no-build-isolation --no-deps --require-hashes -r strength/series-requirements.txt
+strength/series --concurrency 4 -- a5dac71 4fd3002 3 1 100 /tmp/fisher-series-3
 ```
 
 Give the measured revision, opponent revision, conditions, first opening
@@ -102,13 +103,20 @@ Give the measured revision, opponent revision, conditions, first opening
 engine from its commit. Set concurrency to the number of games to play at
 once, up to the machine's core count. The default is one.
 
-The directory holds the PGN, fastchess log and ordered game data. The digest
-is the SHA-256 of `games.jsonl`. Each line holds the opening number and FEN,
-White's full commit, the UCI moves, the result and the termination. For each
-opening, the measured revision's game as White comes first. To validate an
-existing PGN and print its digest, pass `--pgn path/to/games.pgn` with the same
-revisions and range and a fresh output directory. An incomplete range or
-abnormal ending produces no digest.
+The directory holds the PGN, fastchess log and ordered game data. To compute
+the digest from the PGN, encode each game as a compact JSON array containing,
+in order, the one-based opening number (integer), the opening FEN, White's
+full commit, an array of UCI move strings, the result, and the termination.
+Use ASCII escaping for JSON strings, no spaces around separators, and one
+line feed (byte `0x0a`) after each array, including the last. Write the games
+in ascending opening number, with the measured revision's game as White first
+for each opening. The SHA-256 covers these concatenated bytes, which the
+script writes to `games.jsonl`.
+
+To validate an existing PGN and print its digest, pass `--pgn path/to/games.pgn`
+before `--` with the same revisions and range and a fresh output directory.
+An incomplete range, abnormal ending, or result unsupported by the final
+position produces no digest.
 
 The manual Strength series workflow plays the first 100 openings under
 conditions 3 or the first 25 under conditions 4 on each of two runners. It
@@ -126,7 +134,8 @@ checks their digests and retains the games.
 `openings.epd` holds 200 positions from `noob_3moves.epd` in [official-stockfish/books](https://github.com/official-stockfish/books) at commit `37751b0`, which that repository publishes under CC0. Each is a position after three moves by each color. fastchess drew them at random with `-srand 20261123` for the first match, before any result was known, and they are kept in the order it drew them.
 
 The source for `series-openings.epd` is
-[`noob_3moves.epd.zip` at `37751b08db745aa02babfa74056dd1168b9da803`](https://github.com/official-stockfish/books/blob/37751b08db745aa02babfa74056dd1168b9da803/noob_3moves.epd.zip),
+[`noob_3moves.epd.zip` at `37751b08db745aa02babfa74056dd1168b9da803`](https://github.com/official-stockfish/books/blob/37751b08db745aa02babfa74056dd1168b9da803/noob_3moves.epd.zip)
+([raw download](https://raw.githubusercontent.com/official-stockfish/books/37751b08db745aa02babfa74056dd1168b9da803/noob_3moves.epd.zip)),
 published under CC0. The archive SHA-256 is
 `68fe2691e0876d0de54fffb68c797e752138d5ed363beab2ac6ca34be68ee9f3`.
 Verify it before extracting `noob_3moves.epd`, whose SHA-256 is

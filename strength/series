@@ -13,8 +13,7 @@ from tempfile import TemporaryDirectory
 try:
     import chess.pgn
 except ImportError:
-    sys.exit("Install python-chess with: python3 -m pip install --require-hashes "
-             "-r strength/series-requirements.txt")
+    sys.exit("Install python-chess as described in strength/README.md")
 
 ROOT = Path(__file__).resolve().parents[1]
 OPENINGS = ROOT / "strength/series-openings.epd"
@@ -63,6 +62,19 @@ class SeriesGame(chess.pgn.GameBuilder):
         return super().result(), self.movetext_result
 
 
+def final_result(position):
+    if position.is_checkmate():
+        return "0-1" if position.turn == chess.WHITE else "1-0"
+    if (
+        position.is_stalemate()
+        or position.is_insufficient_material()
+        or position.is_repetition(3)
+        or position.is_fifty_moves()
+    ):
+        return "1/2-1/2"
+    return None
+
+
 def games_in_order(pgn, openings, first, measured, opponent):
     numbers = {fen: number for number, fen in enumerate(openings, first)}
     measured_name = f"measured-{measured}"
@@ -97,6 +109,8 @@ def games_in_order(pgn, openings, first, measured, opponent):
             moves = [move.uci() for move in parsed.mainline_moves()]
             if parsed.errors or headers.get("PlyCount") != str(len(moves)):
                 raise ValueError(f"{description}: invalid PGN or incomplete movetext")
+            if result != final_result(parsed.end().board()):
+                raise ValueError(f"{description}: final position does not justify result {result}")
             games[key] = [number, fen, white, moves, result, termination]
 
     if len(games) != 2 * len(openings):
@@ -149,6 +163,8 @@ def main():
 
     measured = revision(args.measured)
     opponent = revision(args.opponent)
+    if measured == opponent:
+        raise ValueError("Measured and opponent revisions must resolve to different commits")
     openings = OPENINGS.read_text(encoding="utf-8").splitlines()
     selected = openings[args.first - 1:args.first + args.count - 1]
     if len(selected) != args.count or len(set(selected)) != args.count:

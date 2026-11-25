@@ -276,3 +276,9 @@ activated by fisher-5sg.10. The
 controlled schedules fix the time for the move and the time the search may
 use after the margin, the decision to start another depth and the order
 of responses when several limits apply.
+
+## Short FEN transcripts
+
+The [four- and five-field sessions](uci-short-fen/README.md) for fisher-og6
+are staged outside `uci/`. They use Stockfish 19's treatment of omitted FEN
+fields and fisher's existing responses to the equivalent six-field commands.

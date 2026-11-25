@@ -1,0 +1,12 @@
+# fisher-og6, 2026-11-25.
+# Acceptance and defaults from Stockfish 19 (sf_19, edb0d9d).
+# Responses from fisher 0.1.0 (44bfe4c) with the equivalent six-field FEN.
+# Source: https://github.com/official-stockfish/Stockfish/releases/tag/sf_19
+# See README.md for the source lines and both session captures.
+# Keep halfmove clock 17 and use fullmove number 1.
+> position fen 7k/8/5K2/6Q1/8/8/8/8 w - - 17 moves g5g7
+> go depth 1
+< info depth 0 score mate 0
+< bestmove 0000
+> quit
+! exit

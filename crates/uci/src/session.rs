@@ -240,6 +240,12 @@ impl Session {
                     Ok(())
                 } else {
                     self.active = Active::Idle;
+                    // Throwaway only: prove the real-clock match reports a late move.
+                    if self.position.to_fen().split_whitespace().nth(1) == Some("w")
+                        && self.position.to_fen().split_whitespace().nth(5) == Some("10")
+                    {
+                        std::thread::sleep(std::time::Duration::from_secs(2));
+                    }
                     send(output, &Response::BestMove(best_move))
                 }
             }

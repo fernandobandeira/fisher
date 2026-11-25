@@ -18,6 +18,7 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
+      # TODO(fisher-j9c): Remove after guard-change is required and has been seen failing from main.
       - name: Check Guard-Change lines
         if: github.event_name != 'schedule'
         env:

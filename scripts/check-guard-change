@@ -60,18 +60,33 @@ def format_paths(paths):
     return "\n".join(f"  {os.fsdecode(path)!r}" for path in paths[:-1].split(b"\0"))
 
 
-def pull_request_tree(repo, base, head):
+def merge_tree(repo, left, right):
     result = subprocess.run(
-        ("git", "-C", str(repo), "merge-tree", "--write-tree", "--no-messages", base, head),
+        ("git", "-C", str(repo), "merge-tree", "--write-tree", "--no-messages", left, right),
         stdout=subprocess.PIPE,
         check=False,
     )
     if result.returncode == 1:
-        print("Skipping the Guard-Change net-change check because the merge has conflicts.",
-              file=sys.stderr)
         return None
     result.check_returncode()
     return result.stdout.decode().strip()
+
+
+def paths_between(repo, before, after):
+    return git(repo, "diff-tree", "--no-commit-id", "--name-only",
+               "--no-renames", "-r", "-z", before, after)
+
+
+def commit_paths(repo, commit, parents):
+    if len(parents) == 2:
+        automatic_tree = merge_tree(repo, *parents)
+        if automatic_tree is not None:
+            return paths_between(repo, automatic_tree, commit)
+
+    # For conflicts and merges with more than two parents, retain the combined
+    # diff. For ordinary commits this also handles the root commit.
+    return git(repo, "diff-tree", "--root", "-c", "--no-commit-id",
+               "--name-only", "--no-renames", "-r", "-z", commit)
 
 
 def check_range(repo, base, head, protected_paths, event):
@@ -80,13 +95,11 @@ def check_range(repo, base, head, protected_paths, event):
     reason_pattern = (r"^Guard-Change: .*[^[:space:]]",)
     path_patterns = ("-z", "-f", protected_paths)
     for commit in git(repo, "rev-list", "--reverse", f"{base}..{head}").decode().splitlines():
-        # Combined diffs omit paths carried over unchanged from any merge parent.
-        paths = git(repo, "diff-tree", "--root", "-c", "--no-commit-id",
-                    "--name-only", "--no-renames", "-r", "-z", commit)
-        touched = grep(path_patterns, paths)
-        parents, _, body = git(repo, "show", "-s", "--format=%P%n%b", commit).partition(b"\n")
+        parent_line, _, body = git(repo, "show", "-s", "--format=%P%n%b", commit).partition(b"\n")
+        parents = parent_line.decode().split()
+        touched = grep(path_patterns, commit_paths(repo, commit, parents))
         if grep(reason_pattern, body):
-            if len(parents.split()) == 1:
+            if len(parents) == 1:
                 marked_range = True
         elif touched:
             problems.append(
@@ -96,13 +109,15 @@ def check_range(repo, base, head, protected_paths, event):
 
     # Compare the tree that a pull request would land with the base tip.
     # A push has already landed, so compare its actual endpoints.
-    landed_tree = pull_request_tree(repo, base, head) if event == "pull_request" else head
-    if landed_tree is None or problems or marked_range:
+    landed_tree = merge_tree(repo, base, head) if event == "pull_request" else head
+    if landed_tree is None:
+        print("Skipping the Guard-Change net-change check because the merge has conflicts.",
+              file=sys.stderr)
+        return problems
+    if marked_range:
         return problems
 
-    paths = git(repo, "diff-tree", "--no-commit-id", "--name-only",
-                "--no-renames", "-r", "-z", base, landed_tree)
-    touched = grep(path_patterns, paths)
+    touched = grep(path_patterns, paths_between(repo, base, landed_tree))
     if touched:
         if event == "push":
             advice = (
@@ -164,8 +179,9 @@ def expect(repo, case, base, bad_commit=None, *bad_paths):
     problems = violations(repo, base, "HEAD")
     if bad_commit is None and not problems:
         return
-    if bad_commit is not None and len(problems) == 1:
-        problem = problems[0]
+    commit_problems = [problem for problem in problems if problem.startswith("Commit ")]
+    if bad_commit is not None and len(commit_problems) == 1:
+        problem = commit_problems[0]
         if (problem.startswith(f"Commit {bad_commit} ")
                 and set(problem.splitlines()[1:1 + len(bad_paths)])
                 == {f"  {path!r}" for path in bad_paths}
@@ -286,6 +302,7 @@ def self_test(script):
         checker = script.read_bytes()
         check_net_change_fixtures(repo, base, checker, reason)
         check_merge_tree_fixtures(repo, base, checker, reason)
+        check_merge_commit_fixtures(repo, base, checker, reason)
         check_hook_fixtures(repo, base, script.parent.parent / ".githooks/commit-msg", reason)
         for event, advice in (
             ("pull_request", b"git push --force-with-lease"),
@@ -400,6 +417,49 @@ def check_merge_tree_fixtures(repo, base, checker, reason):
                conflict_note, unmarked.encode(), b"expectations/perft.epd")
 
 
+def check_merge_commit_fixtures(repo, base, checker, reason):
+    protected = "expectations/perft.epd"
+    policy_path = repo / protected
+    git(repo, "switch", "-q", "--detach", base)
+    common = commit_file(repo, protected, f"Add counts\n\n{reason}",
+                         "Start\n1\n2\n3\nEnd\n")
+
+    policy_path.write_text("Left\n1\n2\n3\nEnd\n")
+    left = commit_file(repo, protected, f"Edit first line\n\n{reason}", "")
+    git(repo, "switch", "-q", "--detach", common)
+    policy_path.write_text("Start\n1\n2\n3\nRight\n")
+    right = commit_file(repo, protected, f"Edit last line\n\n{reason}", "")
+
+    git(repo, "switch", "-q", "--detach", left)
+    git(repo, "merge", "-q", "--no-edit", right)
+    clean = git(repo, "rev-parse", "HEAD").decode().strip()
+    for event in ("pull_request", "push"):
+        expect_cli(checker, repo, left, clean, event, 0)
+
+    # Taking the left parent's entire path drops the cleanly merged right edit.
+    # The combined diff omits this path because it matches the left parent.
+    git(repo, "restore", "--source", left, "--staged", "--worktree", "--", protected)
+    git(repo, "commit", "-q", "--amend", "--no-edit")
+    hand_edited = git(repo, "rev-parse", "HEAD").decode().strip()
+    for event in ("pull_request", "push"):
+        expect_cli(checker, repo, left, hand_edited, event, 1,
+                   hand_edited.encode(), protected.encode())
+
+    git(repo, "switch", "-q", "--detach", common)
+    policy_path.write_text("Conflict\n1\n2\n3\nEnd\n")
+    conflict = commit_file(repo, protected, f"Edit first line differently\n\n{reason}", "")
+    git(repo, "switch", "-q", "--detach", left)
+    merge = subprocess.run(("git", "-C", str(repo), "merge", "--no-commit", conflict),
+                           capture_output=True)
+    if merge.returncode != 1 or not git(repo, "ls-files", "-u", "--", protected):
+        sys.exit("Guard-Change fixture did not create a conflict in the protected path.")
+    policy_path.write_text("Resolved\n1\n2\n3\nEnd\n")
+    resolved = commit_file(repo, protected, "Resolve protected conflict", "")
+    for event in ("pull_request", "push"):
+        expect_cli(checker, repo, left, resolved, event, 1,
+                   resolved.encode(), protected.encode())
+
+
 def check_hook_fixtures(repo, base, hook, reason):
     git(repo, "switch", "-q", "--detach", base)
     (repo / "scripts/check").write_text("Change the check\n")
@@ -408,7 +468,12 @@ def check_hook_fixtures(repo, base, hook, reason):
         for contents, status in (
             (reason, 1),
             (f"Update check\n{reason}", 1),
-            (f"Update check\n\n{reason}", 0),
+            (f"# Editor comment\n\n{reason}", 1),
+            (f"Update check\n\v\n{reason}", 1),
+            (f"Update check\n\f\n{reason}", 1),
+            (f"Update check\n\u00a0\n{reason}", 1),
+            (f"Update check\n \t\r\n{reason}", 0),
+            (f"# Editor comment\n\nUpdate check\n\n{reason}", 0),
         ):
             Path(message.name).write_text(contents + "\n")
             result = subprocess.run(("bash", str(hook), message.name), cwd=repo,

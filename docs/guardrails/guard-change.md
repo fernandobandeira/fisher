@@ -26,8 +26,13 @@ On a push to `main` the workflow checks the new commits with the
 previous revision's checker, using the pushed revision's checker
 during bootstrap if the previous revision has none.
 
-CI checks each commit. For merge commits it checks paths whose result
-differs from every merge parent. The checker also requires at least one
+CI checks each commit. For a two-parent merge with no conflicts, it
+checks paths where the recorded tree differs from Git's automatic
+merge of the parents. This covers hand edits and lets clean merges
+carry forward changes the parents already marked. If merging the
+parents has conflicts, or the commit has more than two parents, CI
+checks paths whose result differs from every parent. The checker
+also requires at least one
 `Guard-Change:` line in the body of an ordinary commit in the range
 if the net change touches a protected path. An ordinary commit has
 one parent. For a pull request the checker compares the base tip
@@ -58,9 +63,10 @@ The weekly run of the Check workflow skips the commit-message check.
 - Deleting `.githooks/protected-paths` at the head makes the check fail even with a reason. Restore the list to pass the check.
 
 The local hook reads the working-tree list. `git commit --no-verify`
-skips it, and it exempts merge commits. The hook can accept a reason
-below Git's scissors line even if Git then strips it. CI reads the
-recorded message.
+skips it, and it exempts merge commits. The hook skips editor comment
+lines beginning with `#` and uses space, tab and carriage return to
+recognize blank lines. The hook can accept a reason below Git's
+scissors line even if Git then strips it. CI reads the recorded message.
 
 The pull request check cannot see an edit made to the squash message at
 merge. Keep the default squash message so the original

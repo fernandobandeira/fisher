@@ -22,13 +22,13 @@ if [ -z "$touched" ]; then
   exit 0
 fi
 
-# Git treats the first paragraph as the subject.
+# Ignore Git's default editor comments and skip the subject paragraph.
 if awk '
-    /^[[:space:]]*$/ { if (subject) body = 1; next }
+    /^#/ { next }
+    /^[ \t\r]*$/ { if (subject) body = 1; next }
     !body { subject = 1; next }
-    /^Guard-Change: .*[^[:space:]]/ { reason = 1 }
-    END { exit !reason }
-  ' "$message_file"; then
+    { print }
+  ' "$message_file" | grep -aE '^Guard-Change: .*[^[:space:]]' >/dev/null; then
   exit 0
 fi
 

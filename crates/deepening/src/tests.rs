@@ -2,7 +2,7 @@
 
 use super::*;
 
-const HANG_BOUND: Duration = Duration::from_secs(60);
+const HANG_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[test]
 fn interrupt_inside_the_depth_discards_it() -> std::io::Result<()> {
@@ -29,13 +29,15 @@ fn interrupt_inside_the_depth_discards_it() -> std::io::Result<()> {
                 interrupt_checks += 1;
                 if interrupt_checks == 3 {
                     assert!(at_node.send(()).is_ok());
-                    assert!(may_resume.recv_timeout(HANG_BOUND).is_ok());
+                    assert!(may_resume.recv_timeout(HANG_TIMEOUT).is_ok());
                 }
             },
         );
         (interrupt_checks, reports)
     });
-    reached.recv_timeout(HANG_BOUND).map_err(io::Error::other)?;
+    reached
+        .recv_timeout(HANG_TIMEOUT)
+        .map_err(io::Error::other)?;
     interrupt.store(true, Ordering::Relaxed);
     resume.send(()).map_err(io::Error::other)?;
     let (interrupt_checks, reports) = worker

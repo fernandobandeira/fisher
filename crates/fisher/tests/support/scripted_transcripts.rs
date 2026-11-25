@@ -6,7 +6,10 @@ use std::{
     time::{Duration, Instant},
 };
 
-use super::{HANG_BOUND, TranscriptIo, exit_timeout, read_timeout, run_transcript};
+use super::{TranscriptIo, exit_timeout, read_timeout, run_transcript};
+
+// The reviewed fixtures use five seconds on the controlled clock.
+const SCRIPTED_TIMEOUT: Duration = Duration::from_secs(5);
 
 // Python is already required by scripts/check. Decode the JSON with its standard
 // library and send counted, NUL-separated fields to the Rust test.
@@ -56,7 +59,7 @@ fn repeated_searched_info_fixtures() -> io::Result<()> {
         let transcript = field(&mut fields)?;
         let mut script = Script::new(&mut fields)?;
         let mut started = false;
-        let result = run_transcript(name, transcript, || {
+        let result = run_transcript(name, transcript, SCRIPTED_TIMEOUT, || {
             started = true;
             Ok(&mut script)
         });
@@ -84,10 +87,10 @@ fn timeout_failure(
     let timed_out = result.as_ref().err().map(io::Error::kind) == Some(io::ErrorKind::TimedOut);
     let elapsed = script.now.duration_since(script.start);
     (matches!(name, "delimiter-at-5100ms" | "flood-without-delimiter")
-        && !(timed_out && elapsed == HANG_BOUND))
+        && !(timed_out && elapsed == SCRIPTED_TIMEOUT))
         .then(|| {
             format!(
-                "{name}: expected stdout timeout at {HANG_BOUND:?}, got {result:?} at {elapsed:?}"
+                "{name}: expected stdout timeout at {SCRIPTED_TIMEOUT:?}, got {result:?} at {elapsed:?}"
             )
         })
 }
@@ -134,9 +137,7 @@ impl<'a> Script<'a> {
             let after_send = number(fields)?;
             let mut events = Vec::new();
             for _ in 0..number::<usize>(fields)? {
-                // The reviewed fixture uses 5000 ms as one hang bound.
-                // Preserve each event's position relative to that bound.
-                let delay = HANG_BOUND * number::<u32>(fields)? / 5000;
+                let delay = Duration::from_millis(number(fields)?);
                 let event = match field(fields)? {
                     "stdout" => Event::Stdout(field(fields)?),
                     "eof" if field(fields)? == "None" => Event::Eof,
@@ -216,7 +217,8 @@ impl TranscriptIo for &mut Script<'_> {
         Ok(None)
     }
 
-    fn wait_for_success(&mut self, deadline: Instant) -> io::Result<()> {
+    fn wait_for_success(&mut self, timeout: Duration) -> io::Result<()> {
+        let deadline = self.now + timeout;
         while self.exit.is_none() {
             if let Event::Exit(status) = self.next_event(deadline).ok_or_else(exit_timeout)? {
                 self.exit = Some(status);

@@ -47,8 +47,8 @@ The following expected lines have special meanings. All other responses are exac
 For `{legal}`, the reference starts at the starting position and follows
 accepted `position` commands and their move lists. A `bestmove` reply does
 not itself advance the position. For `go infinite`, check `readyok` before
-sending `stop` so an early `bestmove` fails by output order. A runner may
-bound reads and process exit to detect a hang.
+sending `stop` so an early `bestmove` fails by output order. The runner uses a
+hang timeout for reads and process exit.
 
 ### Searched moves
 
@@ -219,11 +219,10 @@ repetition. For example, require depth 1, allow depths 2 through 4 to
 match a following `{depth}` repetition, then require `readyok`. A stream
 with depths 1 through 4 followed by `readyok` passes in that order.
 
-Start one absolute five-second read bound when each observation starts.
-It covers all matches and the delimiter read, including stdout EOF for
-`! exit`. Matching lines do not renew it. The process exit-status wait
-keeps its own separate five-second bound, which starts at stdout EOF,
-as it does for `! exit` today.
+Start the hang timeout when each observation starts. It covers all
+matches and the delimiter read, including stdout EOF for `! exit`.
+Matching lines do not renew it. For `! exit`, start a separate hang
+timeout for the process exit-status wait at stdout EOF.
 
 To check silence after a command, synchronize with a search or held move
 and use a strict exit. A repetition before exit alone cannot establish

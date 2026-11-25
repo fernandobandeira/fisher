@@ -31,7 +31,7 @@ use std::{
 use deepening::{FinishedDepth, Score, SearchReport};
 use shakmaty::{CastlingMode, Chess, Position as _, fen::Fen, uci::UciMove};
 
-pub(super) const HANG_BOUND: Duration = Duration::from_secs(60);
+pub(super) const HANG_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub(super) struct ScriptedInput {
     lines: mpsc::Sender<String>,
@@ -47,7 +47,7 @@ impl ScriptedInput {
             .map_err(io::Error::other)?;
 
         self.next_read
-            .recv_timeout(HANG_BOUND)
+            .recv_timeout(HANG_TIMEOUT)
             .map_err(io::Error::other)
     }
 }

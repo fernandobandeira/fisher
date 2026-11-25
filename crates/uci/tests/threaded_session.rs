@@ -9,7 +9,7 @@ use std::{
 };
 
 use deepening::{FinishedDepth, Score, SearchReport, SearchRequest};
-use search_history::{Event, HANG_BOUND, ScriptedInput, check, scripted_input};
+use search_history::{Event, HANG_TIMEOUT, ScriptedInput, check, scripted_input};
 
 const A: &str = "position fen 7k/8/5K1Q/8/8/8/8/8 b - - 0 1";
 const B: &str = "position fen 7k/8/5K2/6Q1/8/8/8/8 b - - 0 1";
@@ -127,7 +127,9 @@ impl Session {
 }
 
 fn receive<T>(receiver: &mpsc::Receiver<T>) -> io::Result<T> {
-    receiver.recv_timeout(HANG_BOUND).map_err(io::Error::other)
+    receiver
+        .recv_timeout(HANG_TIMEOUT)
+        .map_err(io::Error::other)
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -332,8 +334,8 @@ fn acknowledged_commands_reach_the_channel_before_the_next_report() -> io::Resul
 }
 
 fn wait_for_interrupt(interrupt: &std::sync::atomic::AtomicBool) {
-    // The interrupt flag is the signal. Bound the wait in case it never arrives.
-    let deadline = Instant::now() + HANG_BOUND;
+    // The interrupt flag is the signal. The hang timeout catches a missing interrupt.
+    let deadline = Instant::now() + HANG_TIMEOUT;
     while !interrupt.load(Ordering::Relaxed) {
         assert!(
             Instant::now() < deadline,

@@ -51,7 +51,7 @@ jobs:
         id: play
         run: |
           case "$CONDITIONS" in
-            3) count=3 ;;
+            3) count=100 ;;
             4) count=25 ;;
             *) echo "Unknown conditions: $CONDITIONS" >&2; exit 1 ;;
           esac

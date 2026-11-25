@@ -1,0 +1,39 @@
+#!/bin/sh
+set -eu
+
+cd "$(dirname "$0")/.."
+if ! command -v cargo >/dev/null 2>&1; then
+    export PATH="$HOME/.cargo/bin:$PATH"
+fi
+
+export FISHER_PERFT_DEPTHS=6,5,7,5,5,5
+
+check() {
+    step=$1
+    shift
+    step_start=$(date +%s)
+    if output=$(cargo test --locked --release "$@" -- --exact --ignored --nocapture 2>&1); then
+        printf '%s\n' "$output"
+        if printf '%s\n' "$output" | grep -Eq '^test result: ok\. 1 passed; 0 failed; 0 ignored; 0 measured; [0-9]+ filtered out;'; then
+            printf '%s passed in %ss\n' "$step" "$(($(date +%s) - step_start))"
+            return
+        fi
+        status=1
+        printf 'Expected exactly one ignored test to run and pass. Check the test name and its #[ignore] attribute.\n' >&2
+    else
+        status=$?
+        printf '%s\n' "$output" >&2
+    fi
+    printf '%s failed. Run from the repo root: FISHER_PERFT_DEPTHS=%s cargo test --locked --release %s -- --exact --ignored --nocapture\n' \
+        "$step" "$FISHER_PERFT_DEPTHS" "$*" >&2
+    exit "$status"
+}
+
+suite_start=$(date +%s)
+trap 'printf "Published suite elapsed time: %ss\n" "$(($(date +%s) - suite_start))"' EXIT
+
+check 'Deep perft' -p rules --test positions perft_at_selected_depths
+check 'All 100 published mates' -p search --test search all_published_mates_in_two
+# TODO(fisher-4yn.2): Retire the search node count comparison when the search starts pruning.
+check 'Search four-ply node counts' -p search --test search node_count_matches_published_perft_at_four_plies
+check 'Reference four-ply node counts' -p search --test reference_minimax node_count_matches_published_perft_at_four_plies

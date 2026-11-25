@@ -46,8 +46,8 @@ decision bounds fixed before play. See [Evidence](../evidence.md).
 
 In fisher-j07, deleting the line that checks a king's attacks along its
 rank and file from `is_attacked` passed every test in `scripts/check` at
-the time. Only the deep perft tests caught it. These run in release mode
-on request and are skipped by default. At depth 7, Position 3 in
+the time. Only the deep perft tests caught it. These now run in release mode
+in the weekly published suite. At depth 7, Position 3 in
 `expectations/perft.epd` gave 178633737 against a published count of
 178633661. The widened reference comparison now catches that deliberate
 break in `scripts/check`. The history on `main` has no record of a published

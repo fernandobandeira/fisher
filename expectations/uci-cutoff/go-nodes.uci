@@ -28,6 +28,9 @@
 # pruning", Artificial Intelligence 6, 1975), so its total through depth 5 is
 # at most 3138 and depth 5 must finish. Deeper depths may also finish; the
 # repeated record accepts them. bestmove stays h8g8, the only legal move.
+# The owner decided this on 2026-11-25 (PR #74): drop 3137, keep 3138 and
+# accept depth 5 or deeper. Whether the score at each depth is correct is
+# left to the comparison with plain minimax in fisher-4yn.4.
 > position startpos
 > go nodes 0
 < bestmove {legal}

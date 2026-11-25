@@ -238,7 +238,10 @@ fisher-4yn.1 staged the [sessions for a search that makes cutoffs](uci-cutoff/RE
 on 2026-11-25. The runner does not select them until fisher-4yn.2 makes
 cutoffs. They pin the one node total at depth 2 with an outside value, 79
 from the starting position, and move the node limits that sat on a total of
-the search without cutoffs. They need no new allowance.
+the search without cutoffs. They need no new allowance. The same directory
+stages successors of the four READMEs of controlled schedules, with every
+total at depth 2 or more either derived by hand or marked as having no
+outside value.
 
 ## Published perft
 

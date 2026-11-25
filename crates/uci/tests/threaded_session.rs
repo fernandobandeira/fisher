@@ -288,8 +288,13 @@ fn checks_every_sequence_up_to_four_steps() -> io::Result<()> {
 
 #[test]
 fn rejected_finite_replacements_leave_the_position_for_the_next_search() -> io::Result<()> {
-    let (mut session, script) = Script::start();
-    for command in [A, "go", B, "go infinite", "isready"] {
+    let session = Session::start(|request, report| {
+        if request.limits.depth == Some(1) {
+            wait_for_interrupt(&request.interrupt);
+        }
+        deepening::search(request, report);
+    });
+    for command in [A, "go depth 1", B, "go nodes 1"] {
         session.command(command)?;
     }
     assert_eq!(
@@ -300,15 +305,12 @@ fn rejected_finite_replacements_leave_the_position_for_the_next_search() -> io::
         session.reply()?,
         "info string go rejected: waiting for stop\n"
     );
-    assert_eq!(session.reply()?, "readyok\n");
-    script.report(Report::Depth)?;
-    script.report(Report::BestMove)?;
-    assert!(session.reply()?.starts_with("info depth 1 "));
+    session.command("stop")?;
+    session.command("go depth 0")?;
     assert_eq!(session.reply()?, "bestmove h8g8\n");
-    session.command("go")?;
-    script.report(Report::BestMove)?;
-    session.eof();
-    assert_eq!(session.finish()?, ["bestmove h8g8\n"]);
+    assert_eq!(session.reply()?, "bestmove h8g8\n");
+    session.command("quit")?;
+    assert_eq!(session.finish()?, Vec::<String>::new());
     Ok(())
 }
 
@@ -731,3 +733,78 @@ fn holds_the_move_at_the_production_depth_cap() -> io::Result<()> {
 
 #[path = "threaded_session/movetime.rs"]
 mod movetime;
+
+#[test]
+fn commands_on_either_side_of_the_node_limit() -> io::Result<()> {
+    for command in [Some("stop"), Some("quit"), None] {
+        node_limit_with_command(command, true)?;
+        node_limit_with_command(command, false)?;
+    }
+    Ok(())
+}
+
+fn node_limit_with_command(command: Option<&'static str>, command_first: bool) -> io::Result<()> {
+    let mut session = search_to_node_limit(command_first);
+    session.command(PUZZLE)?;
+    session.command("go nodes 1308")?;
+    expect_puzzle_depth(&session, 1, -600, 30, "g5g2")?;
+    if !command_first {
+        expect_puzzle_depth(&session, 2, -700, 1308, "c5f2 g2g3")?;
+        assert_eq!(session.reply()?, "bestmove c5f2\n");
+    }
+
+    send_release_command(&mut session, command)?;
+    if command_first {
+        assert_eq!(session.reply()?, "bestmove g5g2\n");
+    }
+    if command == Some("stop") {
+        session.command("isready")?;
+        assert_eq!(session.reply()?, "readyok\n");
+        session.command("quit")?;
+    }
+    assert_eq!(session.finish()?, Vec::<String>::new());
+    Ok(())
+}
+
+fn send_release_command(session: &mut Session, command: Option<&'static str>) -> io::Result<()> {
+    match command {
+        Some(command) => session.command(command),
+        None => {
+            session.eof();
+            Ok(())
+        }
+    }
+}
+
+fn search_to_node_limit(command_first: bool) -> Session {
+    Session::start(move |request, report| {
+        let interrupt = Arc::clone(&request.interrupt);
+        deepening::search(request, &mut |event| {
+            let first_depth = matches!(
+                event,
+                SearchReport::FinishedDepth(FinishedDepth { depth: 1, .. })
+            );
+            report(event);
+            // Deepening's private schedule can interrupt within depth 2.
+            // At the session boundary, hold the worker after depth 1.
+            if command_first && first_depth {
+                wait_for_interrupt(&interrupt);
+            }
+        });
+    })
+}
+
+fn expect_puzzle_depth(
+    session: &Session,
+    depth: u8,
+    cp: i32,
+    nodes: u64,
+    pv: &str,
+) -> io::Result<()> {
+    let line = session.reply()?;
+    assert!(line.starts_with(&format!(
+        "info depth {depth} multipv 1 score cp {cp} nodes {nodes} nps "
+    )));
+    assert!(line.ends_with(&format!(" pv {pv}\n")));
+    Ok(())
+}

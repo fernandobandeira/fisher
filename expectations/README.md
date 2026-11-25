@@ -256,9 +256,9 @@ within three plies, and no legal move gives checkmate in one ply.
 
 The active [`go-movetime.uci`](uci/go-movetime.uci) uses the
 [derivation and controlled schedules](uci-go-movetime/README.md) from fisher-5sg.7
-for the deadline, command ordering and several limits. The combined schedules and
-[ordinary nodes/movetime session](uci-go-movetime/go-nodes-movetime.uci)
-wait for both fisher-5sg.6 and fisher-5sg.8. The clocks
+for the deadline, command ordering and several limits. The active
+[nodes and movetime session](uci/go-nodes-movetime.uci) exercises both limits
+from fisher-5sg.6 and fisher-5sg.8. The clocks
 remain with fisher-5sg.9 and fisher-5sg.10.
 
 The repeated record matches zero or more searched reports. It cannot

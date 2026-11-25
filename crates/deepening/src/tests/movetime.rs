@@ -305,3 +305,37 @@ fn assert_expired_terminal_root(fen: &str, score: Score) -> Result<(), rules::Fe
     }
     Ok(())
 }
+
+#[test]
+fn counts_entries_until_nodes_or_movetime_refuses_entry() {
+    for (node_limit, initial_elapsed, expiry_check, expected_entries) in [
+        (19, 39, None, 19),
+        (19, 40, None, 0),
+        (1308, 39, Some(1024), 1023),
+    ] {
+        let mut request = timed_request(Position::starting(), 50, false);
+        request.limits.nodes = Some(node_limit);
+        let elapsed = Cell::new(initial_elapsed);
+        let mut reports = Vec::new();
+        let mut checks = 0;
+        let entered = search_with_clock(
+            &request,
+            &mut |event| reports.push(event),
+            &|| request.started + Duration::from_millis(elapsed.get()),
+            &mut || {
+                checks += 1;
+                if expiry_check == Some(checks) {
+                    elapsed.set(40);
+                }
+            },
+            3,
+        );
+        assert_eq!(entered, expected_entries);
+        let totals: &[u64] = if expiry_check.is_some() {
+            &[20, 440]
+        } else {
+            &[]
+        };
+        assert_reports(&reports, totals, request.position);
+    }
+}

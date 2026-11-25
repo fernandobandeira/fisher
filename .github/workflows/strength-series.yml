@@ -21,6 +21,7 @@ permissions:
 
 env:
   CONDITIONS: ${{ inputs.conditions }}
+  FISHER_TRIAL_INVERT_MATERIAL: '1'
 
 jobs:
   plan:
@@ -70,6 +71,14 @@ jobs:
           lscpu | sed -n '/^Model name:/p'
           scripts/install-fastchess "$RUNNER_TEMP/fastchess"
           printf '%s\n' "$RUNNER_TEMP" >> "$GITHUB_PATH"
+      - name: Compare the delayed and identical bench builds
+        if: matrix.name == 'range-01' && inputs.measured == 'a5dac71'
+        env:
+          FISHER_TRIAL_DELAY_BENCH: '1'
+        run: |
+          control=$(strength/series bench -- a5dac71 40cc66a0b14a646eda57ece005d46b15b3b8385d)
+          delayed=$(strength/series bench -- 9cf20f50bab7befe3fea1f06bd7e81bef8ab9528 a5dac71)
+          printf 'Identical builds ratio: %s\nDelayed build ratio: %s\n' "$control" "$delayed"
       - name: Play range
         timeout-minutes: ${{ inputs.conditions == '3' && 38 || 88 }}
         env:
@@ -77,12 +86,7 @@ jobs:
           OPPONENT: ${{ needs.plan.outputs.opponent }}
           FIRST: ${{ matrix.first }}
           COUNT: ${{ matrix.count }}
-          RANGE: ${{ matrix.name }}
-        run: |
-          if [ "$RANGE" = repeat-01 ]; then
-            sed -i 's/(1_000_000, 12)/(100_000, 12)/' strength/series
-          fi
-          strength/series --bench --concurrency 4 -- "$MEASURED" "$OPPONENT" "$CONDITIONS" "$FIRST" "$COUNT" "$RUNNER_TEMP/series"
+        run: strength/series --bench --concurrency 4 -- "$MEASURED" "$OPPONENT" "$CONDITIONS" "$FIRST" "$COUNT" "$RUNNER_TEMP/series"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:

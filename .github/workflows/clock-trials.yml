@@ -10,13 +10,9 @@ permissions:
 jobs:
   trial:
     if: github.head_ref == 'fisher-1w7-clock-trials'
-    name: Arm B trial ${{ matrix.trial }}
+    name: Arm B wiring
     runs-on: ubuntu-latest
     timeout-minutes: 90
-    strategy:
-      fail-fast: false
-      matrix:
-        trial: [1, 2, 3]
     steps:
       - name: Record runner
         run: |
@@ -32,7 +28,7 @@ jobs:
           persist-credentials: false
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
-          ref: a5dac711b6fae86886d54f04158f3f0a33109c72
+          ref: ${{ github.sha }}
           path: engine
           persist-credentials: false
       - name: Install and verify fastchess
@@ -49,12 +45,14 @@ jobs:
         run: |
           python3 -m venv "$RUNNER_TEMP/clock-venv"
           "$RUNNER_TEMP/clock-venv/bin/pip" install chess==1.11.2
-      - name: Play and verify Arm B
+      - name: Play and verify Arm B wiring
+        env:
+          CLOCK_WIRING: "1"
         run: |
           "$RUNNER_TEMP/clock-venv/bin/python" harness/.github/clock-trial.py B
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
-          name: arm-b-trial-${{ matrix.trial }}
+          name: arm-b-wiring
           path: evidence/
           if-no-files-found: error

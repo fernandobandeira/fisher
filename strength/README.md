@@ -2,35 +2,38 @@
 
 A record of how strongly each revision of fisher plays. Compare matches played under the same numbered conditions.
 
-This is a record, not a gate. `scripts/check` does not run it, and nothing here is an expected value. A claim that a change plays stronger is still settled by SPRT with bounds fixed beforehand, as [docs/evidence.md](../docs/evidence.md) says. The ticket for that is `fisher-op4`.
+This is a record, not a gate. `scripts/check` does not run it, and nothing here is an expected value. A claim that a change plays stronger is still settled by SPRT with bounds fixed beforehand, as [docs/evidence.md](../docs/evidence.md) says.
 
 ## What is here
 
 | Path | What it holds |
 |---|---|
-| `records.tsv` | One line per match: the two revisions that played, and the result. |
-| `measure` | Plays one match under the conditions below and prints its line for `records.tsv`. |
-| `summarise.py` | Counts the results in a match's PGN. `measure` runs it. |
+| `records.tsv` | One line per recorded series or historical match. |
+| `measure` | Plays a match by hand using the historical conditions. |
+| `summarise.py` | Counts results and queen-ahead games in a PGN. |
 | `openings.epd` | The 200 positions for conditions 1 and 2. |
-| `series` | Plays a range of openings under conditions 3 or 4 and prints its SHA-256. |
+| `series` | Plays and validates ranges, measures speed, and joins the games for a record. |
 | `series-openings.epd` | The 2,000 positions for conditions 3 and 4, in draw order. |
 
 ## Taking a measurement
 
-Check out the commit to measure. Then play it against Stockfish, against an earlier revision of fisher, or both:
+Start the **Strength series** workflow by hand. Give the measured revision,
+conditions 3 or 4, and an opponent revision. Leaving the opponent blank
+uses the measured revision from the last record under those conditions.
 
-```sh
-strength/measure stockfish /tmp/fisher-against-stockfish
-strength/measure dbe9113 /tmp/fisher-against-dbe9113
-```
+Each of `range-01` through `range-20` plays a contiguous range in opening
+order, with four games at a time. The ranges have 100 openings under
+conditions 3 and 25 under conditions 4. `repeat-01` plays the first range
+on a separate runner. The last job checks the expected games and
+compares the repeat. It prints a tab-separated record and saves the
+record and joined games in the `strength-record` artifact. Add the
+printed line to `records.tsv` in a pull request.
 
-The second argument is a new directory for the games. `measure` plays 400 games, prints the result, and ends with one tab-separated line. Add that line to `records.tsv` and commit it.
-
-`measure` builds each fisher from its commit, not from the working files, so the hashes in the line name exactly the engines that played. Uncommitted changes are not measured. It refuses to print a line if the match did not produce 400 games.
-
-To see whether a change helped, measure the new revision against the last revision in `records.tsv`.
-
-`measure` needs [fastchess](https://github.com/Disservin/fastchess), Python 3 with `pip install chess==1.11.2`, and Stockfish for a match against it. Set `PYTHON` to use another interpreter.
+For a clocked match by hand, check out the revision to measure and run
+`strength/measure stockfish /tmp/fisher-against-stockfish` with fastchess,
+Stockfish and Python 3 with `chess==1.11.2`. Give a new directory for the
+games. Conditions 1 and 2 are closed and their historical records remain
+in the table.
 
 ## What a record says
 
@@ -42,13 +45,14 @@ Each line of `records.tsv` describes one match, from the measured revision's poi
 | `revision` | The commit of fisher that was measured. |
 | `opponent` | The commit of fisher it played, or the name Stockfish gives itself over UCI and its `UCI_Elo`. |
 | `conditions` | Which set of conditions below the match was played under. Only records with the same number can be compared. |
-| `games` | Games played: 400. |
+| `games` | Games in the record, excluding the repeat. |
 | `won`, `drawn`, `lost` | Results for the measured revision. |
 | `score` | The share of the points it took, in percent. A draw is half a point. |
 | `queen_ahead_won`, `queen_ahead_drawn`, `queen_ahead_lost` | Results of the games in which it was a queen ahead. |
 | `abnormal_endings` | Games whose PGN `Termination` tag is not `normal`: an engine crashed, played an illegal move or lost on time. Either engine may be at fault; the PGN says which. |
-| `elo_difference`, `elo_interval` | The Elo difference fastchess computes from the score, and the margin it prints after `+/-`. Positive means the measured revision scored more than half the points. fastchess prints `inf` or `nan` when the score is too one-sided to compute them. |
-| `runner` | The version of fastchess that ran the match. |
+| `elo_difference`, `elo_interval` | The Elo difference and its 95% margin. Historical records use the values printed by fastchess. The series computes them from the opening pairs. |
+| `runner` | The version of fastchess that ran the games. |
+| `speed_ratio` | The median over the 20 playing ranges of measured to opponent bench speed on the same runner. Empty for conditions 1 and 2. |
 
 A revision was a queen ahead in a game if its material minus the opponent's was at least 900 in two positions in a row, so that the lead outlasted a reply. Material is counted as fisher's evaluation counts it: pawn 100, knight 300, bishop 300, rook 500, queen 900. The queen-ahead games it drew or lost are the games it failed to finish. The count does not say why: it may have been unable to give checkmate, or it may have blundered later.
 
@@ -56,7 +60,7 @@ A revision was a queen ahead in a game if its material minus the opponent's was 
 
 ## Conditions
 
-### 1
+### 1 (closed)
 
 - 400 games: each of the 200 positions in `openings.epd` once with each color, in the order of the document.
 - A game ends by checkmate, stalemate, threefold repetition, the fifty-move rule or insufficient material, or abnormally when an engine crashes, plays an illegal move or runs out of time. No game is adjudicated on its score, and no engine resigns.
@@ -66,7 +70,7 @@ A revision was a queen ahead in a game if its material minus the opponent's was 
 
 The conditions do not fix the Stockfish version or the machine. Compare two records against Stockfish only if `opponent` reads the same in both, and treat records from different machines with care.
 
-### 2
+### 2 (closed)
 
 Both engines get 10 seconds plus 0.1 seconds a move. The other conditions are the same as in conditions 1.
 
@@ -105,7 +109,7 @@ once, up to the machine's core count. The default is one.
 
 The directory holds the PGN, fastchess log and ordered game data. To compute
 the digest from the PGN, encode each game as a compact JSON array containing,
-in order, the one-based opening number (integer), the opening FEN, White's
+in order, the opening's one-based line number in `series-openings.epd`, the opening FEN, White's
 full commit, an array of UCI move strings, the result, and the termination.
 Use ASCII escaping for JSON strings, no spaces around separators, and one
 line feed (byte `0x0a`) after each array, including the last. Write the games
@@ -118,16 +122,28 @@ before `--` with the same revisions and range and a fresh output directory.
 An incomplete range, abnormal ending, or result unsupported by the final
 position produces no digest.
 
-The manual Strength series workflow plays the first 100 openings under
-conditions 3 or the first 25 under conditions 4 on each of two runners. It
-checks their digests and retains the games.
+Pass `--bench` to time both builds before playing. The workflow always does
+this. It runs `fisher bench` on each build once to warm up, then measures
+five samples per build, alternating which build goes first in each pair.
+Each sample divides the reported node count by elapsed time. The job
+divides the measured median nodes per second by the opponent median.
+The final record uses the median of the 20 range ratios. The repeated
+range does not contribute. [Fishtest worker bench](https://github.com/official-stockfish/fishtest/blob/ea59d0c793613882480198bf5402401054046ad7/worker/games.py#L521-L538)
 
 ## How far to trust the numbers
 
-- **Between two revisions of fisher that search**, a match under conditions 1 repeats game for game because each revision searches to a fixed depth and plays the same move from the same position. Under conditions 2 the match no longer repeats game for game. The depths the engines finish and the resulting scores depend on the machine and its load. The score describes these 200 openings. Revisions before `71a4608` choose legal moves at random.
-- **Against Stockfish** the result varies from match to match, because Stockfish at limited strength chooses weaker moves on purpose and not always the same ones. The margin fastchess prints gives a rough idea of how much; it is not a promise about the next match.
-- **An Elo for fisher** is not something this record establishes. Adding the difference against Stockfish to 1320 gives a rough placement only: it leans on one opponent, and for a fisher far below 1320 it is an extrapolation. Stockfish's documentation says `UCI_Elo` was calibrated at 120 seconds plus 1 a move and anchored to the CCRL 40/4 list; here it gets 10 seconds plus 0.1.
-- **A score near 0% or 100%** says little about the size of the gap. Measure against a closer opponent instead.
+Under a node limit, repeating the series gives the same games. The Elo
+margin estimates how far the result might move with other openings.
+Each opening contributes the mean score of its two games. The series
+uses the mean of these pair scores and the 95% normal interval from their
+variance, then converts the score and both bounds to Elo. The margin is
+half the width between the converted bounds. A mirror match scores
+exactly half on every pair, so its observed pair variance is zero.
+[fastchess paired Elo](https://github.com/Disservin/fastchess/blob/d7b47e8dec6b564aaf4cbb2922ab37e6c6761e75/app/src/matchmaking/elo/elo_pentanomial.cpp)
+
+A node limit gives no credit for speed. A speed ratio above 1 means the
+measured revision searched more nodes per second in the fixed bench.
+The ratio uses both builds on each runner before combining runners.
 
 ## Where the openings come from
 

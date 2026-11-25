@@ -1,8 +1,5 @@
 name: Strength series
 on:
-  push:
-    branches: [fisher-op4-series-trials]
-    paths-ignore: ['**']
   workflow_dispatch:
     inputs:
       measured:
@@ -10,8 +7,8 @@ on:
         required: true
         type: string
       opponent:
-        description: Opponent revision of fisher
-        required: true
+        description: Opponent revision (defaults to the last record under these conditions)
+        required: false
         type: string
       conditions:
         description: Series conditions
@@ -23,70 +20,100 @@ permissions:
   contents: read
 
 env:
-  MEASURED: ${{ inputs.measured }}
-  OPPONENT: ${{ inputs.opponent }}
   CONDITIONS: ${{ inputs.conditions }}
 
 jobs:
-  first:
+  plan:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 5
     outputs:
-      digest: ${{ steps.play.outputs.digest }}
-    steps: &play_steps
+      measured: ${{ steps.ranges.outputs.measured }}
+      opponent: ${{ steps.ranges.outputs.opponent }}
+      date: ${{ steps.ranges.outputs.date }}
+      matrix: ${{ steps.ranges.outputs.matrix }}
+    steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Prepare runner
-        run: |
-          lscpu | sed -n '/^Model name:/p'
-          scripts/install-fastchess "$RUNNER_TEMP/fastchess"
+      - name: Install the PGN replay library
+        run: &install_python |
           python3 -m venv "$RUNNER_TEMP/series-venv"
           pip="$RUNNER_TEMP/series-venv/bin/pip"
           "$pip" install --only-binary :all: --require-hashes -r strength/series-build-requirements.txt
           "$pip" install --no-build-isolation --no-deps --require-hashes -r strength/series-requirements.txt
-          printf '%s\n' "$RUNNER_TEMP" "$RUNNER_TEMP/series-venv/bin" >> "$GITHUB_PATH"
-      - name: Play first range
-        id: play
+          printf '%s\n' "$RUNNER_TEMP/series-venv/bin" >> "$GITHUB_PATH"
+      - name: Plan ranges
+        id: ranges
+        env:
+          MEASURED: ${{ inputs.measured }}
+          OPPONENT: ${{ inputs.opponent }}
+        run: strength/series plan -- "$MEASURED" "$OPPONENT" "$CONDITIONS" >> "$GITHUB_OUTPUT"
+
+  play:
+    name: Play ${{ matrix.name }}
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.conditions == '3' && 40 || 90 }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install the PGN replay library
+        run: *install_python
+      - name: Install fastchess
         run: |
-          case "$CONDITIONS" in
-            3) count=100 ;;
-            4) count=25 ;;
-            *) echo "Unknown conditions: $CONDITIONS" >&2; exit 1 ;;
-          esac
-          digest=$(strength/series --concurrency 4 -- "$MEASURED" "$OPPONENT" "$CONDITIONS" 1 "$count" "$RUNNER_TEMP/series")
-          printf '%s\n' "$digest"
-          printf 'digest=%s\n' "$digest" >> "$GITHUB_OUTPUT"
+          lscpu | sed -n '/^Model name:/p'
+          scripts/install-fastchess "$RUNNER_TEMP/fastchess"
+          printf '%s\n' "$RUNNER_TEMP" >> "$GITHUB_PATH"
+      - name: Play range
+        timeout-minutes: ${{ inputs.conditions == '3' && 38 || 88 }}
+        env:
+          MEASURED: ${{ needs.plan.outputs.measured }}
+          OPPONENT: ${{ needs.plan.outputs.opponent }}
+          FIRST: ${{ matrix.first }}
+          COUNT: ${{ matrix.count }}
+        run: strength/series --bench --concurrency 4 -- "$MEASURED" "$OPPONENT" "$CONDITIONS" "$FIRST" "$COUNT" "$RUNNER_TEMP/series"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
-          name: series-${{ github.job }}
+          name: series-${{ matrix.name }}
+          overwrite: true
           path: |
             ${{ runner.temp }}/series/games.pgn
-            ${{ runner.temp }}/series/games.jsonl
+            ${{ runner.temp }}/series/bench.json
             ${{ runner.temp }}/series/fastchess.log
 
-  repeat:
+  record:
+    needs: [plan, play]
+    if: always() && needs.plan.result == 'success'
     runs-on: ubuntu-latest
-    timeout-minutes: 60
-    outputs:
-      digest: ${{ steps.play.outputs.digest }}
-    steps: *play_steps
-
-  compare:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    needs: [first, repeat]
+    timeout-minutes: 10
     steps:
-      - name: Compare the digests
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install the PGN replay library
+        run: *install_python
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        continue-on-error: true
+        with:
+          pattern: series-*
+          path: ${{ runner.temp }}/ranges
+      - name: Check games and print the record
         env:
-          FIRST: ${{ needs.first.outputs.digest }}
-          REPEAT: ${{ needs.repeat.outputs.digest }}
-        run: |
-          lscpu | sed -n '/^Model name:/p'
-          if [[ ! "$FIRST" =~ ^[0-9a-f]{64}$ || "$FIRST" != "$REPEAT" ]]; then
-            printf 'Series digests differ or are missing. first=%s repeat=%s\n' "$FIRST" "$REPEAT" >&2
-            exit 1
-          fi
-          printf 'Series digest: %s\n' "$FIRST"
+          MEASURED: ${{ needs.plan.outputs.measured }}
+          OPPONENT: ${{ needs.plan.outputs.opponent }}
+          DATE: ${{ needs.plan.outputs.date }}
+          PLAY_RESULT: ${{ needs.play.result }}
+        run: strength/series join -- "$MEASURED" "$OPPONENT" "$CONDITIONS" "$DATE" "$PLAY_RESULT" "$RUNNER_TEMP/ranges" "$RUNNER_TEMP/joined"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: strength-record
+          overwrite: true
+          path: ${{ runner.temp }}/joined/

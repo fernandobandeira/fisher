@@ -7,20 +7,24 @@ const CHECKMATE: i32 = 100_000;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Score {
     Centipawns(i32),
-    Mate { plies: u8, winning: bool },
+    Mate {
+        plies: u8,
+        /// True when the root's side to move gives the checkmate.
+        winning: bool,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SearchResult {
-    pub chosen_move: Option<Move>,
+    pub best_move: Option<Move>,
     pub score: Score,
     pub nodes: u64,
     pub principal_variation: Vec<Move>,
 }
 
 /// Searches every legal move to the given depth in plies.
-/// At depth zero the result has no chosen move, even if legal moves exist.
-/// The score is from the starting side to move, and nodes exclude the starting position.
+/// At depth zero the result has no best move, even if legal moves exist.
+/// The score is from the root's side to move, and nodes exclude the root.
 #[must_use]
 pub fn minimax(position: &Position, depth: u8) -> SearchResult {
     let Ok(result) = search_depth(position, depth, &mut || Ok::<(), Infallible>(()));
@@ -52,7 +56,7 @@ fn search_depth<E>(
     search(position, 0, &mut nodes, &mut variations, before_node).map(|score| {
         let principal_variation = variations.into_iter().next().unwrap_or_default();
         SearchResult {
-            chosen_move: principal_variation.first().copied(),
+            best_move: principal_variation.first().copied(),
             score: mate_within_depth_or_centipawns(score, depth),
             nodes,
             principal_variation,

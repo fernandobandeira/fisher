@@ -38,8 +38,8 @@ fn forced_move(fen: &str) -> rules::Move {
     moves.into_iter().next().unwrap()
 }
 
-fn ended(fen: &str) -> Event<'static> {
-    Report(SearchReport::Ended(Some(forced_move(fen))))
+fn best_move_report(fen: &str) -> Event<'static> {
+    Report(SearchReport::BestMove(Some(forced_move(fen))))
 }
 
 fn finished_depth() -> Event<'static> {
@@ -67,23 +67,40 @@ fn rejects(rule: u8, name: &str, history: &[Event<'_>]) {
 
 #[test]
 fn rule_1_one_bestmove_per_go() {
-    accepts(&[POSITION_A, GO, ended(A), MOVE_A, STOP, QUIT]);
-    accepts(&[POSITION_A, GO, STOP, ended(A), MOVE_A, QUIT]);
+    accepts(&[POSITION_A, GO, best_move_report(A), MOVE_A, STOP, QUIT]);
+    accepts(&[POSITION_A, GO, STOP, best_move_report(A), MOVE_A, QUIT]);
     rejects(
         1,
         "duplicate bestmove",
-        &[POSITION_A, GO, ended(A), MOVE_A, STOP, MOVE_A, QUIT],
+        &[
+            POSITION_A,
+            GO,
+            best_move_report(A),
+            MOVE_A,
+            STOP,
+            MOVE_A,
+            QUIT,
+        ],
     );
     rejects(
         1,
-        "duplicate bestmove before the next search reports Ended",
-        &[POSITION_A, GO, ended(A), STOP, GO, MOVE_A, MOVE_A, QUIT],
+        "duplicate bestmove before the next search reports BestMove",
+        &[
+            POSITION_A,
+            GO,
+            best_move_report(A),
+            STOP,
+            GO,
+            MOVE_A,
+            MOVE_A,
+            QUIT,
+        ],
     );
     rejects(1, "bestmove without go", &[MOVE_A, QUIT]);
     rejects(
         1,
         "accepted go without bestmove",
-        &[POSITION_A, GO, ended(A)],
+        &[POSITION_A, GO, best_move_report(A)],
     );
 }
 
@@ -92,7 +109,7 @@ fn rule_2_infinite_holds_its_move() {
     accepts(&[
         POSITION_A,
         INFINITE,
-        ended(A),
+        best_move_report(A),
         READY,
         READY_OK,
         STOP,
@@ -102,7 +119,14 @@ fn rule_2_infinite_holds_its_move() {
     rejects(
         2,
         "early infinite bestmove",
-        &[POSITION_A, INFINITE, ended(A), MOVE_A, STOP, QUIT],
+        &[
+            POSITION_A,
+            INFINITE,
+            best_move_report(A),
+            MOVE_A,
+            STOP,
+            QUIT,
+        ],
     );
 
     let terminal = Command("position fen 7k/6Q1/5K2/8/8/8/8/8 b - - 0 1");
@@ -110,7 +134,7 @@ fn rule_2_infinite_holds_its_move() {
     accepts(&[
         terminal.clone(),
         INFINITE,
-        Report(SearchReport::Ended(None)),
+        Report(SearchReport::BestMove(None)),
         STOP,
         null.clone(),
         QUIT,
@@ -121,7 +145,7 @@ fn rule_2_infinite_holds_its_move() {
         &[
             terminal,
             INFINITE,
-            Report(SearchReport::Ended(None)),
+            Report(SearchReport::BestMove(None)),
             null,
             STOP,
             QUIT,
@@ -137,13 +161,13 @@ fn rule_3_finished_depths_precede_bestmove() {
         STOP,
         finished_depth(),
         INFO_A,
-        ended(A),
+        best_move_report(A),
         MOVE_A,
         QUIT,
     ]);
     rejects(
         3,
-        "stop released bestmove before Ended",
+        "stop released bestmove before BestMove",
         &[
             POSITION_A,
             INFINITE,
@@ -151,14 +175,22 @@ fn rule_3_finished_depths_precede_bestmove() {
             INFO_A,
             STOP,
             MOVE_A,
-            ended(A),
+            best_move_report(A),
             QUIT,
         ],
     );
     rejects(
         3,
         "late search info",
-        &[POSITION_A, GO, STOP, ended(A), MOVE_A, INFO_A, QUIT],
+        &[
+            POSITION_A,
+            GO,
+            STOP,
+            best_move_report(A),
+            MOVE_A,
+            INFO_A,
+            QUIT,
+        ],
     );
     rejects(
         3,
@@ -168,7 +200,7 @@ fn rule_3_finished_depths_precede_bestmove() {
             GO,
             finished_depth(),
             STOP,
-            ended(A),
+            best_move_report(A),
             MOVE_A,
             QUIT,
         ],
@@ -176,7 +208,15 @@ fn rule_3_finished_depths_precede_bestmove() {
     rejects(
         3,
         "info for an unfinished depth",
-        &[POSITION_A, GO, STOP, INFO_A, ended(A), MOVE_A, QUIT],
+        &[
+            POSITION_A,
+            GO,
+            STOP,
+            INFO_A,
+            best_move_report(A),
+            MOVE_A,
+            QUIT,
+        ],
     );
 
     // Both e-pawn moves are legal. D11 still requires the one from the
@@ -203,7 +243,7 @@ fn rule_3_finished_depths_precede_bestmove() {
             depth,
             info,
             STOP,
-            Report(SearchReport::Ended(pawn_move("e3"))),
+            Report(SearchReport::BestMove(pawn_move("e3"))),
             Response("bestmove e2e3\n"),
             QUIT,
         ],
@@ -233,16 +273,22 @@ fn rule_4_idle_stop_is_silent() {
 
 #[test]
 fn rule_5_bestmove_is_legal_in_the_accepted_position() {
-    accepts(&[POSITION_B, GO, ended(B), MOVE_B, QUIT]);
+    accepts(&[POSITION_B, GO, best_move_report(B), MOVE_B, QUIT]);
     rejects(
         5,
         "illegal bestmove",
-        &[POSITION_A, GO, ended(A), MOVE_B, QUIT],
+        &[POSITION_A, GO, best_move_report(A), MOVE_B, QUIT],
     );
     rejects(
         5,
         "0000 with a legal move",
-        &[POSITION_A, GO, ended(A), Response("bestmove 0000\n"), QUIT],
+        &[
+            POSITION_A,
+            GO,
+            best_move_report(A),
+            Response("bestmove 0000\n"),
+            QUIT,
+        ],
     );
 }
 
@@ -254,14 +300,22 @@ fn rule_6_isready_does_not_end_a_search() {
         READY,
         READY_OK,
         STOP,
-        ended(A),
+        best_move_report(A),
         MOVE_A,
         QUIT,
     ]);
     rejects(
         6,
         "missing readyok during search",
-        &[POSITION_A, INFINITE, READY, STOP, ended(A), MOVE_A, QUIT],
+        &[
+            POSITION_A,
+            INFINITE,
+            READY,
+            STOP,
+            best_move_report(A),
+            MOVE_A,
+            QUIT,
+        ],
     );
     rejects(
         6,
@@ -270,7 +324,7 @@ fn rule_6_isready_does_not_end_a_search() {
             POSITION_A,
             INFINITE,
             READY,
-            ended(A),
+            best_move_report(A),
             MOVE_A,
             READY_OK,
             QUIT,
@@ -284,7 +338,7 @@ fn rule_6_isready_does_not_end_a_search() {
             INFINITE,
             READY,
             READY_OK,
-            ended(A),
+            best_move_report(A),
             MOVE_A,
             QUIT,
         ],
@@ -304,7 +358,7 @@ fn rule_7_earlier_command_responses_precede_readyok() {
         finished_depth(),
         INFO_A,
         STOP,
-        ended(A),
+        best_move_report(A),
         MOVE_A,
         QUIT,
     ]);
@@ -318,7 +372,7 @@ fn rule_7_earlier_command_responses_precede_readyok() {
         READY,
         READY_OK,
         STOP,
-        ended(A),
+        best_move_report(A),
         MOVE_A,
         QUIT,
     ]);
@@ -333,7 +387,7 @@ fn rule_7_earlier_command_responses_precede_readyok() {
             READY_OK,
             REJECT_POSITION,
             STOP,
-            ended(A),
+            best_move_report(A),
             MOVE_A,
             QUIT,
         ],
@@ -348,24 +402,24 @@ fn rule_8_reject_replacements_only_before_stop() {
             INFINITE,
             command.clone(),
             diagnostic.clone(),
-            ended(A),
+            best_move_report(A),
             STOP,
             MOVE_A,
             GO,
-            ended(A),
+            best_move_report(A),
             MOVE_A,
             QUIT,
         ]);
         accepts(&[
             POSITION_A,
             INFINITE,
-            ended(A),
+            best_move_report(A),
             command,
             diagnostic,
             STOP,
             MOVE_A,
             GO,
-            ended(A),
+            best_move_report(A),
             MOVE_A,
             QUIT,
         ]);
@@ -377,18 +431,18 @@ fn rule_8_reject_replacements_only_before_stop() {
         REJECT_POSITION,
         GO,
         REJECT_GO,
-        ended(A),
+        best_move_report(A),
         MOVE_A,
         QUIT,
     ]);
     accepts(&[
         POSITION_A,
         GO,
-        ended(A),
+        best_move_report(A),
         POSITION_B,
         GO,
         MOVE_A,
-        ended(B),
+        best_move_report(B),
         MOVE_B,
         QUIT,
     ]);
@@ -398,21 +452,21 @@ fn rule_8_reject_replacements_only_before_stop() {
         STOP,
         POSITION_B,
         GO,
-        ended(A),
+        best_move_report(A),
         MOVE_A,
-        ended(B),
+        best_move_report(B),
         MOVE_B,
         QUIT,
     ]);
     accepts(&[
         POSITION_A,
         INFINITE,
-        ended(A),
+        best_move_report(A),
         STOP,
         POSITION_B,
         GO,
         MOVE_A,
-        ended(B),
+        best_move_report(B),
         MOVE_B,
         QUIT,
     ]);
@@ -425,11 +479,11 @@ fn rule_8_reject_replacements_only_before_stop() {
             INFINITE,
             POSITION_B,
             REJECT_POSITION,
-            ended(A),
+            best_move_report(A),
             STOP,
             MOVE_A,
             GO,
-            ended(B),
+            best_move_report(B),
             MOVE_B,
             QUIT,
         ],
@@ -442,10 +496,10 @@ fn rule_8_reject_replacements_only_before_stop() {
             INFINITE,
             GO,
             REJECT_GO,
-            ended(A),
+            best_move_report(A),
             STOP,
             MOVE_A,
-            ended(A),
+            best_move_report(A),
             MOVE_A,
             QUIT,
         ],
@@ -461,7 +515,7 @@ fn rule_8_reject_replacements_only_before_stop() {
             GO,
             REJECT_POSITION,
             REJECT_GO,
-            ended(A),
+            best_move_report(A),
             MOVE_A,
             QUIT,
         ],
@@ -475,7 +529,7 @@ fn rule_8_reject_replacements_only_before_stop() {
             STOP,
             POSITION_B,
             GO,
-            ended(A),
+            best_move_report(A),
             MOVE_A,
             REJECT_GO,
             QUIT,
@@ -486,21 +540,47 @@ fn rule_8_reject_replacements_only_before_stop() {
 #[test]
 fn rule_9_quit_and_end_of_input_release_the_move_then_exit() {
     for exit in [QUIT, EndOfInput] {
-        accepts(&[POSITION_A, INFINITE, ended(A), exit.clone(), MOVE_A]);
-        accepts(&[POSITION_A, INFINITE, exit.clone(), ended(A), MOVE_A]);
-        accepts(&[POSITION_A, GO, exit.clone(), ended(A), MOVE_A]);
-        accepts(&[POSITION_A, GO, ended(A), exit.clone(), MOVE_A]);
-        accepts(&[POSITION_A, GO, STOP, exit.clone(), ended(A), MOVE_A]);
+        accepts(&[
+            POSITION_A,
+            INFINITE,
+            best_move_report(A),
+            exit.clone(),
+            MOVE_A,
+        ]);
+        accepts(&[
+            POSITION_A,
+            INFINITE,
+            exit.clone(),
+            best_move_report(A),
+            MOVE_A,
+        ]);
+        accepts(&[POSITION_A, GO, exit.clone(), best_move_report(A), MOVE_A]);
+        accepts(&[POSITION_A, GO, best_move_report(A), exit.clone(), MOVE_A]);
+        accepts(&[
+            POSITION_A,
+            GO,
+            STOP,
+            exit.clone(),
+            best_move_report(A),
+            MOVE_A,
+        ]);
         accepts(std::slice::from_ref(&exit));
         rejects(
             9,
             "exit omitted bestmove",
-            &[POSITION_A, GO, exit.clone(), ended(A)],
+            &[POSITION_A, GO, exit.clone(), best_move_report(A)],
         );
         rejects(
             9,
             "output after exit bestmove",
-            &[POSITION_A, INFINITE, ended(A), exit, MOVE_A, READY_OK],
+            &[
+                POSITION_A,
+                INFINITE,
+                best_move_report(A),
+                exit,
+                MOVE_A,
+                READY_OK,
+            ],
         );
     }
 }
@@ -524,7 +604,7 @@ fn rule_10_responses_are_whole_lines() {
             POSITION_A,
             GO,
             READY,
-            ended(A),
+            best_move_report(A),
             Response("bestmove h8g8readyok\n"),
             QUIT,
         ],
@@ -539,9 +619,24 @@ fn rule_10_responses_are_whole_lines() {
 #[test]
 fn commands_after_exit_are_ignored() {
     for exit in [QUIT, EndOfInput] {
-        accepts(&[POSITION_A, GO, ended(A), exit.clone(), READY, MOVE_A]);
+        accepts(&[
+            POSITION_A,
+            GO,
+            best_move_report(A),
+            exit.clone(),
+            READY,
+            MOVE_A,
+        ]);
         for go in [GO, INFINITE] {
-            accepts(&[POSITION_A, go, STOP, exit.clone(), READY, ended(A), MOVE_A]);
+            accepts(&[
+                POSITION_A,
+                go,
+                STOP,
+                exit.clone(),
+                READY,
+                best_move_report(A),
+                MOVE_A,
+            ]);
         }
         accepts(&[exit, READY, GO, POSITION_B]);
     }
@@ -575,28 +670,60 @@ fn invalid_idle_position_is_reported() {
 
 #[test]
 fn readiness_on_either_side_of_finite_bestmove() {
-    accepts(&[POSITION_A, GO, ended(A), READY, READY_OK, MOVE_A, QUIT]);
-    accepts(&[POSITION_A, GO, ended(A), READY, MOVE_A, READY_OK, QUIT]);
+    accepts(&[
+        POSITION_A,
+        GO,
+        best_move_report(A),
+        READY,
+        READY_OK,
+        MOVE_A,
+        QUIT,
+    ]);
+    accepts(&[
+        POSITION_A,
+        GO,
+        best_move_report(A),
+        READY,
+        MOVE_A,
+        READY_OK,
+        QUIT,
+    ]);
     rejects(
         6,
-        "isready before finite Ended must be answered before bestmove",
-        &[POSITION_A, GO, READY, ended(A), MOVE_A, READY_OK, QUIT],
+        "isready before finite BestMove must be answered before bestmove",
+        &[
+            POSITION_A,
+            GO,
+            READY,
+            best_move_report(A),
+            MOVE_A,
+            READY_OK,
+            QUIT,
+        ],
     );
 }
 
 #[test]
 fn replacements_on_either_side_of_finite_bestmove() {
     for (command, diagnostic) in [(POSITION_B, REJECT_POSITION), (GO, REJECT_GO)] {
-        accepts(&[POSITION_A, GO, ended(A), command, diagnostic, MOVE_A, QUIT]);
+        accepts(&[
+            POSITION_A,
+            GO,
+            best_move_report(A),
+            command,
+            diagnostic,
+            MOVE_A,
+            QUIT,
+        ]);
     }
     accepts(&[
         POSITION_A,
         GO,
-        ended(A),
+        best_move_report(A),
         MOVE_A,
         POSITION_B,
         GO,
-        ended(B),
+        best_move_report(B),
         MOVE_B,
         QUIT,
     ]);
@@ -621,7 +748,7 @@ fn fen_fields_end_before_the_move_list() {
         accepts(&[
             Command(position),
             GO,
-            Report(SearchReport::Ended(movement)),
+            Report(SearchReport::BestMove(movement)),
             Response("bestmove e7e5\n"),
             QUIT,
         ]);
@@ -642,7 +769,7 @@ fn empty_principal_variation_omits_pv() {
         GO,
         depth.clone(),
         Response("info depth 1 multipv 1 score cp -900 nodes 1 nps 1000 time 1\n"),
-        ended(A),
+        best_move_report(A),
         MOVE_A,
         QUIT,
     ]);
@@ -654,7 +781,7 @@ fn empty_principal_variation_omits_pv() {
             GO,
             depth,
             Response("info depth 1 multipv 1 score cp -900 nodes 1 nps 1000 time 1 pv \n"),
-            ended(A),
+            best_move_report(A),
             MOVE_A,
             QUIT,
         ],
@@ -666,11 +793,11 @@ fn command_responses_precede_bestmove() {
     for (rule, name, history) in [
         (
             8,
-            "B1: late rejection for position recorded after Ended",
+            "B1: late rejection for position recorded after BestMove",
             vec![
                 POSITION_A,
                 GO,
-                ended(A),
+                best_move_report(A),
                 POSITION_B,
                 MOVE_A,
                 REJECT_POSITION,
@@ -683,7 +810,7 @@ fn command_responses_precede_bestmove() {
             vec![
                 POSITION_A,
                 GO,
-                ended(A),
+                best_move_report(A),
                 MOVE_A,
                 POSITION_B,
                 REJECT_POSITION,
@@ -692,12 +819,12 @@ fn command_responses_precede_bestmove() {
         ),
         (
             8,
-            "B3: late rejection for position recorded before Ended",
+            "B3: late rejection for position recorded before BestMove",
             vec![
                 POSITION_A,
                 GO,
                 POSITION_B,
-                ended(A),
+                best_move_report(A),
                 MOVE_A,
                 REJECT_POSITION,
                 QUIT,
@@ -711,7 +838,7 @@ fn command_responses_precede_bestmove() {
                 INFINITE,
                 POSITION_B,
                 STOP,
-                ended(A),
+                best_move_report(A),
                 MOVE_A,
                 REJECT_POSITION,
                 QUIT,
@@ -725,7 +852,7 @@ fn command_responses_precede_bestmove() {
                 INFINITE,
                 READY,
                 STOP,
-                ended(A),
+                best_move_report(A),
                 MOVE_A,
                 READY_OK,
                 QUIT,
@@ -739,7 +866,7 @@ fn command_responses_precede_bestmove() {
                 INFINITE,
                 GO,
                 STOP,
-                ended(A),
+                best_move_report(A),
                 MOVE_A,
                 REJECT_GO,
                 QUIT,
@@ -751,7 +878,7 @@ fn command_responses_precede_bestmove() {
             vec![
                 POSITION_A,
                 GO,
-                ended(A),
+                best_move_report(A),
                 INVALID_POSITION,
                 MOVE_A,
                 REJECT_POSITION,
@@ -770,7 +897,7 @@ fn command_responses_precede_bestmove() {
                 INFINITE,
                 READY,
                 exit,
-                ended(A),
+                best_move_report(A),
                 MOVE_A,
                 READY_OK,
             ],
@@ -794,7 +921,7 @@ fn scripted_input_drives_the_session_entry() -> io::Result<()> {
         elapsed: Duration::from_millis(1),
         principal_variation: vec![forced_move(A)],
     };
-    let chosen = depth.principal_variation.first().copied();
+    let best_move = depth.principal_variation.first().copied();
     let mut output = Vec::new();
     std::thread::scope(|scope| -> io::Result<()> {
         let (controller, commands_for_search) = std::sync::mpsc::channel();
@@ -813,7 +940,7 @@ fn scripted_input_drives_the_session_entry() -> io::Result<()> {
             commands.send_line("isready").unwrap();
             report(SearchReport::FinishedDepth(depth.clone()));
             commands.send_line("stop").unwrap();
-            report(SearchReport::Ended(chosen));
+            report(SearchReport::BestMove(best_move));
             commands.send_line("quit").unwrap();
         })?;
         feeder.join().unwrap()
@@ -826,7 +953,7 @@ fn scripted_input_drives_the_session_entry() -> io::Result<()> {
         READY,
         finished_depth(),
         STOP,
-        ended(A),
+        best_move_report(A),
         QUIT,
     ];
     history.extend(text.split_inclusive('\n').map(Response));
@@ -877,7 +1004,7 @@ mod model {
     #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
     enum ReportKind {
         Depth,
-        Ended,
+        BestMove,
     }
 
     #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -928,7 +1055,7 @@ mod model {
         infinite: bool,
         phase: Phase,
         depth_reported: bool,
-        ended_reported: bool,
+        best_move_reported: bool,
     }
 
     #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
@@ -1001,7 +1128,7 @@ mod model {
             match message {
                 Message::Input(command) => self.command(engine, command),
                 Message::Report(ReportKind::Depth, root) => self.write(Line::Info(root)),
-                Message::Report(ReportKind::Ended, _) => {
+                Message::Report(ReportKind::BestMove, _) => {
                     let Some(mut work) = self.work else {
                         unreachable!()
                     };
@@ -1075,7 +1202,7 @@ mod model {
                         infinite: command == Action::Infinite,
                         phase: Phase::Working,
                         depth_reported: false,
-                        ended_reported: false,
+                        best_move_reported: false,
                     });
                 }
                 Action::Ready => self.write(Line::Ready),
@@ -1102,7 +1229,7 @@ mod model {
                 | Action::Ready => {}
             }
             self.stop_during_search |=
-                command == Action::Stop && self.work.is_some_and(|work| !work.ended_reported);
+                command == Action::Stop && self.work.is_some_and(|work| !work.best_move_reported);
             self.channel.push_back(Message::Input(command));
         }
 
@@ -1112,7 +1239,7 @@ mod model {
             self.worker.push_back(message);
             match kind {
                 ReportKind::Depth => work.depth_reported = true,
-                ReportKind::Ended => work.ended_reported = true,
+                ReportKind::BestMove => work.best_move_reported = true,
             }
             self.work = Some(work);
         }
@@ -1178,10 +1305,10 @@ mod model {
     ) {
         if !schedule.exited
             && (schedule.actions + 1 < limit || schedule.input != InputState::Open)
-            && let Some(work) = schedule.work.filter(|work| !work.ended_reported)
+            && let Some(work) = schedule.work.filter(|work| !work.best_move_reported)
         {
-            for kind in [ReportKind::Depth, ReportKind::Ended] {
-                if kind == ReportKind::Ended || !work.depth_reported {
+            for kind in [ReportKind::Depth, ReportKind::BestMove] {
+                if kind == ReportKind::BestMove || !work.depth_reported {
                     let mut next = schedule.clone();
                     next.record_report(kind, work);
                     explore(engine, next, seen, histories);
@@ -1196,7 +1323,7 @@ mod model {
         seen: &mut HashSet<Schedule>,
         histories: &mut Histories,
     ) {
-        // Delivery is unobservable. Delivering Ended just before or just
+        // Delivery is unobservable. Delivering BestMove just before or just
         // after recording a command enumerates both channel orders. Commands
         // already recorded when the worker reports are already enqueued.
         if !schedule.worker.is_empty() {
@@ -1253,7 +1380,7 @@ mod model {
                         elapsed: Duration::from_millis(1),
                         principal_variation: vec![movement],
                     })),
-                    ReportKind::Ended => Report(SearchReport::Ended(Some(movement))),
+                    ReportKind::BestMove => Report(SearchReport::BestMove(Some(movement))),
                 }
             }
             Observation::Line(line) => match line {
@@ -1306,7 +1433,7 @@ mod model {
         ] {
             let generated = generate(engine);
             // Some schedules never exercise the fault or are observationally
-            // identical to a permitted handling order after finite Ended.
+            // identical to a permitted handling order after finite BestMove.
             let violations = generated.difference(&correct);
             assert!(
                 violations.clone().next().is_some(),

@@ -11,7 +11,7 @@ fn reports_for(fen: &str) -> Result<Vec<SearchReport>, Box<dyn Error>> {
     let request = SearchRequest {
         position: Position::from_fen(fen)?,
         limits: Limits::default(),
-        stop: Arc::new(AtomicBool::new(false)),
+        interrupt: Arc::new(AtomicBool::new(false)),
         started: Instant::now(),
     };
     let mut reports = Vec::new();
@@ -44,7 +44,7 @@ fn reports_terminal_positions_without_searching_a_depth() -> Result<(), Box<dyn 
                         principal_variation,
                         ..
                     }),
-                    SearchReport::Ended(None),
+                    SearchReport::BestMove(None),
                 ] if *actual == score && principal_variation.is_empty()
             ),
             "{fen}: {reports:?}"
@@ -54,12 +54,12 @@ fn reports_terminal_positions_without_searching_a_depth() -> Result<(), Box<dyn 
 }
 
 #[test]
-fn reports_the_finished_depth_before_ending_the_search() -> Result<(), Box<dyn Error>> {
+fn reports_the_finished_depth_before_the_best_move() -> Result<(), Box<dyn Error>> {
     // The python-chess counts and the sole legal move are recorded in new-game.uci.
     let reports = reports_for("7k/8/5K1Q/8/8/8/8/8 b - - 0 1")?;
     let [
         SearchReport::FinishedDepth(report),
-        SearchReport::Ended(Some(chosen)),
+        SearchReport::BestMove(Some(best_move)),
     ] = reports.as_slice()
     else {
         return Err(format!("unexpected reports: {reports:?}").into());
@@ -73,8 +73,8 @@ fn reports_the_finished_depth_before_ending_the_search() -> Result<(), Box<dyn E
             winning: false
         }
     );
-    assert_eq!(format!("{}{}", chosen.from(), chosen.to()), "h8g8");
-    assert_eq!(report.principal_variation.first(), Some(chosen));
+    assert_eq!(format!("{}{}", best_move.from(), best_move.to()), "h8g8");
+    assert_eq!(report.principal_variation.first(), Some(best_move));
     Ok(())
 }
 
@@ -83,11 +83,11 @@ fn interrupt_before_the_root_of_a_terminal_position() -> Result<(), Box<dyn std:
     let request = SearchRequest {
         position: Position::from_fen("7k/6Q1/5K2/8/8/8/8/8 b - - 0 1")?,
         limits: Limits::default(),
-        stop: Arc::new(AtomicBool::new(true)),
+        interrupt: Arc::new(AtomicBool::new(true)),
         started: Instant::now(),
     };
     let mut reports = Vec::new();
     search(request, &mut |report| reports.push(report));
-    assert_eq!(reports, [SearchReport::Ended(None)]);
+    assert_eq!(reports, [SearchReport::BestMove(None)]);
     Ok(())
 }

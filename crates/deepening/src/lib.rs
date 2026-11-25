@@ -30,7 +30,7 @@ pub struct Limits {
 pub struct SearchRequest {
     pub position: Position,
     pub limits: Limits,
-    pub stop: Arc<AtomicBool>,
+    pub interrupt: Arc<AtomicBool>,
     pub started: Instant,
 }
 
@@ -49,19 +49,19 @@ pub struct FinishedDepth {
 /// Reports from the work of a search, in the order the session consumes them.
 ///
 /// A search sends zero or more `FinishedDepth` reports in increasing depth,
-/// then exactly one `Ended`, and nothing after it.
+/// then exactly one `BestMove`, and nothing after it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SearchReport {
     FinishedDepth(FinishedDepth),
-    /// The move to send as `bestmove`: the chosen move of the last finished
+    /// The move to send as `bestmove`: the best move of the last finished
     /// depth, or the first legal move when no depth finished. `None` only when
     /// the root has no legal move.
-    Ended(Option<Move>),
+    BestMove(Option<Move>),
 }
 
-/// Reports each finished depth, then `Ended` with the move to send.
+/// Reports each finished depth, then `BestMove` with the move to send.
 /// If interrupted before finishing a depth, the move is the first legal move.
-/// A finished search of a terminal root reports depth 0 then `Ended(None)`.
+/// A finished search of a terminal root reports depth 0 then `BestMove(None)`.
 #[expect(
     clippy::needless_pass_by_value,
     reason = "The worker owns the request and the current fixed-depth search only borrows it"
@@ -71,7 +71,7 @@ pub fn search(request: SearchRequest, report: &mut dyn FnMut(SearchReport)) {
 }
 
 fn is_interrupted(request: &SearchRequest) -> bool {
-    request.stop.load(Ordering::Relaxed)
+    request.interrupt.load(Ordering::Relaxed)
 }
 
 fn search_with_clock(
@@ -83,7 +83,7 @@ fn search_with_clock(
     // TODO(fisher-5sg.4): Deepen under the limits of the go.
     // TODO(fisher-5sg.10): Use the clocks and moves to go to set the time limit.
     const DEPTH: u8 = 4;
-    let result = if request.stop.load(Ordering::Relaxed) {
+    let result = if request.interrupt.load(Ordering::Relaxed) {
         None
     } else {
         minimax_until_interrupted(&request.position, DEPTH, || {
@@ -92,12 +92,12 @@ fn search_with_clock(
         })
     };
     let Some(result) = result else {
-        report(SearchReport::Ended(
+        report(SearchReport::BestMove(
             request.position.legal_moves().into_iter().next(),
         ));
         return;
     };
-    let (depth, elapsed) = if result.chosen_move.is_some() {
+    let (depth, elapsed) = if result.best_move.is_some() {
         (DEPTH, now().duration_since(request.started))
     } else {
         (0, Duration::ZERO)
@@ -109,7 +109,7 @@ fn search_with_clock(
         elapsed,
         principal_variation: result.principal_variation,
     }));
-    report(SearchReport::Ended(result.chosen_move));
+    report(SearchReport::BestMove(result.best_move));
 }
 
 #[cfg(test)]

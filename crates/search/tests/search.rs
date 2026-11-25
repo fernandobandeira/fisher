@@ -44,7 +44,7 @@ fn check_mate_in_two(
             record.id
         );
         assert_eq!(
-            result.chosen_move.map(move_text).as_deref(),
+            result.best_move.map(move_text).as_deref(),
             Some(record.published_move),
             "{}",
             record.id
@@ -80,9 +80,9 @@ fn mate_on_the_horizon_scores_as_material() -> Result<(), Box<dyn Error>> {
 fn stalemate_on_the_horizon_scores_as_material() -> Result<(), Box<dyn Error>> {
     let fen = "k7/8/1p6/1Q6/8/8/8/7K w - - 0 1";
     let position: Chess = reference_position(fen)?;
-    let chosen = reference::minimax(&position, 1).chosen_move;
-    let chosen = chosen.ok_or("reference found no legal move")?;
-    assert!(position.clone().play(chosen)?.is_stalemate());
+    let best_move = reference::minimax(&position, 1).best_move;
+    let best_move = best_move.ok_or("reference found no legal move")?;
+    assert!(position.clone().play(best_move)?.is_stalemate());
     assert_matches_reference(&position, 1).map(drop)
 }
 
@@ -92,7 +92,7 @@ fn equal_scores_keep_the_first_legal_move() {
     // None of the starting position's 20 legal moves changes the material.
     let first = position.legal_moves().into_iter().next();
     let result = minimax(&position, 1);
-    assert_eq!(result.chosen_move, first);
+    assert_eq!(result.best_move, first);
     assert_eq!(result.score, Score::Centipawns(0));
     assert_eq!(result.nodes, 20);
 }
@@ -148,7 +148,7 @@ fn assert_matches_reference(position: &Chess, depth: u8) -> Result<SearchResult,
     assert_eq!(result.nodes, expected.nodes, "{fen}");
     assert_eq!(
         result.principal_variation.first().copied(),
-        result.chosen_move,
+        result.best_move,
         "{fen}"
     );
 

@@ -32,7 +32,11 @@ enum Response<'a> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SearchScore {
     Centipawns(i32),
-    Mate { plies: u8, winning: bool },
+    Mate {
+        plies: u8,
+        /// True when the root's side to move gives the checkmate.
+        winning: bool,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

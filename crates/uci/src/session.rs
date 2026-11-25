@@ -25,13 +25,14 @@ use crate::{
 /// Runs a UCI session until quit, end of input, or an I/O error.
 ///
 /// The reader and search thread send events into one ordered stream. Only the
-/// command handler writes output. Each search must send one `SearchReport::Ended`
+/// command handler writes output. Each search must send one `SearchReport::BestMove`
 /// after its last finished depth and return.
 ///
 /// # Errors
 ///
 /// Returns an error if a thread cannot start, the search dies or returns
-/// without ending, reports after ending, input cannot be read, or output cannot be written or flushed.
+/// without a best move, the search reports after its best move, input cannot
+/// be read, or output cannot be written or flushed.
 pub fn run_session(
     input: impl Read + Send + 'static,
     mut output: impl Write,
@@ -92,27 +93,29 @@ fn run_searches(
 
 enum SearchProgress {
     Running,
-    Ended,
-    ReportedAfterEnd,
+    BestMoveReported,
+    ReportedAfterBestMove,
 }
 
 impl SearchProgress {
     fn send(&mut self, report: SearchReport, events: &mpsc::Sender<Event>) {
         if !matches!(self, Self::Running) {
-            *self = Self::ReportedAfterEnd;
+            *self = Self::ReportedAfterBestMove;
             return;
         }
-        if matches!(report, SearchReport::Ended(_)) {
-            *self = Self::Ended;
+        if matches!(report, SearchReport::BestMove(_)) {
+            *self = Self::BestMoveReported;
         }
         drop(events.send(Event::Report(report)));
     }
 
     fn finish(self) -> io::Result<()> {
         match self {
-            Self::Running => Err(io::Error::other("search returned without Ended")),
-            Self::Ended => Ok(()),
-            Self::ReportedAfterEnd => Err(io::Error::other("search reported after Ended")),
+            Self::Running => Err(io::Error::other("search returned without a best move")),
+            Self::BestMoveReported => Ok(()),
+            Self::ReportedAfterBestMove => {
+                Err(io::Error::other("search reported after its best move"))
+            }
         }
     }
 }
@@ -120,7 +123,7 @@ impl SearchProgress {
 enum Active {
     Idle,
     Searching {
-        stop: Arc<AtomicBool>,
+        interrupt: Arc<AtomicBool>,
         infinite: bool,
     },
     Held(UciMove),
@@ -128,8 +131,8 @@ enum Active {
 
 impl Active {
     fn interrupt(&self) {
-        if let Self::Searching { stop, .. } = self {
-            stop.store(true, Ordering::Relaxed);
+        if let Self::Searching { interrupt, .. } = self {
+            interrupt.store(true, Ordering::Relaxed);
         }
     }
 }
@@ -221,7 +224,7 @@ impl Session {
         }
         let request = search_request(self.position, parameters);
         self.active = Active::Searching {
-            stop: Arc::clone(&request.stop),
+            interrupt: Arc::clone(&request.interrupt),
             infinite: parameters.infinite,
         };
         self.requests.send(request).map_err(io::Error::other)
@@ -230,14 +233,14 @@ impl Session {
     fn report(&mut self, output: &mut dyn Write, report: SearchReport) -> io::Result<()> {
         match report {
             SearchReport::FinishedDepth(depth) => send_search_info(output, &depth),
-            SearchReport::Ended(chosen) => {
-                let chosen = chosen.map_or(UciMove::Null, UciMove::from);
+            SearchReport::BestMove(best_move) => {
+                let best_move = best_move.map_or(UciMove::Null, UciMove::from);
                 if matches!(self.active, Active::Searching { infinite: true, .. }) {
-                    self.active = Active::Held(chosen);
+                    self.active = Active::Held(best_move);
                     Ok(())
                 } else {
                     self.active = Active::Idle;
-                    send(output, &Response::BestMove(chosen))
+                    send(output, &Response::BestMove(best_move))
                 }
             }
         }
@@ -262,8 +265,8 @@ impl Session {
                 event @ (Event::Line(_) | Event::EndOfInput(_)) => self.deferred.push_back(event),
             }
         }
-        if let Active::Held(chosen) = std::mem::replace(&mut self.active, Active::Idle) {
-            send(output, &Response::BestMove(chosen))?;
+        if let Active::Held(best_move) = std::mem::replace(&mut self.active, Active::Idle) {
+            send(output, &Response::BestMove(best_move))?;
         }
         Ok(())
     }
@@ -285,7 +288,7 @@ fn search_request(position: Position, parameters: &GoParameters) -> SearchReques
             binc: parameters.binc.map(Duration::from_millis),
             movestogo: parameters.movestogo,
         },
-        stop: Arc::new(AtomicBool::new(false)),
+        interrupt: Arc::new(AtomicBool::new(false)),
         started: Instant::now(),
     }
 }

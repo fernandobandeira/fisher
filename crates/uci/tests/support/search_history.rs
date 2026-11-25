@@ -2,7 +2,7 @@
 //! Source: April 2006 UCI, <https://backscattering.de/chess/uci/>.
 //! Record commands in input order, reports in report order, and responses
 //! at the writer, including each newline. Finish recording when the session
-//! returns successfully. Before stepping a scripted finished depth or Ended,
+//! returns successfully. Before stepping a scripted finished depth or `BestMove`,
 //! wait until every earlier recorded command has reached the ordered command
 //! channel. Use `scripted_input` to wait for the reader to ask for the next
 //! line, after it has enqueued the one just sent. That acknowledgement holds
@@ -12,11 +12,11 @@
 //! acknowledges before sending. Record a `Report` event before passing that
 //! report to the session's callback, so its `info` line or `bestmove` cannot
 //! be recorded ahead of it.
-//! Commands recorded before Ended are handled before it, subject to the stop
-//! barrier. After finite Ended, commands may be handled on either side of
-//! bestmove in input order (fisher-8ie rules 6–8).
+//! Commands recorded before `BestMove` are handled before it, subject to the
+//! stop barrier. After a finite search reports `BestMove`, commands may be
+//! handled on either side of `bestmove` in input order (fisher-8ie rules 6–8).
 //! This checker reads fisher-2aj.5's "until that search has reported" and
-//! the `SearchReport` seam as requiring `Ended` before `bestmove`. Infinite work
+//! the `SearchReport` seam as requiring `BestMove` before `bestmove`. Infinite work
 //! also needs stop or exit (rule 2 and D25).
 //! Commands use ordinary UCI spelling. A report belongs to the one
 //! accepted search in progress.
@@ -124,7 +124,7 @@ struct Search {
     infinite: bool,
     stopped: bool,
     readiness_requested: bool,
-    ended: Option<String>,
+    best_move: Option<String>,
     info: VecDeque<String>,
     last_move: Option<String>,
 }
@@ -223,10 +223,9 @@ impl<'a> Session<'a> {
     fn can_wait_for_bestmove(&self) -> bool {
         !self.exiting
             && self.deferred.is_empty()
-            && self
-                .search
-                .as_ref()
-                .is_some_and(|search| !search.stopped && !search.infinite && search.ended.is_some())
+            && self.search.as_ref().is_some_and(|search| {
+                !search.stopped && !search.infinite && search.best_move.is_some()
+            })
     }
 
     fn receive(&mut self, command: &'a str) {
@@ -253,7 +252,7 @@ impl<'a> Session<'a> {
                     infinite: words.any(|word| word == "infinite"),
                     stopped: false,
                     readiness_requested: false,
-                    ended: None,
+                    best_move: None,
                     info: VecDeque::new(),
                     last_move: None,
                 });
@@ -302,16 +301,20 @@ impl<'a> Session<'a> {
         let Some(search) = &mut self.search else {
             return Err((8, "a search reported without an accepted go"));
         };
-        if search.ended.is_some() {
-            return Err((3, "a search reported after Ended"));
+        if search.best_move.is_some() {
+            return Err((3, "a search reported after BestMove"));
         }
         match report {
             SearchReport::FinishedDepth(depth) => {
                 search.info.push_back(info(depth));
                 search.last_move = depth.principal_variation.first().map(movement);
             }
-            SearchReport::Ended(chosen) => {
-                search.ended = Some(chosen.as_ref().map_or_else(|| "0000".to_owned(), movement));
+            SearchReport::BestMove(best_move) => {
+                search.best_move = Some(
+                    best_move
+                        .as_ref()
+                        .map_or_else(|| "0000".to_owned(), movement),
+                );
             }
         }
         Ok(())
@@ -409,12 +412,12 @@ impl<'a> Session<'a> {
             .search
             .as_ref()
             .ok_or((1, "bestmove without an outstanding go"))?;
-        // Once the next search reports Ended with the same move, the
+        // Once the next search reports `BestMove` with the same move, the
         // history cannot tell which search produced a matching bestmove.
-        if search.ended.is_none() && self.last_bestmove.as_deref() == Some(text) {
+        if search.best_move.is_none() && self.last_bestmove.as_deref() == Some(text) {
             return Err((
                 1,
-                "duplicate bestmove before the next search reported Ended",
+                "duplicate bestmove before the next search reported BestMove",
             ));
         }
         if search.infinite && !search.stopped && !self.exiting {
@@ -447,8 +450,8 @@ impl<'a> Session<'a> {
         if !search.info.is_empty() {
             return Err((3, "bestmove preceded info for a finished depth"));
         }
-        if search.ended.as_deref() != Some(text) {
-            return Err((3, "bestmove did not match the search's Ended report"));
+        if search.best_move.as_deref() != Some(text) {
+            return Err((3, "bestmove did not match the search's BestMove report"));
         }
         if (search.stopped || self.exiting)
             && search

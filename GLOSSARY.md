@@ -91,7 +91,7 @@ _Avoid_: fifty-move counter, draw counter
 ### Search
 
 **Bench signature**:
-The total node count of a fixed-depth search over a fixed list of positions, compared between revisions to show whether a change altered what the search visits.
+The total node count of a fixed-depth search over a fixed list of positions, compared between revisions to show whether a change altered which nodes the search reaches.
 _Avoid_: benchmark, bench number
 
 **Ply**:
@@ -106,6 +106,10 @@ _Avoid_: starting position (which names the position a game of chess starts from
 A legal move of the root. The search chooses one, and every variation it reports starts with one.
 _Avoid_: first move, candidate move, top-level move
 
+**Best move**:
+The root move a search chooses, which fisher sends as `bestmove`. A held move is a best move not yet sent.
+_Avoid_: chosen move, selected move, top move
+
 **Horizon**:
 The ply at which a search stops playing moves. A position there is scored as it stands, without asking whether it has a legal move.
 _Avoid_: frontier, search edge, leaf depth
@@ -117,6 +121,10 @@ _Avoid_: rating, assessment
 **Mate distance**:
 The number of plies from the root to a checkmate the search has found. UCI counts it in moves instead, and gives it a minus sign when the root's side to move is the one checkmated: `mate 2` is three plies and `mate -1` is two.
 _Avoid_: mate in N (without saying plies or moves), mate depth
+
+**Minimax**:
+The score and principal variation found by playing every legal move to a fixed depth and keeping, at each position, the move best for its side to move. A cutoff does not change its score.
+_Avoid_: negamax, brute force, full-width search
 
 **Bound**:
 A value that a position's score is known to be at least, or at most, when the score itself is not known. A bound is never reported or compared as a score.
@@ -197,7 +205,7 @@ A move as UCI writes it: the square a piece leaves, the square it reaches, and a
 _Avoid_: long algebraic notation, coordinate move, move string
 
 **Held move**:
-The selected move or `0000` withheld after `go infinite` until `stop`.
+The best move or `0000` withheld after `go infinite` until `stop`.
 
 ### Quality checks
 

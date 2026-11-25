@@ -134,7 +134,7 @@ fn receive<T>(receiver: &mpsc::Receiver<T>) -> io::Result<T> {
 #[derive(Clone, Copy, Debug)]
 enum Report {
     Depth,
-    End,
+    BestMove,
 }
 
 struct Script {
@@ -147,7 +147,7 @@ impl Script {
         let (steps, instructions) = mpsc::channel();
         let (sent, reported) = mpsc::channel();
         let session = Session::start(move |request, report| {
-            let chosen = request.position.legal_moves().into_iter().next();
+            let best_move = request.position.legal_moves().into_iter().next();
             let mut depth = 0;
             while let Ok(Report::Depth) = instructions.recv() {
                 depth += 1;
@@ -156,11 +156,11 @@ impl Script {
                     score: Score::Centipawns(0),
                     nodes: 1,
                     elapsed: Duration::from_millis(1),
-                    principal_variation: chosen.into_iter().collect(),
+                    principal_variation: best_move.into_iter().collect(),
                 }));
                 let _sent = sent.send(());
             }
-            report(SearchReport::Ended(chosen));
+            report(SearchReport::BestMove(best_move));
             let _sent = sent.send(());
         });
         (session, Self { steps, reported })
@@ -189,11 +189,11 @@ const ALPHABET: [Step; 10] = [
     Step::Command("quit"),
     Step::Eof,
     Step::Report(Report::Depth),
-    Step::Report(Report::End),
+    Step::Report(Report::BestMove),
 ];
 
 // Track which scripted reports can run within four steps. A go queued behind
-// a stop cannot receive a scripted report until the first search has ended.
+// a stop cannot receive a scripted report until the first search reports its best move.
 enum ScriptSearch {
     Idle,
     Finite,
@@ -215,13 +215,13 @@ impl ScriptSearch {
         if matches!(self, Self::Finite | Self::Infinite) {
             script.report(report)?;
         }
-        if matches!(report, Report::End) {
-            self.end();
+        if matches!(report, Report::BestMove) {
+            self.report_best_move();
         }
         Ok(())
     }
 
-    fn end(&mut self) {
+    fn report_best_move(&mut self) {
         *self = match self {
             Self::Finite => Self::Idle,
             Self::Infinite => Self::Held,
@@ -295,11 +295,11 @@ fn rejected_finite_replacements_leave_the_position_for_the_next_search() -> io::
     );
     assert_eq!(session.reply()?, "readyok\n");
     script.report(Report::Depth)?;
-    script.report(Report::End)?;
+    script.report(Report::BestMove)?;
     assert!(session.reply()?.starts_with("info depth 1 "));
     assert_eq!(session.reply()?, "bestmove h8g8\n");
     session.command("go")?;
-    script.report(Report::End)?;
+    script.report(Report::BestMove)?;
     session.eof();
     assert_eq!(session.finish()?, ["bestmove h8g8\n"]);
     Ok(())
@@ -311,8 +311,8 @@ fn stop_releases_its_move_before_a_queued_position_and_go() -> io::Result<()> {
     for command in [A, "go infinite", "stop", B, "go", "quit"] {
         session.command(command)?;
     }
-    script.report(Report::End)?;
-    script.report(Report::End)?;
+    script.report(Report::BestMove)?;
+    script.report(Report::BestMove)?;
     assert_eq!(session.finish()?, ["bestmove h8g8\n", "bestmove h8h7\n"]);
     Ok(())
 }
@@ -324,7 +324,7 @@ fn acknowledged_commands_reach_the_channel_before_the_next_report() -> io::Resul
     session.command("go")?;
     session.command("isready")?;
     // The first report can only run after the reader has acknowledged isready.
-    script.report(Report::End)?;
+    script.report(Report::BestMove)?;
     assert_eq!(session.reply()?, "readyok\n");
     assert_eq!(session.reply()?, "bestmove h8g8\n");
     session.command("quit")?;
@@ -332,9 +332,9 @@ fn acknowledged_commands_reach_the_channel_before_the_next_report() -> io::Resul
     Ok(())
 }
 
-fn wait_for_stop(stop: &std::sync::atomic::AtomicBool) {
+fn wait_for_interrupt(interrupt: &std::sync::atomic::AtomicBool) {
     let deadline = Instant::now() + TIMEOUT;
-    while !stop.load(Ordering::Relaxed) {
+    while !interrupt.load(Ordering::Relaxed) {
         assert!(
             Instant::now() < deadline,
             "the session did not interrupt the search"
@@ -350,7 +350,7 @@ fn answers_ready_while_real_search_is_held_then_interrupts_on_stop() -> io::Resu
     let session = Session::start(move |request, report| {
         assert!(started.send(()).is_ok());
         assert!(receive(&released).is_ok());
-        wait_for_stop(&request.stop);
+        wait_for_interrupt(&request.interrupt);
         deepening::search(request, report);
     });
     session.command("go infinite")?;
@@ -373,7 +373,7 @@ fn isready_leaves_a_finite_real_search_running() -> io::Result<()> {
     let session = Session::start(move |request, report| {
         assert!(started.send(()).is_ok());
         assert!(receive(&released).is_ok());
-        assert!(!request.stop.load(Ordering::Relaxed));
+        assert!(!request.interrupt.load(Ordering::Relaxed));
         deepening::search(request, report);
     });
     session.command(A)?;
@@ -390,19 +390,19 @@ fn isready_leaves_a_finite_real_search_running() -> io::Result<()> {
 }
 
 fn first_starting_move() -> io::Result<String> {
-    let chosen = rules::Position::starting()
+    let best_move = rules::Position::starting()
         .legal_moves()
         .into_iter()
         .next()
         .ok_or_else(|| io::Error::other("no legal starting move"))?;
-    Ok(format!("bestmove {}{}\n", chosen.from(), chosen.to()))
+    Ok(format!("bestmove {}{}\n", best_move.from(), best_move.to()))
 }
 
 fn interrupt_real_search_on_exit(quit: bool) -> io::Result<()> {
     let (started, hold) = mpsc::channel();
     let mut session = Session::start(move |request, report| {
         assert!(started.send(()).is_ok());
-        wait_for_stop(&request.stop);
+        wait_for_interrupt(&request.interrupt);
         deepening::search(request, report);
     });
     session.command("go")?;
@@ -429,10 +429,10 @@ fn eof_interrupts_real_search_and_exits_after_bestmove() -> io::Result<()> {
 #[test]
 fn stop_crossing_the_end_of_real_search_releases_once() -> io::Result<()> {
     let session = Session::start(|request, report| {
-        let stop = Arc::clone(&request.stop);
+        let interrupt = Arc::clone(&request.interrupt);
         deepening::search(request, &mut |event| {
-            if matches!(event, SearchReport::Ended(_)) {
-                wait_for_stop(&stop);
+            if matches!(event, SearchReport::BestMove(_)) {
+                wait_for_interrupt(&interrupt);
             }
             report(event);
         });
@@ -459,13 +459,13 @@ fn a_dying_search_returns_an_error_with_input_still_open() -> io::Result<()> {
 }
 
 #[test]
-fn a_search_returning_without_ended_is_an_error_with_input_still_open() -> io::Result<()> {
+fn a_search_returning_without_a_best_move_is_an_error_with_input_still_open() -> io::Result<()> {
     let session = Session::start(|_, _| {});
     session.command("go")?;
     let error = receive(&session.result)?
         .err()
-        .ok_or_else(|| io::Error::other("session accepted a search without Ended"))?;
-    assert_eq!(error.to_string(), "search returned without Ended");
+        .ok_or_else(|| io::Error::other("session accepted a search without a best move"))?;
+    assert_eq!(error.to_string(), "search returned without a best move");
     Ok(())
 }
 
@@ -486,7 +486,7 @@ fn a_search_thread_dying_during_shutdown_returns_an_error() -> io::Result<()> {
     let search = DiesOnDrop;
     let session = Session::start(move |request, report| {
         let _alive = &search;
-        report(SearchReport::Ended(
+        report(SearchReport::BestMove(
             request.position.legal_moves().into_iter().next(),
         ));
     });
@@ -501,9 +501,9 @@ fn a_search_thread_dying_during_shutdown_returns_an_error() -> io::Result<()> {
 }
 
 #[test]
-fn reports_after_ended_are_errors_with_input_still_open() -> io::Result<()> {
+fn reports_after_best_move_are_errors_with_input_still_open() -> io::Result<()> {
     for extra_report in [
-        SearchReport::Ended(None),
+        SearchReport::BestMove(None),
         SearchReport::FinishedDepth(FinishedDepth {
             depth: 1,
             score: Score::Centipawns(0),
@@ -513,14 +513,14 @@ fn reports_after_ended_are_errors_with_input_still_open() -> io::Result<()> {
         }),
     ] {
         let session = Session::start(move |_, report| {
-            report(SearchReport::Ended(None));
+            report(SearchReport::BestMove(None));
             report(extra_report.clone());
         });
         session.command("go")?;
         let error = receive(&session.result)?
             .err()
-            .ok_or_else(|| io::Error::other("session accepted a report after Ended"))?;
-        assert_eq!(error.to_string(), "search reported after Ended");
+            .ok_or_else(|| io::Error::other("session accepted a report after the best move"))?;
+        assert_eq!(error.to_string(), "search reported after its best move");
         assert_eq!(session.reply()?, "bestmove 0000\n");
         assert!(session.replies.try_recv().is_err());
     }

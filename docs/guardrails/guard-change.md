@@ -7,8 +7,10 @@ owner to find and read.
 
 The local hook runs only where `git config core.hooksPath .githooks` has
 been set. It refuses a commit touching a path in `.githooks/protected-paths`
-unless the message has a `Guard-Change:` line giving a reason. An agent
-can write the line itself. The owner can find it with
+unless the commit body has a `Guard-Change: <why>` line of its own.
+Put a blank line after the subject before writing the body. GitHub
+prefixes each subject with `* ` when it joins commit messages for a
+squash. An agent can write the reason. The owner can find it with
 `git log --grep '^Guard-Change:'`.
 
 The [Guard-Change workflow](../../.github/workflows/guard-change.yml)
@@ -26,16 +28,28 @@ during bootstrap if the previous revision has none.
 
 CI checks each commit. For merge commits it checks paths whose result
 differs from every merge parent. The checker also requires at least one
-`Guard-Change:` line in the range if the net change touches a protected
-path. For a pull request it compares the merge base to the head. For a
-push it compares the previous and pushed revisions.
+`Guard-Change:` line in the body of an ordinary commit in the range
+if the net change touches a protected path. An ordinary commit has
+one parent. For a pull request the checker compares the base tip
+with the tree Git would land by merging the head into it. If the
+merge has conflicts, the checker reports that it skipped the
+net-change rule and still checks each commit. GitHub blocks merging
+until the conflicts are resolved, and pushing the resolution runs the
+check again. For a push the checker compares the previous and pushed
+revisions.
+
+A reason on one ordinary commit satisfies the net-change rule for
+the whole range. The owner accepts that a reason for one protected
+path can also cover another protected path restored by a merge. The
+squash still appears in the log search and its diff shows the reset.
 
 The `guard-change` job becomes required once the event policy permits
 it, GitHub reports the result on the pull request head, and throwaway
 pull requests prove that removing the guard or adding a passing job
 with the same name cannot satisfy the requirement. Squash must also be
-the only enabled merge method. An already-open pull request needs a
-push or an edit to get a run. The existing step in the
+the only enabled merge method. The pull request check relies on the
+ruleset continuing to require branches to be up to date before merging.
+An already-open pull request needs a push or an edit to get a run. The existing step in the
 [Check workflow](../../.github/workflows/check.yml) stays until the
 `guard-change` job is required and has been seen failing from `main`.
 The weekly run of the Check workflow skips the commit-message check.

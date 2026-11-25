@@ -22,11 +22,14 @@ if [ -z "$touched" ]; then
   exit 0
 fi
 
-if grep -aE '^Guard-Change: .*[^[:space:]]' "$message_file" >/dev/null; then
+# Git treats the first paragraph as the subject.
+if awk '
+    /^[[:space:]]*$/ { if (subject) body = 1; next }
+    !body { subject = 1; next }
+    /^Guard-Change: .*[^[:space:]]/ { reason = 1 }
+    END { exit !reason }
+  ' "$message_file"; then
   exit 0
-elif [ "$?" -ne 1 ]; then
-  echo "Guard-Change matcher could not read the commit message." >&2
-  exit 1
 fi
 
 {
@@ -34,7 +37,7 @@ fi
   printf '%s\n' "$touched"
   echo
   echo "These files decide what counts as green, so the human reads every change to them."
-  echo "If the change is intended, add a line to the commit message saying why:"
+  echo "If the change is intended, add a line to the commit body saying why:"
   echo
   echo "  Guard-Change: <what this does to the checks, and why>"
   echo

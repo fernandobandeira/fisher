@@ -22,6 +22,7 @@ The `main gates` ruleset requires the Actions `check`, `mutation`, and `coverage
 | Guardrail | What it stops | Where enforced | When |
 |---|---|---|---|
 | CI | Missing shared check results | [Check workflow](../../.github/workflows/check.yml) | All PRs, pushes to `main`, weekly |
+| Weekly published suite | Differences from published counts or mates missed by the ordinary check | [Published suite workflow](../../.github/workflows/published-suite.yml) | Weekly and on manual dispatch |
 | Pre-commit hook | Committing after a failed local check | [Pre-commit hook](../../.githooks/pre-commit) | Every commit with the hooks installed |
 | Claude Code stop hook | Ending a turn with unchecked changes | [Stop hook](../../.claude/hooks/stop-check) | End of a dirty Claude Code turn |
 
@@ -70,8 +71,8 @@ Give each claim about what the engine does an observation that could prove it wr
 | Guardrail | What it stops | Where enforced | When |
 |---|---|---|---|
 | Independent expected values | Tests that attest to the implementer's own output | [`expectations/`](../../expectations/README.md), [evidence rules](../evidence.md) | Tests each commit and CI run. Provenance in review |
-| Published perft | Incorrect legal move counts | [Expected counts](../../expectations/perft.epd), [rules](../../crates/rules/tests/positions.rs), [search](../../crates/search/tests/search.rs) | Shallow in `scripts/check`. Deep perft uses the ignored release-mode tests on request |
-| Seeded reference comparison | Differences in legal moves, resulting positions, check detection or search results | [Rules comparison](../../crates/rules/tests/positions.rs), [search comparison](../../crates/search/tests/search.rs) | In `scripts/check`. Full mate suite on request |
+| Published perft | Incorrect legal move counts | [Expected counts](../../expectations/perft.epd), [rules](../../crates/rules/tests/positions.rs), [search](../../crates/search/tests/search.rs) | Shallow in `scripts/check`. Deep perft and both four-ply node tests run in the weekly published suite |
+| Seeded reference comparison | Differences in legal moves, resulting positions, check detection or search results | [Rules comparison](../../crates/rules/tests/positions.rs), [search comparison](../../crates/search/tests/search.rs) | In `scripts/check`, including the first ten published mates. All 100 run in the weekly published suite |
 | UCI transcripts | Incorrect responses, process exits or search reports | [Transcript runner](../../crates/fisher/tests/transcripts.rs), [expected transcripts](../../expectations/uci) | In `scripts/check` |
 | Bench signature | A changed fixed-search node count | [Signature test](../../crates/bench/tests/signature.rs), [`fisher bench` and commit record](../process.md#recording-the-bench-signature) | Signature test each commit and CI run. Commit record in review |
 | Strength record | Unsupported claims about playing strength | [`strength/measure` and records](../../strength/README.md) | When claiming a strength change |

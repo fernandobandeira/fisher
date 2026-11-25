@@ -17,7 +17,9 @@ engine tested in the match came from `aaf0218`. Rebuilding `e16f1da` after stren
 ## Deep perft
 
 The owner approved the depths after measuring a release build on this Mac.
-The acceptance run took 33.46 seconds.
+The acceptance run took 33.46 seconds. The weekly published suite uses
+these depths. Run [`scripts/check-published-suite`](../scripts/check-published-suite)
+to repeat the full suite locally.
 
 | Published position | Depth | Matching count |
 |---|---:|---:|

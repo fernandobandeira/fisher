@@ -1,0 +1,31 @@
+#!/bin/sh
+set -eu
+
+cd "$(dirname "$0")/.."
+if ! command -v cargo >/dev/null 2>&1; then
+    export PATH="$HOME/.cargo/bin:$PATH"
+fi
+
+export FISHER_PERFT_DEPTHS=6,5,7,5,5,5
+
+check() {
+    step=$1
+    shift
+    step_start=$(date +%s)
+    if cargo test --locked --release "$@" -- --exact --ignored --nocapture; then
+        printf '%s passed in %ss\n' "$step" "$(($(date +%s) - step_start))"
+    else
+        status=$?
+        printf '%s failed. Run from the repo root: FISHER_PERFT_DEPTHS=%s cargo test --locked --release %s -- --exact --ignored --nocapture\n' \
+            "$step" "$FISHER_PERFT_DEPTHS" "$*" >&2
+        exit "$status"
+    fi
+}
+
+suite_start=$(date +%s)
+trap 'printf "Published suite elapsed time: %ss\n" "$(($(date +%s) - suite_start))"' EXIT
+
+check 'Deep perft' -p rules --test positions perft_at_selected_depths
+check 'All 100 published mates' -p search --test search all_published_mates_in_two
+check 'Search four-ply node counts' -p search --test search node_count_matches_published_perft_at_four_plies
+check 'Reference four-ply node counts' -p search --test reference_minimax node_count_matches_published_perft_at_four_plies

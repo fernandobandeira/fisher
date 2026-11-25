@@ -15,7 +15,8 @@ scripts/check                                                 # run the local ch
 
 The skills are Matt Pocock's. They are not committed: `skills-lock.json` pins the commit, and the second command copies them into `.agents/skills/`. A new git worktree needs the same command.
 
-The crate boundary check uses Python 3.8 or newer. The pre-commit hook runs the local gate and needs network access to refresh RustSec and Cargo registry data. If the refresh fails, restore connectivity and rerun `scripts/check`. CI runs the local checks, mutation and coverage on pull requests, pushes to `main`, and weekly. It also checks commit messages for `Guard-Change:` on pull requests and pushes to `main`. Rust comes from [rustup](https://rustup.rs). The version is pinned in `rust-toolchain.toml`.
+The crate boundary check uses Python 3.8 or newer. The pre-commit hook runs the local gate and needs network access to refresh RustSec and Cargo registry data. If the refresh fails, restore connectivity and rerun `scripts/check`. CI runs the local checks, mutation and coverage on pull requests, pushes to `main`, and weekly. It also checks commit messages for `Guard-Change:` on pull requests and pushes to `main`. 
+A separate weekly workflow runs the approved deep perft, all 100 published mates and both four-ply node tests. Run `scripts/check-published-suite` locally to run the same suite. Rust comes from [rustup](https://rustup.rs). The version is pinned in `rust-toolchain.toml`.
 
 ## Start work
 

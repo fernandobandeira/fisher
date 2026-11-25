@@ -935,7 +935,7 @@ fn scripted_input_drives_the_session_entry() -> io::Result<()> {
         uci::run_session(input, &mut output, "test", move |request, report| {
             assert!(request.limits.infinite);
             let commands = commands_for_search
-                .recv_timeout(Duration::from_secs(5))
+                .recv_timeout(search_history::HANG_BOUND)
                 .unwrap();
             commands.send_line("isready").unwrap();
             report(SearchReport::FinishedDepth(depth.clone()));

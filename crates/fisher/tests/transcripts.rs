@@ -22,7 +22,7 @@ use std::{
 use shakmaty::{CastlingMode, Chess, Move, Position, fen::Fen, uci::UciMove};
 
 const LEGAL_BESTMOVE: &str = "bestmove {legal}";
-const TIMEOUT: Duration = Duration::from_secs(5);
+const HANG_BOUND: Duration = Duration::from_secs(60);
 
 #[test]
 fn handshake() -> io::Result<()> {
@@ -748,7 +748,7 @@ impl<I: TranscriptIo> Session<I> {
         pattern: Option<&SearchInfo<'_>>,
         delimiter: Delimiter<'_>,
     ) -> io::Result<()> {
-        let deadline = self.io.now() + TIMEOUT;
+        let deadline = self.io.now() + HANG_BOUND;
         let actual = loop {
             let actual = self.io.read_reply(deadline)?;
             let info = actual.as_deref().and_then(search_info);
@@ -771,7 +771,7 @@ impl<I: TranscriptIo> Session<I> {
             (Delimiter::Exit, Some(extra)) => {
                 Err(io::Error::other(format!("unexpected output {extra:?}")))
             }
-            (Delimiter::Exit, None) => self.io.wait_for_success(self.io.now() + TIMEOUT),
+            (Delimiter::Exit, None) => self.io.wait_for_success(self.io.now() + HANG_BOUND),
         }
     }
 

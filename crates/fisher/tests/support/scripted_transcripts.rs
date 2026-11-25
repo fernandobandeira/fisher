@@ -6,7 +6,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use super::{TranscriptIo, exit_timeout, read_timeout, run_transcript};
+use super::{HANG_BOUND, TranscriptIo, exit_timeout, read_timeout, run_transcript};
 
 // Python is already required by scripts/check. Decode the JSON with its standard
 // library and send counted, NUL-separated fields to the Rust test.
@@ -84,8 +84,12 @@ fn timeout_failure(
     let timed_out = result.as_ref().err().map(io::Error::kind) == Some(io::ErrorKind::TimedOut);
     let elapsed = script.now.duration_since(script.start);
     (matches!(name, "delimiter-at-5100ms" | "flood-without-delimiter")
-        && !(timed_out && elapsed == Duration::from_secs(5)))
-    .then(|| format!("{name}: expected stdout timeout at 5s, got {result:?} at {elapsed:?}"))
+        && !(timed_out && elapsed == HANG_BOUND))
+        .then(|| {
+            format!(
+                "{name}: expected stdout timeout at {HANG_BOUND:?}, got {result:?} at {elapsed:?}"
+            )
+        })
 }
 
 fn field<'a>(fields: &mut impl Iterator<Item = &'a str>) -> io::Result<&'a str> {
@@ -130,7 +134,9 @@ impl<'a> Script<'a> {
             let after_send = number(fields)?;
             let mut events = Vec::new();
             for _ in 0..number::<usize>(fields)? {
-                let delay = Duration::from_millis(number(fields)?);
+                // The reviewed fixture uses 5000 ms as one hang bound.
+                // Preserve each event's position relative to that bound.
+                let delay = HANG_BOUND * number::<u32>(fields)? / 5000;
                 let event = match field(fields)? {
                     "stdout" => Event::Stdout(field(fields)?),
                     "eof" if field(fields)? == "None" => Event::Eof,

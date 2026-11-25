@@ -250,3 +250,21 @@ literal tabs into three fields in this order.
 The records retain the order of the first 100 puzzles tagged `mateIn2`
 in the export. In each position, exactly one legal move forces checkmate
 within three plies, and no legal move gives checkmate in one ply.
+
+## Movetime transcripts
+
+fisher-5sg.7 stages [`go-movetime.uci`](uci-go-movetime/go-movetime.uci)
+to succeed [the active session](uci/go-movetime.uci) when fisher-5sg.8
+obeys the limit. The active `go-parameters.uci` has no `movetime` case.
+The [controlled schedules](uci-go-movetime/README.md) cover the deadline,
+command ordering and several limits. The combined schedules and
+[ordinary nodes/movetime session](uci-go-movetime/go-nodes-movetime.uci)
+wait for both fisher-5sg.6 and fisher-5sg.8. The clocks
+remain with fisher-5sg.9 and fisher-5sg.10.
+
+The repeated record matches zero or more searched reports. It cannot
+assert consecutive depths, exact cumulative node counts for a variable
+number of reports, a clock reading or which event wins a race. The
+controlled schedules fix the relevant clock and command order and
+specify their exact reports. Release measurements cover elapsed
+wall-clock time outside `scripts/check`.

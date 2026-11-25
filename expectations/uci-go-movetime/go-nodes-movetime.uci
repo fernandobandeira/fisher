@@ -1,0 +1,15 @@
+# Staged by fisher-5sg.7 on 2026-11-25.
+# Sources: April 2006 UCI specification https://backscattering.de/chess/uci/,
+# fisher-8ie session rules, fisher-r6y D5, D20, D22–D25, D31 and D41,
+# fisher-5sg decisions 8 and 10, and expectations/perft.epd.
+# python-chess 1.11.2 enumerated legal moves and nodes on 2026-11-25.
+# The README beside this transcript records the derivation.
+# Adopt this search after both fisher-5sg.6 and fisher-5sg.8 land.
+> position startpos
+> go nodes 19 movetime 50
+# D20/D23 and published perft: depth 1 needs 20 nodes. Either limit
+# can arrive first, and neither permits a searched report.
+< bestmove {legal}
+> quit
+# UCI quit requires clean exit with no further output in this idle session.
+! exit

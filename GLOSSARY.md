@@ -207,6 +207,36 @@ _Avoid_: long algebraic notation, coordinate move, move string
 **Held move**:
 The best move or `0000` withheld after `go infinite` until `stop`.
 
+### The clock
+
+**Clock**:
+The time a color has left for the rest of its moves, as the GUI sends it with `go`.
+_Avoid_: timer, time left, clock (for the source fisher reads the time from)
+
+**Increment**:
+The time the GUI adds to a color's clock after each move that color makes.
+_Avoid_: bonus, delay
+
+**Moves to go**:
+The number of moves a color must still make before the GUI refills its clock, counting the move it is about to make. When the GUI sends none, the clock is never refilled.
+_Avoid_: moves left, moves remaining
+
+**Time control**:
+The rule a game's clocks follow: the starting clock, the increment and the number of moves between refills, if any.
+_Avoid_: time format, time control (for the moment a clock is refilled)
+
+**Time for the move**:
+How long a search may take from its `go` to its `bestmove`. The GUI gives it with `go movetime`, or fisher works it out from the clock, the increment and the moves to go.
+_Avoid_: budget, allocation, think time
+
+**Margin**:
+The part of a time for the move that fisher does not use, kept back so that `bestmove` reaches the GUI in time.
+_Avoid_: overhead (except in the option name Move Overhead), buffer
+
+**Loss on time**:
+A game the GUI gives against a color whose clock ran out before its move arrived.
+_Avoid_: time forfeit, flag, timeout (which names only the hang timeout)
+
 ### Quality checks
 
 **Hang timeout**:

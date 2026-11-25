@@ -70,6 +70,16 @@ jobs:
           lscpu | sed -n '/^Model name:/p'
           scripts/install-fastchess "$RUNNER_TEMP/fastchess"
           printf '%s\n' "$RUNNER_TEMP" >> "$GITHUB_PATH"
+      - name: Install the release Rust toolchains
+        timeout-minutes: 5
+        env:
+          MEASURED: ${{ needs.plan.outputs.measured }}
+          OPPONENT: ${{ needs.plan.outputs.opponent }}
+        run: |
+          SERIES_RUSTUP_HOME=$(mktemp -d "$RUNNER_TEMP/series-rustup.XXXXXX")
+          export SERIES_RUSTUP_HOME
+          strength/series prepare-rust -- "$MEASURED" "$OPPONENT"
+          printf 'SERIES_RUSTUP_HOME=%s\n' "$SERIES_RUSTUP_HOME" >> "$GITHUB_ENV"
       - name: Play range
         timeout-minutes: ${{ inputs.conditions == '3' && 38 || 88 }}
         env:

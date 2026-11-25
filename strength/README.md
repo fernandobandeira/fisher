@@ -29,6 +29,10 @@ compares the repeat. It prints a tab-separated record and saves the
 record and joined games in the `strength-record` artifact. Add the
 printed line to `records.tsv` in a pull request.
 
+Before building, each playing job installs the two revisions' pinned Rust
+channels with the minimal profile in a fresh runner-local Rustup directory.
+The release builds explicitly use those installations.
+
 For a clocked match by hand, check out the revision to measure and run
 `strength/measure stockfish /tmp/fisher-against-stockfish` with fastchess,
 Stockfish and Python 3 with `chess==1.11.2`. Give a new directory for the

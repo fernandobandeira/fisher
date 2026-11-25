@@ -7,6 +7,7 @@ from datetime import date
 import hashlib
 import json
 from math import inf, isfinite, log10, sqrt
+import os
 from pathlib import Path
 import re
 import shutil
@@ -51,9 +52,13 @@ def build(commit, engine):
         subprocess.run(["git", "archive", "-o", archive, commit], cwd=ROOT, check=True)
         subprocess.run(["tar", "-xf", archive], cwd=source, check=True)
         target = source / "target"
+        command = ["cargo", "build", "--locked", "--release", "-p", "fisher", "--target-dir", target]
+        environment = os.environ.copy()
+        if rustup_home := environment.get("SERIES_RUSTUP_HOME"):
+            environment["RUSTUP_HOME"] = rustup_home
+            command[:0] = ["rustup", "run", toolchain(commit)]
         subprocess.run(
-            ["cargo", "build", "--locked", "--release", "-p", "fisher", "--target-dir", target],
-            cwd=source, check=True, stdout=sys.stderr,
+            command, cwd=source, env=environment, check=True, stdout=sys.stderr,
         )
         shutil.copy2(target / "release/fisher", engine)
 
@@ -200,6 +205,30 @@ def pair(measured, opponent):
     if measured == opponent:
         raise ValueError("Measured and opponent revisions must resolve to different commits")
     return measured, opponent
+
+
+def toolchain(commit):
+    import tomllib
+
+    manifest = subprocess.check_output(
+        ["git", "show", f"{commit}:rust-toolchain.toml"], cwd=ROOT, text=True,
+    )
+    return tomllib.loads(manifest)["toolchain"]["channel"]
+
+
+def prepare_rust(measured, opponent):
+    # Provision a new home per job so an incomplete runner installation
+    # cannot leave stale component files in the toolchains used by the builds.
+    environment = dict(os.environ, RUSTUP_HOME=os.environ["SERIES_RUSTUP_HOME"])
+    for channel in dict.fromkeys(map(toolchain, pair(measured, opponent))):
+        subprocess.run(
+            ["rustup", "toolchain", "install", channel, "--profile", "minimal", "--no-self-update"],
+            env=environment, check=True,
+        )
+        subprocess.run(
+            ["rustup", "component", "list", "--installed", "--toolchain", channel],
+            env=environment, check=True,
+        )
 
 
 def play_range():
@@ -349,14 +378,14 @@ def join(args):
 
 
 def main():
-    if sys.argv[1:2] not in (["plan"], ["join"], ["bench"]):
+    if sys.argv[1:2] not in (["plan"], ["join"], ["bench"], ["prepare-rust"]):
         play_range()
         return
     command = sys.argv[1]
     parser = argparse.ArgumentParser(prog=f"series {command}")
     parser.add_argument("measured")
     parser.add_argument("opponent")
-    if command != "bench":
+    if command in ("plan", "join"):
         parser.add_argument("conditions", type=int, choices=CONDITIONS)
     if command == "join":
         parser.add_argument("date")
@@ -368,6 +397,8 @@ def main():
         plan(args.measured, args.opponent, args.conditions)
     elif command == "join":
         join(args)
+    elif command == "prepare-rust":
+        prepare_rust(args.measured, args.opponent)
     else:
         measured, opponent = pair(args.measured, args.opponent)
         with TemporaryDirectory() as directory:
@@ -380,5 +411,5 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except (OSError, ValueError, subprocess.SubprocessError) as error:
+    except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
         sys.exit(f"Series failed: {error}")

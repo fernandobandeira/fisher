@@ -10,9 +10,9 @@ permissions:
 jobs:
   trial:
     if: github.head_ref == 'fisher-1w7-clock-trials'
-    name: Arm A trial ${{ matrix.trial }}
+    name: Arm B trial ${{ matrix.trial }}
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
@@ -49,12 +49,12 @@ jobs:
         run: |
           python3 -m venv "$RUNNER_TEMP/clock-venv"
           "$RUNNER_TEMP/clock-venv/bin/pip" install chess==1.11.2
-      - name: Play and verify Arm A
+      - name: Play and verify Arm B
         run: |
-          "$RUNNER_TEMP/clock-venv/bin/python" harness/.github/clock-trial.py A
+          "$RUNNER_TEMP/clock-venv/bin/python" harness/.github/clock-trial.py B
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
-          name: arm-a-trial-${{ matrix.trial }}
+          name: arm-b-trial-${{ matrix.trial }}
           path: evidence/
           if-no-files-found: error

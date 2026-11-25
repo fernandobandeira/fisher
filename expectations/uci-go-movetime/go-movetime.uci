@@ -1,0 +1,30 @@
+# fisher-5sg.7, 2026-11-25. Sources and derivation in README.md beside this file.
+> position startpos
+> go movetime 50
+<* info depth {depth} multipv 1 score {score} nodes {nodes} nps {nps} time {time} pv {pv}
+< bestmove {legal}
+> stop
+> isready
+< readyok
+> go movetime 0
+< bestmove b1a3
+> go movetime 10
+< bestmove b1a3
+
+# D23 holds the move even when the time limit ends the search immediately.
+> go infinite movetime 0
+> position fen 7k/8/5K2/6Q1/8/8/8/8 b - - 0 1
+< info string {message:position rejected: waiting for stop}
+> go movetime 0
+< info string {message:go rejected: waiting for stop}
+> isready
+< readyok
+> stop
+< bestmove b1a3
+> go movetime 0
+< bestmove b1a3
+> position fen 7k/8/5K2/6Q1/8/8/8/8 b - - 0 1
+> go movetime 0
+< bestmove h8h7
+> quit
+! exit

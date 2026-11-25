@@ -1,0 +1,44 @@
+#!/bin/sh
+# Install the checksum-pinned fastchess release used by fisher's workflows.
+set -eu
+
+if [ "$#" -ne 1 ]; then
+    echo "usage: scripts/install-fastchess DESTINATION" >&2
+    exit 2
+fi
+
+case "$(uname -s)/$(uname -m)" in
+    Linux/x86_64)
+        platform=linux-x86-64
+        checksum=7ab4879eda78de88f210d87c04c65f9ea274d20e18d4f1745c6a3ddd8ef35d7e ;;
+    Darwin/arm64)
+        platform=mac-arm64
+        checksum=f7a812354d5c5944c0c8070c6fc492077589f98560412a977bb077cee4f441d8 ;;
+    *)
+        echo "No pinned fastchess build for $(uname -s)/$(uname -m)." >&2
+        exit 1 ;;
+esac
+
+temporary=$(mktemp -d)
+trap 'rm -rf "$temporary"' EXIT
+archive="fastchess-$platform.tar"
+url="https://github.com/Disservin/fastchess/releases/download/v1.8.3-alpha/$archive"
+if ! curl --fail --silent --show-error --location --connect-timeout 15 --max-time 90 \
+    -o "$temporary/$archive" "$url"; then
+    echo "fastchess download failed." >&2
+    exit 1
+fi
+
+(
+    cd "$temporary"
+    printf '%s  %s\n' "$checksum" "$archive" | shasum -a 256 --check
+    tar -xf "$archive" "fastchess-$platform/fastchess"
+)
+binary="$temporary/fastchess-$platform/fastchess"
+version=$("$binary" --version)
+printf '%s\n' "$version"
+case "$version" in
+    "fastchess alpha 1.8.3 "*" 20261107-d7b47e8 (CI)"*) ;;
+    *) echo "Unexpected fastchess version." >&2; exit 1 ;;
+esac
+install -m 755 "$binary" "$1"

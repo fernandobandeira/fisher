@@ -1,0 +1,131 @@
+#!/usr/bin/env python3
+"""Build, play and verify the weekly real-clock match.
+
+Usage: scripts/check-clock-match FASTCHESS NEW_EVIDENCE_DIRECTORY
+Install the replay library with pip install --require-hashes -r scripts/clock-match-requirements.txt.
+"""
+import collections
+import json
+import os
+from pathlib import Path
+import re
+import subprocess
+import sys
+
+import chess.pgn
+
+
+GAME_COUNT = 1000
+EXPECTED_WARNING = "PV continues after threefold repetition"
+
+
+def runner_cores():
+    if sys.platform == "linux":
+        return int(subprocess.check_output(["nproc"]))
+    return os.cpu_count() or 1
+
+
+def read_log(path):
+    terminations = collections.Counter()
+    warnings = collections.Counter()
+    game_ids = set()
+    with path.open() as stream:
+        for line in stream:
+            if line.startswith("{"):
+                event = json.loads(line)
+                if event["event"] == "game_finished":
+                    terminations[event["termination"]] += 1
+                    game_ids.add(event["game"])
+                elif event["event"] == "game_aborted":
+                    terminations["interrupted"] += 1
+                continue
+            warning = re.search(r"Warning; (.*)|\bWARN\b[:\]]?\s*(.*)", line, re.I)
+            if warning:
+                message = next(group for group in warning.groups() if group is not None)
+                kind = re.split(r" - (?:move|from) |:\s", message, maxsplit=1)[0]
+                warnings[kind] += 1
+    return terminations, warnings, game_ids
+
+
+def replay_pgn(path):
+    game_ids = set()
+    terminations = collections.Counter()
+    replay_errors = 0
+    if not path.exists():
+        return game_ids, terminations, replay_errors
+    with path.open() as stream:
+        while (game := chess.pgn.read_game(stream)) is not None:
+            game_id = game.headers.get("GameId", "")
+            terminations[game.headers.get("Termination", "missing")] += 1
+            if not game_id.isascii() or not game_id.isdecimal() or game.errors:
+                replay_errors += 1
+                continue
+            number = int(game_id)
+            if number in game_ids:
+                replay_errors += 1
+                continue
+            game_ids.add(number)
+            if game.headers["Result"] not in {"1-0", "0-1", "1/2-1/2"}:
+                replay_errors += 1
+                continue
+            position = game.board()
+            for move in game.mainline_moves():
+                if not position.is_legal(move):
+                    replay_errors += 1
+                    break
+                position.push(move)
+    return game_ids, terminations, replay_errors
+
+
+def main():
+    if len(sys.argv) != 3:
+        sys.exit(__doc__)
+    fastchess = Path(sys.argv[1]).resolve(strict=True)
+    evidence = Path(sys.argv[2]).resolve()
+    evidence.mkdir()
+    root = Path(__file__).resolve().parent.parent
+    subprocess.run(["cargo", "build", "--locked", "--release", "-p", "fisher"], cwd=root, check=True)
+
+    fisher = root / "target/release/fisher"
+    openings = root / "strength/openings.epd"
+    concurrency = max(1, runner_cores() // 2)
+    print(f"Playing {GAME_COUNT} games at concurrency {concurrency}", flush=True)
+    command = [
+        str(fastchess), "-engine", f"cmd={fisher}", "name=fisher-a",
+        "-engine", f"cmd={fisher}", "name=fisher-b",
+        "-each", "proto=uci", "tc=10/1", "timemargin=0",
+        "-openings", f"file={openings}", "format=epd", "order=sequential",
+        "-rounds", str(GAME_COUNT // 2), "-games", "2", "-concurrency", str(concurrency),
+        "-pgnout", "file=games.pgn", "append=false", "timeleft=true", "latency=true",
+        "-events", "file=-", "info=false", "-autosaveinterval", "0", "-ratinginterval", "0",
+    ]
+    log = evidence / "fastchess.log"
+    with log.open("w") as stream:
+        status = subprocess.run(command, cwd=evidence, stdout=stream, stderr=subprocess.STDOUT).returncode
+    terminations, warnings, game_ids = read_log(log)
+    pgn_ids, pgn_terminations, replay_errors = replay_pgn(evidence / "games.pgn")
+    finished = sum(count for kind, count in terminations.items() if kind != "interrupted")
+    abnormal = finished - terminations["normal"]
+    unexpected = sum(warnings.values()) - warnings[EXPECTED_WARNING]
+    print(f"Games finished: {finished} of {GAME_COUNT}")
+    print(f"Abnormal endings: {abnormal}")
+    print(f"Losses on time: {terminations['time_forfeit']}")
+    print(f"Interrupted games: {terminations['interrupted']}")
+    print(f"PGN games: {sum(pgn_terminations.values())}")
+    print(f"PGN replay errors: {replay_errors}")
+    print(f"Unexpected warnings: {unexpected}")
+    print(f"Repetition warnings: {warnings[EXPECTED_WARNING]}")
+    print(f"Terminations by kind: {dict(terminations)}")
+    print(f"Warnings by kind: {dict(warnings)}")
+    print(f"fastchess exit status: {status}")
+    passed = (
+        status == 0 and finished == GAME_COUNT and not abnormal
+        and not terminations["interrupted"] and not unexpected
+        and not replay_errors and pgn_terminations == {"normal": GAME_COUNT}
+        and game_ids == pgn_ids and len(game_ids) == GAME_COUNT
+    )
+    return 0 if passed else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

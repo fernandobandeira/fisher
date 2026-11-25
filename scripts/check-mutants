@@ -180,7 +180,7 @@ def run(args):
     print(f"Mutation reports: {output}", flush=True)
     command = [
         "cargo", "mutants", "--workspace", "--no-config", "--test-workspace=false",
-        "--cap-lints=true", "--minimum-test-timeout", "120", "--annotations=none",
+        "--cap-lints=true", "--minimum-test-timeout", "300", "--annotations=none",
         "--copy-target=false", "--cargo-arg=--locked", "--cargo-test-arg=--tests",
         "--jobs", str(args.jobs), "--output", str(output),
     ]

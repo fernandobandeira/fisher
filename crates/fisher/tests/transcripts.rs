@@ -20,6 +20,7 @@ use std::{
 };
 
 use shakmaty::{CastlingMode, Chess, Move, Position, fen::Fen, uci::UciMove};
+use wait_timeout::ChildExt;
 
 const LEGAL_BESTMOVE: &str = "bestmove {legal}";
 const HANG_TIMEOUT: Duration = Duration::from_secs(30);
@@ -679,21 +680,19 @@ impl TranscriptIo for Engine {
     }
 
     fn wait_for_success(&mut self, timeout: Duration) -> io::Result<()> {
-        let mut child = self
+        let child = self
             .child
-            .take()
+            .as_mut()
             .ok_or_else(|| io::Error::other("already waited for fisher to exit"))?;
         // Keep stdin open during the wait unless the transcript closed it.
         let _stdin = child.stdin.take();
-        let (sender, status) = mpsc::channel();
-        thread::Builder::new().spawn(move || {
-            drop(sender.send(child.wait()));
-        })?;
-        let status = match status.recv_timeout(timeout) {
-            Ok(result) => result?,
-            Err(mpsc::RecvTimeoutError::Timeout) => return Err(exit_timeout()),
-            Err(error) => return Err(io::Error::other(error)),
-        };
+        let status = child.wait_timeout(timeout)?;
+        if status.is_none() {
+            drop(child.kill());
+            drop(child.wait());
+        }
+        self.child = None;
+        let status = status.ok_or_else(exit_timeout)?;
         if status.success() {
             Ok(())
         } else {

@@ -391,7 +391,7 @@
         {"after_send": 6, "events": [[0, "stdout", "bestmove e2e4"]]},
         {"after_send": 7, "events": [[0, "eof", null], [0, "exit", 0]]}
       ],
-      "expected": {"verdict": "accept", "reason": "Each repetition consumes its own output and starts its own five-second read bound."}
+      "expected": {"verdict": "accept", "reason": "Each repetition consumes its own output and starts its own five-second read timeout."}
     },
     {
       "name": "unknown-allowance",

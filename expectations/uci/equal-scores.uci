@@ -1,9 +1,17 @@
+# Iterative deepening expectations from fisher-5sg.13, 2026-11-24.
+# Scores and per-ply counts independently enumerated with python-chess 1.11.2
+# (https://pypi.org/project/chess/1.11.2/) using fisher-2aj rules 1 to 7.
+# Decision 10 sums the per-ply counts within each search, then adds the
+# nodes from every earlier finished depth of this go. Starting-position
+# counts match expectations/perft.epd. D28 sets the default depth to 4.
+# The derivation script and results are on fisher-5sg.13.
 # Four-ply info spelling from Stockfish sf_19 (edb0d9d), read 2026-11-24:
 # UCIEngine::on_update_full in src/uci.cpp and SearchManager::output_pv in src/search.cpp.
 # fisher-r6y D41 sets this spelling; fisher-8hc.6 committed these sessions.
 # D3-D6 supply the
 # existing principal variation and allowances, with time at least one under D41.
-# The fisher-2aj.2 sources below supply the retained scores, node counts and response order.
+# The fisher-2aj.2 sources below supply the retained scores and response order;
+# fisher-5sg.13 derived the node totals.
 # Sources: April 2006 UCI specification https://backscattering.de/chess/uci/
 # Search: fisher-2aj rules 1 to 7 and 10. Exact search values
 # were checked by exhaustive enumeration with python-chess 1.11.2.
@@ -15,7 +23,10 @@
 > position startpos
 > go
 # Rules 1 to 7 and 10. All 20 legal moves tie at cp 0.
-< info depth 4 multipv 1 score cp 0 nodes 206603 nps {nps} time {time} pv {pv}
+< info depth 1 multipv 1 score cp 0 nodes 20 nps {nps} time {time} pv {pv}
+< info depth 2 multipv 1 score cp 0 nodes 440 nps {nps} time {time} pv {pv}
+< info depth 3 multipv 1 score cp 0 nodes 9762 nps {nps} time {time} pv {pv}
+< info depth 4 multipv 1 score cp 0 nodes 216365 nps {nps} time {time} pv {pv}
 # UCI bestmove and rule 6. Both processes must pick the same legal move.
 < bestmove {legal}
 # UCI quit.

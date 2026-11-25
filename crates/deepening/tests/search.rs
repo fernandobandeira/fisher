@@ -1,6 +1,9 @@
 use std::{
     error::Error,
-    sync::{Arc, atomic::AtomicBool},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
     time::Instant,
 };
 
@@ -58,6 +61,9 @@ fn reports_the_finished_depth_before_the_best_move() -> Result<(), Box<dyn Error
     // The python-chess counts and the sole legal move are recorded in new-game.uci.
     let reports = reports_for("7k/8/5K1Q/8/8/8/8/8 b - - 0 1")?;
     let [
+        SearchReport::FinishedDepth(_),
+        SearchReport::FinishedDepth(_),
+        SearchReport::FinishedDepth(_),
         SearchReport::FinishedDepth(report),
         SearchReport::BestMove(Some(best_move)),
     ] = reports.as_slice()
@@ -65,7 +71,7 @@ fn reports_the_finished_depth_before_the_best_move() -> Result<(), Box<dyn Error
         return Err(format!("unexpected reports: {reports:?}").into());
     };
     assert_eq!(report.depth, 4);
-    assert_eq!(report.nodes, 782);
+    assert_eq!(report.nodes, 857);
     assert_eq!(
         report.score,
         Score::Mate {
@@ -89,5 +95,34 @@ fn interrupt_before_the_root_of_a_terminal_position() -> Result<(), Box<dyn std:
     let mut reports = Vec::new();
     search(request, &mut |report| reports.push(report));
     assert_eq!(reports, [SearchReport::BestMove(None)]);
+    Ok(())
+}
+
+#[test]
+fn infinite_search_reaches_past_the_default_depth() -> Result<(), Box<dyn Error>> {
+    let interrupt = Arc::new(AtomicBool::new(false));
+    let request = SearchRequest {
+        position: Position::from_fen("7k/8/5K1Q/8/8/8/8/8 b - - 0 1")?,
+        limits: Limits {
+            infinite: true,
+            ..Limits::default()
+        },
+        interrupt: Arc::clone(&interrupt),
+        started: Instant::now(),
+    };
+    let mut depths = Vec::new();
+    search(request, &mut |report| {
+        if let SearchReport::FinishedDepth(report) = report {
+            assert!(
+                report.depth <= 5,
+                "reported depth after interrupt: {report:?}"
+            );
+            depths.push(report.depth);
+            if report.depth == 5 {
+                interrupt.store(true, Ordering::Relaxed);
+            }
+        }
+    });
+    assert_eq!(depths, [1, 2, 3, 4, 5]);
     Ok(())
 }

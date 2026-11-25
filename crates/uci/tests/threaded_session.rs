@@ -13,6 +13,7 @@ use search_history::{Event, HANG_TIMEOUT, ScriptedInput, check, scripted_input};
 
 const A: &str = "position fen 7k/8/5K1Q/8/8/8/8/8 b - - 0 1";
 const B: &str = "position fen 7k/8/5K2/6Q1/8/8/8/8 b - - 0 1";
+const PUZZLE: &str = "position fen 5r1k/pp4pp/5p2/1BbQp1r1/7K/7P/1PP3P1/3R3R b - - 3 26";
 
 enum Recorded {
     Command(&'static str),
@@ -246,7 +247,12 @@ fn play_short_history(steps: impl Iterator<Item = Step>) -> io::Result<()> {
                 session.eof();
                 exiting = true;
             }
-            Step::Report(report) => search.report(&script, report)?,
+            Step::Report(Report::Depth) => {
+                for _ in 0..3 {
+                    search.report(&script, Report::Depth)?;
+                }
+            }
+            Step::Report(Report::BestMove) => search.report(&script, Report::BestMove)?,
             Step::Command(_) | Step::Eof => {}
         }
     }
@@ -355,16 +361,19 @@ fn answers_ready_while_real_search_is_held_then_interrupts_on_stop() -> io::Resu
         wait_for_interrupt(&request.interrupt);
         deepening::search(request, report);
     });
+    session.command(PUZZLE)?;
     session.command("go infinite")?;
     receive(&hold)?;
     session.command("isready")?;
     assert_eq!(session.reply()?, "readyok\n");
     session.command("stop")?;
     resume.send(()).map_err(io::Error::other)?;
+    assert_eq!(session.reply()?, "bestmove c5b4\n");
     session.command("stop")?;
+    session.command("isready")?;
+    assert_eq!(session.reply()?, "readyok\n");
     session.command("quit")?;
-    let expected = first_starting_move()?;
-    assert_eq!(session.finish()?, [expected]);
+    assert_eq!(session.finish()?, Vec::<String>::new());
     Ok(())
 }
 
@@ -384,10 +393,21 @@ fn isready_leaves_a_finite_real_search_running() -> io::Result<()> {
     session.command("isready")?;
     assert_eq!(session.reply()?, "readyok\n");
     resume.send(()).map_err(io::Error::other)?;
-    assert!(session.reply()?.starts_with("info depth 4 "));
+    expect_depths(&session, 4)?;
     assert_eq!(session.reply()?, "bestmove h8g8\n");
     session.command("quit")?;
     assert_eq!(session.finish()?, Vec::<String>::new());
+    Ok(())
+}
+
+fn expect_depths(session: &Session, last: u8) -> io::Result<()> {
+    for depth in 1..=last {
+        assert!(
+            session
+                .reply()?
+                .starts_with(&format!("info depth {depth} "))
+        );
+    }
     Ok(())
 }
 
@@ -401,20 +421,33 @@ fn first_starting_move() -> io::Result<String> {
 }
 
 fn interrupt_real_search_on_exit(quit: bool) -> io::Result<()> {
-    let (started, hold) = mpsc::channel();
-    let mut session = Session::start(move |request, report| {
-        assert!(started.send(()).is_ok());
-        wait_for_interrupt(&request.interrupt);
-        deepening::search(request, report);
+    let mut session = Session::start(|request, report| {
+        let interrupt = Arc::clone(&request.interrupt);
+        deepening::search(request, &mut |event| {
+            let at_boundary = matches!(
+                event,
+                SearchReport::FinishedDepth(FinishedDepth { depth: 1, .. })
+            );
+            report(event);
+            if at_boundary {
+                wait_for_interrupt(&interrupt);
+            }
+        });
     });
-    session.command("go")?;
-    receive(&hold)?;
+    session.command(PUZZLE)?;
+    session.command("go infinite")?;
+    let info = session.reply()?;
+    assert!(
+        info.starts_with("info depth 1 multipv 1 score cp -600 nodes 30 nps "),
+        "{info}"
+    );
+    assert!(info.ends_with(" pv g5g2\n"), "{info}");
     if quit {
         session.command("quit")?;
     } else {
         session.eof();
     }
-    assert_eq!(session.finish()?, [first_starting_move()?]);
+    assert_eq!(session.finish()?, ["bestmove g5g2\n"]);
     Ok(())
 }
 
@@ -441,7 +474,7 @@ fn stop_crossing_the_end_of_real_search_releases_once() -> io::Result<()> {
     });
     session.command(A)?;
     session.command("go")?;
-    assert!(session.reply()?.starts_with("info depth 4 "));
+    expect_depths(&session, 4)?;
     session.command("stop")?;
     session.command("quit")?;
     assert_eq!(session.finish()?, ["bestmove h8g8\n"]);
@@ -526,5 +559,172 @@ fn reports_after_best_move_are_errors_with_input_still_open() -> io::Result<()> 
         assert_eq!(session.reply()?, "bestmove 0000\n");
         assert!(session.replies.try_recv().is_err());
     }
+    Ok(())
+}
+
+#[test]
+fn holds_the_move_at_the_depth_cap_until_a_release_command() -> io::Result<()> {
+    for command in [Some("stop"), Some("quit"), None] {
+        let (held, at_depth_cap) = mpsc::channel();
+        let mut session = Session::start(move |request, report| {
+            // Drive the session with the scripted result of the private two-ply
+            // depth cap. The deepening crate checks the same puzzle and counts.
+            for (depth, cp, nodes, moves) in [
+                (1, -600, 30, &["g5g2"][..]),
+                (2, -700, 1308, &["c5f2", "g2g3"][..]),
+            ] {
+                let principal_variation = scripted_variation(request.position, moves);
+                let best_move = principal_variation.first().copied();
+                report(SearchReport::FinishedDepth(FinishedDepth {
+                    depth,
+                    score: Score::Centipawns(cp),
+                    nodes,
+                    elapsed: Duration::from_millis(1),
+                    principal_variation,
+                }));
+                if depth == 2 {
+                    report(SearchReport::BestMove(best_move));
+                    assert!(held.send(()).is_ok());
+                }
+            }
+        });
+        session.command(PUZZLE)?;
+        session.command("go infinite")?;
+        expect_depths(&session, 2)?;
+        receive(&at_depth_cap)?;
+        session.command("isready")?;
+        assert_eq!(session.reply()?, "readyok\n");
+        match command {
+            Some(command) => session.command(command)?,
+            None => session.eof(),
+        }
+        assert_eq!(session.reply()?, "bestmove c5f2\n");
+        if command == Some("stop") {
+            session.command("stop")?;
+            session.command("isready")?;
+            assert_eq!(session.reply()?, "readyok\n");
+            session.command("quit")?;
+        }
+        assert_eq!(session.finish()?, Vec::<String>::new());
+    }
+    Ok(())
+}
+
+#[test]
+fn bare_go_matches_go_depth_four_with_the_same_elapsed_time() -> io::Result<()> {
+    fn replies(command: &'static str) -> io::Result<Vec<String>> {
+        let session = Session::start(|request, report| {
+            deepening::search(request, &mut |mut event| {
+                if let SearchReport::FinishedDepth(depth) = &mut event {
+                    depth.elapsed = Duration::from_millis(u64::from(depth.depth));
+                }
+                report(event);
+            });
+        });
+        session.command(A)?;
+        session.command(command)?;
+        let replies = (0..5).map(|_| session.reply()).collect::<io::Result<_>>()?;
+        session.command("quit")?;
+        assert_eq!(session.finish()?, Vec::<String>::new());
+        Ok(replies)
+    }
+    assert_eq!(replies("go")?, replies("go depth 4")?);
+    Ok(())
+}
+
+fn scripted_variation(mut position: rules::Position, moves: &[&str]) -> Vec<rules::Move> {
+    moves
+        .iter()
+        .map(|text| {
+            let movement = position
+                .legal_moves()
+                .into_iter()
+                .find(|movement| format!("{}{}", movement.from(), movement.to()) == *text);
+            let Some(movement) = movement else {
+                unreachable!("the controlled schedule uses legal moves")
+            };
+            position = movement.play();
+            movement
+        })
+        .collect()
+}
+
+#[test]
+fn starting_position_reports_time_and_nps_at_the_depth_cap() -> io::Result<()> {
+    let (held, at_depth_cap) = mpsc::channel();
+    let session = Session::start(move |request, report| {
+        // Schedule 4 supplies the totals. Deepening exercises its private
+        // two-ply depth cap and controlled clock in its own tests.
+        let principal_variation = scripted_variation(request.position, &["e2e4", "e7e5"]);
+        report(SearchReport::FinishedDepth(FinishedDepth {
+            depth: 1,
+            score: Score::Centipawns(0),
+            nodes: 20,
+            elapsed: Duration::from_millis(2),
+            principal_variation: scripted_variation(request.position, &["e2e4"]),
+        }));
+        let best_move = principal_variation.first().copied();
+        report(SearchReport::FinishedDepth(FinishedDepth {
+            depth: 2,
+            score: Score::Centipawns(0),
+            nodes: 440,
+            elapsed: Duration::from_millis(5),
+            principal_variation,
+        }));
+        report(SearchReport::BestMove(best_move));
+        assert!(held.send(()).is_ok());
+    });
+    session.command("position startpos")?;
+    session.command("go infinite")?;
+    assert_eq!(
+        session.reply()?,
+        "info depth 1 multipv 1 score cp 0 nodes 20 nps 10000 time 2 pv e2e4\n"
+    );
+    assert_eq!(
+        session.reply()?,
+        "info depth 2 multipv 1 score cp 0 nodes 440 nps 88000 time 5 pv e2e4 e7e5\n"
+    );
+    receive(&at_depth_cap)?;
+    session.command("isready")?;
+    assert_eq!(session.reply()?, "readyok\n");
+    session.command("stop")?;
+    assert_eq!(session.reply()?, "bestmove e2e4\n");
+    session.command("quit")?;
+    assert_eq!(session.finish()?, Vec::<String>::new());
+    Ok(())
+}
+
+#[test]
+fn holds_the_move_at_the_production_depth_cap() -> io::Result<()> {
+    let (held, at_depth_cap) = mpsc::channel();
+    let session = Session::start(move |request, report| {
+        deepening::search(request, &mut |event| {
+            let best_move = matches!(event, SearchReport::BestMove(_));
+            report(event);
+            if best_move {
+                assert!(held.send(()).is_ok());
+            }
+        });
+    });
+    session.command("position fen 6bk/5p1p/5P1P/8/8/p1p5/P7/K7 b - - 0 1")?;
+    session.command("go infinite")?;
+    for depth in 1..=255 {
+        let line = session.reply()?;
+        let cp = if depth == 1 { 400 } else { 0 };
+        assert!(
+            line.starts_with(&format!(
+                "info depth {depth} multipv 1 score cp {cp} nodes {depth} nps "
+            )),
+            "{line}"
+        );
+        assert!(line.ends_with(" pv c3c2\n"), "{line}");
+    }
+    receive(&at_depth_cap)?;
+    session.command("isready")?;
+    assert_eq!(session.reply()?, "readyok\n");
+    session.command("stop")?;
+    assert_eq!(session.reply()?, "bestmove c3c2\n");
+    session.command("quit")?;
+    assert_eq!(session.finish()?, Vec::<String>::new());
     Ok(())
 }

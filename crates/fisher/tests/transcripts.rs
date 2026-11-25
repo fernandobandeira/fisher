@@ -71,6 +71,31 @@ fn go_parameters() -> io::Result<()> {
 }
 
 #[test]
+fn go_depth() -> io::Result<()> {
+    play_transcript("go-depth")
+}
+
+#[test]
+fn go_nodes() -> io::Result<()> {
+    play_transcript("go-nodes")
+}
+
+#[test]
+fn go_movetime() -> io::Result<()> {
+    play_transcript("go-movetime")
+}
+
+#[test]
+fn quit_while_deepening() -> io::Result<()> {
+    play_transcript("quit-while-deepening")
+}
+
+#[test]
+fn end_of_input_while_deepening() -> io::Result<()> {
+    play_transcript("end-of-input-while-deepening")
+}
+
+#[test]
 fn terminal_positions() -> io::Result<()> {
     play_transcript("terminal-positions")
 }
@@ -845,7 +870,7 @@ impl<I: TranscriptIo> Session<I> {
             return Ok(());
         };
         let score = reported_score(info.score)?;
-        if expected_score == "{score}" {
+        if expected_score == "{score}" || depth <= 2 {
             let best = reference::minimax(&self.position, depth).score;
             if score != best {
                 return Err(io::Error::other(format!(

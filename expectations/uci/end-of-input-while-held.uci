@@ -1,27 +1,13 @@
-# Staged 2026-11-24 from fisher-8ie rules 1 and 9 as amended by D25.
-# The held move is sent before exit. The original search sources follow.
-# Four-ply info spelling from Stockfish sf_19 (edb0d9d), read 2026-11-24:
-# UCIEngine::on_update_full in src/uci.cpp and SearchManager::output_pv in src/search.cpp.
-# fisher-r6y D41 sets this spelling. D3-D6 supply the principal variation
-# and allowances, with time at least one under D41.
-# The fisher-2aj.2 sources below supply the retained scores, node counts and response order.
-# Sources: April 2006 UCI specification https://backscattering.de/chess/uci/
-# and fisher-l7f owner decisions from 2026-11-22.
-# Search: fisher-2aj rules 1 to 7, 9 and 10. Exact search values
-# were checked by exhaustive enumeration with python-chess 1.11.2.
-# Starting score: four-ply minimax with python-chess 1.11.2 followed rules
-# 1 to 7. An independent reviewer reproduced cp 0 and per-ply counts
-# 20/400/8902/197281 with their own minimax. See expectations/perft.epd.
-# Searched transcript written 2026-11-23.
-> position startpos
+# Staged by fisher-5sg.3 on 2026-11-24.
+# Sources: April 2006 UCI specification https://backscattering.de/chess/uci/,
+# fisher-8ie session rules, and fisher-r6y D9–D11, D15, D20, D24, D25 and D28.
+# Terminal reply: owner approval on fisher-2aj.2, 2026-11-23.
+# Shakmaty 0.30.3, 2026-11-24: no legal moves and Black is not in check.
+> position fen 7k/5K2/6Q1/8/8/8/8/8 b - - 0 1
 > go infinite
-# The finished depth is reported before the end of input.
-# D25 releases it on quit or the end of input as well as on stop.
-# Rules 1 to 7 and 10. Published perft counts sum to 206603. See the header for cp 0.
-< info depth 4 multipv 1 score cp 0 nodes 206603 nps {nps} time {time} pv {pv}
+< info depth 0 score cp 0
 > isready
-# UCI go infinite and isready. No bestmove precedes readyok.
 < readyok
 ! eof
-< bestmove {legal}
+< bestmove 0000
 ! exit

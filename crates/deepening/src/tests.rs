@@ -176,3 +176,39 @@ fn assert_puzzle_depths(
     }
     Ok(())
 }
+
+#[test]
+fn infinite_search_reaches_the_production_depth_cap() -> Result<(), Box<dyn std::error::Error>> {
+    let position = Position::from_fen("6bk/5p1p/5P1P/8/8/p1p5/P7/K7 b - - 0 1")?;
+    let legal_moves = position.legal_moves();
+    assert_eq!(legal_moves.len(), 1);
+    let best_move = legal_moves.into_iter().next();
+    assert_eq!(move_text(best_move).as_deref(), Some("c3c2"));
+    let after_move = best_move.ok_or("expected c3c2")?.play();
+    assert_eq!(after_move.legal_moves(), Vec::<Move>::new());
+
+    let request = SearchRequest {
+        position,
+        limits: Limits {
+            infinite: true,
+            ..Limits::default()
+        },
+        interrupt: Arc::new(AtomicBool::new(false)),
+        started: Instant::now(),
+    };
+    let mut reports = Vec::new();
+    search(request, &mut |report| reports.push(report));
+    let Some((last, depths)) = reports.split_last() else {
+        return Err("search reported nothing".into());
+    };
+    assert_eq!(depths.len(), 255);
+    for (depth, report) in (1..=255).zip(depths) {
+        let SearchReport::FinishedDepth(report) = report else {
+            return Err(format!("unexpected depth report: {report:?}").into());
+        };
+        assert_eq!(report.depth, depth);
+        assert_eq!(report.nodes, u64::from(depth));
+    }
+    assert_eq!(*last, SearchReport::BestMove(best_move));
+    Ok(())
+}

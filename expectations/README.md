@@ -115,8 +115,7 @@ script and its results are on fisher-5sg.13.
 
 The runner compares moves from two fresh processes for `equal-scores.uci`.
 The `terminal-positions.uci` session requires one depth-zero line for each
-position. The [staged bare searches](uci-iterative-deepening/go-infinite.uci)
-are included in the active [`go-infinite.uci`](uci/go-infinite.uci).
+position. The bare searches are included in the active [`go-infinite.uci`](uci/go-infinite.uci).
 
 Rules 2 and 3 of fisher-2aj score a position at the horizon by material
 without asking whether it has a legal move. A mate one ply beyond the

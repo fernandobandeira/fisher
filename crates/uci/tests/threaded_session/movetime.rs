@@ -324,3 +324,33 @@ fn queued_stop_replies_before_replacement_search_starts() -> io::Result<()> {
     assert_eq!(session.reply()?, "bestmove h8h7\n");
     finish(session)
 }
+
+#[test]
+fn time_for_the_move_starts_when_go_is_accepted() -> io::Result<()> {
+    let (release, released) = mpsc::channel();
+    let (started, origin) = mpsc::channel();
+    let session = Session::start(move |request, report| {
+        if request.limits.movetime.is_some() {
+            assert!(started.send(request.started).is_ok());
+            report(SearchReport::BestMove(first_move(request.position)));
+        } else {
+            report(SearchReport::BestMove(first_move(request.position)));
+            assert!(receive(&released).is_ok());
+        }
+    });
+
+    // The first bestmove makes the session idle while its worker is still
+    // occupied. The readyok after the second go bounds when it was accepted.
+    session.command("go")?;
+    assert_eq!(session.reply()?, best_move_line(Position::starting()));
+    let before_go = Instant::now();
+    session.command(TIMED_GO)?;
+    ready(&session)?;
+    let after_acceptance = Instant::now();
+    release.send(()).map_err(io::Error::other)?;
+
+    let started = receive(&origin)?;
+    assert!((before_go..=after_acceptance).contains(&started));
+    assert_eq!(session.reply()?, best_move_line(Position::starting()));
+    finish(session)
+}

@@ -102,8 +102,9 @@ fisher-2aj.5 activates the five sessions authored in fisher-5sg.12 in [`uci/`](u
 
 fisher-5sg.13 independently derived the [active sessions](uci/) on
 2026-11-24. The `go depth`, `go nodes` and `go movetime` cases each start a
-fresh session in `go-depth.uci`, `go-nodes.uci` and `go-movetime.uci`. They use
-the default depth of four until their limits are implemented.
+fresh session in `go-depth.uci`, `go-nodes.uci` and `go-movetime.uci`. The depth
+and node cases use the default depth of four until their limits are implemented.
+The movetime case runs within the stated time for the move.
 
 Each finished depth has its own required reply with a literal depth.
 For depth D, the node total adds the counts of every search from depth 1
@@ -253,21 +254,19 @@ within three plies, and no legal move gives checkmate in one ply.
 
 ## Movetime transcripts
 
-fisher-5sg.7 stages [`go-movetime.uci`](uci-go-movetime/go-movetime.uci)
-to succeed [the active session](uci/go-movetime.uci) when fisher-5sg.8
-obeys the limit. The active `go-parameters.uci` has no `movetime` case.
-The [controlled schedules](uci-go-movetime/README.md) cover the deadline,
-command ordering and several limits. The combined schedules and
+The active [`go-movetime.uci`](uci/go-movetime.uci) uses the
+[derivation and controlled schedules](uci-go-movetime/README.md) from fisher-5sg.7
+for the deadline, command ordering and several limits. The combined schedules and
 [ordinary nodes/movetime session](uci-go-movetime/go-nodes-movetime.uci)
 wait for both fisher-5sg.6 and fisher-5sg.8. The clocks
 remain with fisher-5sg.9 and fisher-5sg.10.
 
 The repeated record matches zero or more searched reports. It cannot
 assert consecutive depths, exact cumulative node counts for a variable
-number of reports, a clock reading or which event wins a race. The
-controlled schedules fix the relevant clock and command order and
+number of reports, an elapsed-time reading or which event wins a race. The
+controlled schedules fix the elapsed time and command order and
 specify their exact reports. Release measurements cover elapsed
-wall-clock time outside `scripts/check`.
+time outside `scripts/check`.
 
 ## Searches on the clock
 

@@ -67,18 +67,46 @@ pub enum SearchReport {
     reason = "The worker owns the request throughout the search"
 )]
 pub fn search(request: SearchRequest, report: &mut dyn FnMut(SearchReport)) {
-    const DEPTH_CAP: u8 = 255;
-    const DEFAULT_DEPTH: u8 = 4;
-    let depth_cap = if request.limits.infinite || request.limits.movetime.is_some() {
-        DEPTH_CAP
-    } else {
-        DEFAULT_DEPTH
-    };
-    search_with_clock(&request, report, &Instant::now, &mut || {}, depth_cap);
+    search_with_clock(&request, report, &Instant::now, &mut || {}, u8::MAX);
 }
 
-fn is_interrupted(request: &SearchRequest) -> bool {
-    request.interrupt.load(Ordering::Relaxed)
+struct SearchLimits<'a> {
+    interrupt: &'a AtomicBool,
+    depth_cap: u8,
+    move_time: Option<MoveTime>,
+}
+
+impl<'a> SearchLimits<'a> {
+    fn new(request: &'a SearchRequest, depth_cap: u8) -> Self {
+        const DEFAULT_DEPTH: u8 = 4;
+        let limits = &request.limits;
+        let depth_cap = if limits.infinite || limits.movetime.is_some() {
+            depth_cap
+        } else {
+            depth_cap.min(DEFAULT_DEPTH)
+        };
+        Self {
+            interrupt: &request.interrupt,
+            depth_cap,
+            move_time: limits.movetime.map(MoveTime::new),
+        }
+    }
+
+    fn stop_before_depth(&self, elapsed: &dyn Fn() -> Duration) -> bool {
+        self.interrupt.load(Ordering::Relaxed)
+            || self
+                .move_time
+                .as_ref()
+                .is_some_and(|time| time.expired(elapsed))
+    }
+
+    fn stop_before_node(&mut self, elapsed: &dyn Fn() -> Duration) -> bool {
+        self.interrupt.load(Ordering::Relaxed)
+            || self
+                .move_time
+                .as_mut()
+                .is_some_and(|time| time.expired_before_node(elapsed))
+    }
 }
 
 struct MoveTime {
@@ -119,47 +147,49 @@ fn search_with_clock(
     depth_cap: u8,
 ) {
     // TODO(fisher-5sg.10): Use the clocks and moves to go to set the time limit.
+    let fallback = request.position.legal_moves().into_iter().next();
+    if request.interrupt.load(Ordering::Relaxed) {
+        report(SearchReport::BestMove(fallback));
+        return;
+    }
+    let Some(fallback) = fallback else {
+        let result = search::minimax(&request.position, 1);
+        report(SearchReport::FinishedDepth(FinishedDepth {
+            depth: 0,
+            score: result.score,
+            nodes: result.nodes,
+            elapsed: Duration::ZERO,
+            principal_variation: result.principal_variation,
+        }));
+        report(SearchReport::BestMove(None));
+        return;
+    };
+
     let elapsed = || now().duration_since(request.started);
-    let mut move_time = request.limits.movetime.map(MoveTime::new);
+    let mut limits = SearchLimits::new(request, depth_cap);
     let mut nodes: u64 = 0;
-    let mut best_move = None;
-    for depth in 1..=depth_cap {
-        if is_interrupted(request)
-            || move_time
-                .as_ref()
-                .is_some_and(|time| time.expired(&elapsed))
-        {
+    let mut best_move = fallback;
+    for depth in 1..=limits.depth_cap {
+        if limits.stop_before_depth(&elapsed) {
             break;
         }
         let Some(result) = minimax_until_interrupted(&request.position, depth, || {
             before_node();
-            is_interrupted(request)
-                || move_time
-                    .as_mut()
-                    .is_some_and(|time| time.expired_before_node(&elapsed))
+            limits.stop_before_node(&elapsed)
         }) else {
             break;
         };
-        best_move = result.best_move;
+        best_move = result.best_move.unwrap_or(best_move);
         nodes = nodes.saturating_add(result.nodes);
         report(SearchReport::FinishedDepth(FinishedDepth {
-            depth: if best_move.is_some() { depth } else { 0 },
+            depth,
             score: result.score,
             nodes,
-            elapsed: if best_move.is_some() {
-                elapsed()
-            } else {
-                Duration::ZERO
-            },
+            elapsed: elapsed(),
             principal_variation: result.principal_variation,
         }));
-        if best_move.is_none() {
-            break;
-        }
     }
-    report(SearchReport::BestMove(
-        best_move.or_else(|| request.position.legal_moves().into_iter().next()),
-    ));
+    report(SearchReport::BestMove(Some(best_move)));
 }
 
 #[cfg(test)]

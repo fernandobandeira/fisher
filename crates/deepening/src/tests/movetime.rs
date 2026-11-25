@@ -251,3 +251,57 @@ fn timed_search_can_finish_more_than_four_depths() -> Result<(), rules::FenError
     ));
     Ok(())
 }
+
+#[test]
+fn expired_movetime_reports_checkmate_before_reading_elapsed_time() -> Result<(), rules::FenError> {
+    // fisher-r6y D41 and Stockfish 19: info depth 0 score mate 0.
+    assert_expired_terminal_root(
+        "7k/7Q/6K1/8/8/8/8/8 b - - 0 1",
+        Score::Mate {
+            plies: 0,
+            winning: false,
+        },
+    )
+}
+
+#[test]
+fn expired_movetime_reports_stalemate_before_reading_elapsed_time() -> Result<(), rules::FenError> {
+    // fisher-r6y D41 and Stockfish 19: info depth 0 score cp 0.
+    assert_expired_terminal_root("7k/5Q2/6K1/8/8/8/8/8 b - - 0 1", Score::Centipawns(0))
+}
+
+fn assert_expired_terminal_root(fen: &str, score: Score) -> Result<(), rules::FenError> {
+    let position = Position::from_fen(fen)?;
+    for millis in [0, 10] {
+        let request = timed_request(position, millis, false);
+        let mut reports = Vec::new();
+        let mut node_checks = 0;
+        let elapsed_readings = Cell::new(0);
+        search_with_clock(
+            &request,
+            &mut |event| reports.push(event),
+            &|| {
+                elapsed_readings.set(elapsed_readings.get() + 1);
+                request.started
+            },
+            &mut || node_checks += 1,
+            3,
+        );
+        assert_eq!(
+            reports,
+            [
+                SearchReport::FinishedDepth(FinishedDepth {
+                    depth: 0,
+                    score,
+                    nodes: 0,
+                    elapsed: Duration::ZERO,
+                    principal_variation: Vec::new(),
+                }),
+                SearchReport::BestMove(None),
+            ],
+        );
+        assert_eq!(elapsed_readings.get(), 0);
+        assert_eq!(node_checks, 0);
+    }
+    Ok(())
+}

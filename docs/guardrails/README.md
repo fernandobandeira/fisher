@@ -77,6 +77,8 @@ Give each claim about what the engine does an observation that could prove it wr
 
 See [evidence of behaviour](behaviour-evidence.md) for what each check shows and when to run the full mate suite.
 
+See [independent expected values](expected-values.md) for how those values are chosen and where they stop applying.
+
 ## Strength of the tests
 
 Make each crate’s unit and integration tests defend its own code.
@@ -104,6 +106,8 @@ Make changes to what passes easy for the owner to find and review.
 | Guardrail | What it stops | Where enforced | When |
 |---|---|---|---|
 | Protected paths and `Guard-Change:` | Changes to checking policy without a stated reason | [Protected paths](../../.githooks/protected-paths), [commit-message hook](../../.githooks/commit-msg) | Every commit with the hooks installed |
+
+See [the `Guard-Change:` line](guard-change.md) for how the hook works and where it stops.
 
 ## Review
 

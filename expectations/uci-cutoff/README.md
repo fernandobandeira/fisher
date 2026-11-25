@@ -104,8 +104,13 @@ Every new number comes from six facts:
    total is an upper bound.
 5. Depth 2 on puzzle 001om plays all 30 root moves, so after 29 of its
    nodes (59 in all) at least one root move is unplayed and depth 2 has not
-   finished. That is the latest node boundary inside depth 2 that does not
-   depend on the order of moves.
+   finished. That boundary is guaranteed whatever the order of moves; it is
+   not the latest one. Each root move also has a legal reply, and the first
+   reply to every root move is played, so depth 2 enters at least 60 nodes
+   of its own and finishes at a total of at least 90. No root move gives
+   checkmate ([mate-in-two.tsv](../mate-in-two.tsv) excludes a mate in one
+   ply), and none stalemates White, whose rook on d1 can always move along
+   the first rank or capture on e1.
 6. Nodes per second follow D41: 1000 × 79 ÷ 5 = 15,800.
 
 Where no outside value exists, the staged file says "no outside value"
@@ -130,14 +135,14 @@ is the Nth call of the test's node hook, made before node N is entered.
 | uci-depth-and-nodes | Forced position h8g8, `go depth 5` and the default depth 4 | Totals 1, 23, 75, 857, 3138 | Exactly depths 1–5 (or 1–4). Totals 1, 23, then rising and at most 75, 857, 3138 | `tests/search.rs` 81–106 (857), 152–193 |
 | uci-depth-and-nodes | Forced position, `nodes 3137` and `nodes 3138` | Depths 1–4; depths 1–5 | 3137 dropped. 3138: consecutive depths from 1 through at least 5, further depths allowed; totals 1, 23, then rising, at most 75, 857, 3138 at depths 3–5, never above 3138 | `tests/search.rs` 152–193, whose helper `reports_with_limits` (21–44) rejects any depth above `expected_depth` and must allow more for 3138 |
 | uci-depth-and-nodes, uci-deepen-until-stop | Puzzle 001om, `stop`, `quit` or end of input inside depth 2 | `go nodes 1308`, after node 639 of depth 2, 669 entered | `go depth 2`, after node 29 of depth 2, 59 entered, only the depth-1 report, `bestmove g5g2` | `src/tests.rs` 120–156: the limit `nodes: Some(1308)` becomes `depth: Some(2)`; `Some(30 + 640)` and 670 at line 122 become `Some(30 + 30)` and 60; 669 at line 148 becomes 59 |
-| uci-depth-and-nodes, uci-deepen-until-stop | Puzzle 001om, search ends on its own after depth 2, and the derivation tables | `go nodes 1308`, 1308 entered, depth 2 reports 1308; depth 2 by ply 30, 1248 | `go depth 2`. Node checks and nodes entered both equal the depth-2 total: no outside value (at least 60 by fact 5, at most 1308). cp −700, PV c5f2 g2g3, `bestmove c5f2` | `src/tests.rs` 120–164 (the 1308 at lines 122 and 148) |
+| uci-depth-and-nodes, uci-deepen-until-stop | Puzzle 001om, search ends on its own after depth 2, and the derivation tables | `go nodes 1308`, 1308 entered, depth 2 reports 1308; depth 2 by ply 30, 1248 | `go depth 2`. Node checks and nodes entered both equal the depth-2 total: no outside value (at least 90 by fact 5, at most 1308). cp −700, PV c5f2 g2g3, `bestmove c5f2` | `src/tests.rs` 120–164 (the 1308 at lines 122 and 148) |
 | uci-deepen-until-stop | Starting position, cap 2, depths at 2 and 5 ms | Totals 20, 440; nps 10,000, 88,000; 440 checks | Totals 20, 79; nps 10,000, 15,800; 79 checks | `src/tests.rs` 70–118 |
 | uci-go-movetime | Puzzle, `go movetime 50`, expiry or interrupt at the first reading inside depth 2 | Production interval: check 1024; readings at checks 0, 30, 30, 1024 | `run_search::<60>`: the event at check 60; readings 0, 30, 30, 60 (or 0, 30, 30 when the interrupt comes first); 60 checks; 59 entered; depth 1 only; `g5g2` | `src/tests/movetime.rs` 78–123 |
 | uci-go-movetime | Starting position, `go movetime 50`, depths at 2 and 5 ms, expiry at the first reading in depth 3 | Production interval: check 1024; totals 20, 440 | `run_search::<81>`: expiry at check 81; 81 checks; totals 20, 79; 80 entered; depth-2 move | `src/tests/movetime.rs` 126–162 |
 | uci-go-movetime | Starting position, `go nodes 1308 movetime 50`, held at 39 ms | Expiry at check 1024; 1023 entered; totals 20, 440 | `run_search::<81>`: expiry at check 81; 80 entered; totals 20, 79; movetime wins before the node limit. The rows with `nodes 19` are unchanged | `src/tests/movetime.rs` 309–339 (no README row before this commit) |
-| uci-go-movetime | Production interval of 1,024 nodes | Starting position, cap 3, 40 ms from check 1025, expect 2048 checks | Starting position, `movetime 50`, cap at least 103, 39 ms until check 2048, then 40 ms: readings at checks 1024 and 2048, 2048 checks, 2047 entered | `src/tests/movetime.rs` 212–230 |
+| uci-go-movetime | Production interval of 1,024 nodes | Starting position, cap 3, 40 ms from check 1025, expect 2048 checks | Starting position, `movetime 50`, cap at least 103, 39 ms until check 2048, then 40 ms: readings at checks 1024 and 2048, 2048 checks, 2047 entered. Record every clock reading with the node check at which it happens. A reading at check 0 or at a reported depth total belongs to the start or end of a depth; every other reading must be at check 1024 or 2048, and both must occur. Asserting only the final count of 2048 checks would also pass if the clock were read before every node | `src/tests/movetime.rs` 212–230 |
 | uci-go-movetime | Starting-position totals through depth 4 | 20, 440, 9,762, 216,365 | 20, 79, then no outside value | None directly |
-| uci-go-movetime, uci-go-clocks | Puzzle 001om, the total at which depth 2 finishes, in the derivation | 1,308 | No outside value (at least 60, at most 1,308) | None directly |
+| uci-go-movetime, uci-go-clocks | Puzzle 001om, the total at which depth 2 finishes, in the derivation | 1,308 | No outside value (at least 90, at most 1,308) | None directly |
 | uci-go-clocks | Search values for the three roots in the sessions | 20, 440, 9,762, 216,365; 1, 23, 75, 857; 1, 27, 98, 1,397 | 20, 79; 1, 23; 1, 27; then no outside value | `src/tests/clocks.rs` 225–261 (`btime`, `winc`, `binc`, `movestogo` alone) |
 | uci-go-clocks | `go btime 60000` from startpos, private | Totals 20, 440, 9,762, 216,365 | 20, 79, then no outside value | `src/tests/clocks.rs` 263–276 |
 | uci-go-clocks | `go wtime 60000` on h8g8, private | Totals 1, 23, 75, 857 | 1, 23, then rising, at most 75 and 857 | `src/tests/clocks.rs` 278–305 |
@@ -147,6 +152,8 @@ is the Nth call of the test's node hook, made before node N is entered.
 | uci-go-clocks | `go wtime 2790`, end at 5 ms | `(20, 1 ms), (440, 5 ms), (442, 83 ms)`; 440 entered | `(20, 1 ms), (79, 5 ms), (81, 83 ms)`; 79 entered | `src/tests/clocks.rs` 435–444 |
 | uci-go-clocks | `go wtime 2160`, one depth-3 node | `(20, 2 ms), (440, 3 ms), (442, 62 ms)`; 441 entered | `(20, 2 ms), (79, 3 ms), (81, 62 ms)`; 80 entered | `src/tests/clocks.rs` 446–455 |
 | uci-go-clocks | `go wtime 1500 nodes …`, both orders, private | `nodes 440` | `nodes 79` | `src/tests/clocks.rs` 457–484 (line 468) |
+| uci-depth-and-nodes (session side) | Puzzle 001om, `stop`, `quit` or end of input on either side of the end of depth 2, through a real `deepening::search` worker | `go nodes 1308`; when the search ends first, depth 2 reports cp −700, exactly 1308 nodes, PV c5f2 g2g3, then `bestmove c5f2` | `go depth 2`, which keeps the search ending exactly after depth 2. When the search ends first: depth 2 reports cp −700 and PV c5f2 g2g3 with a total of at least 90 and at most 1308 (no outside value), then `bestmove c5f2`. When the command comes first: unchanged, depth 1 cp −600, 30 nodes, PV g5g2, then `bestmove g5g2`. Command order unchanged | `crates/uci/tests/threaded_session.rs` 737–810: `node_limit_with_command` sends `go nodes 1308` (line 749) and `expect_puzzle_depth` (797–810) requires an exact node total |
+| None (fisher-ssg) | Bench signature: depth-4 totals of the six perft positions | 206603, 4185552, 46255, 432070, 2167396, 3986609; sum 11024485 | No outside value for any position; each at most its total without cutoffs, and the sum at most 1,102,448 (fisher-4yn claim, D39) | `crates/bench/tests/signature.rs` 3–25 |
 
 ### What stays exact
 
@@ -159,7 +166,11 @@ is the Nth call of the test's node hook, made before node N is entered.
   (`crates/uci/tests/threaded_session/clocks.rs` 342–344). A scripted search
   emits fixed reports, so cutoffs cannot change them. They keep 440, 9,762,
   216,365 and their nps (110000, 88000, 146666 and the 2,000 ms figures).
-  The scripted tests in `crates/uci` need no change.
+  The scripted tests in `crates/uci` need no change. The tests there that
+  run the real `deepening::search` assert no total at depth 2 or more apart
+  from `node_limit_with_command`, listed above: they check depth-1 totals,
+  depth prefixes, line counts, best moves, the equality of two searches, or
+  one node per depth below a single forced move that stalemates.
 
 ### Corrections to the first version of this table (80c81e4)
 
@@ -170,3 +181,12 @@ changed the command of the scripted `nodes 440` case while saying
 `crates/uci` needed no change. It missed the production-interval test at
 `src/tests/movetime.rs` 212–230, and it left the movetime schedules tied to
 the production interval. Each of these now has an entry above.
+
+The second version (10f0b3a) missed `node_limit_with_command` in
+`crates/uci/tests/threaded_session.rs`, which runs the real search and
+requires exactly 1308 nodes at depth 2. It also called node 29 of depth 2
+the latest boundary that does not depend on the order of moves; it is a
+guaranteed boundary, and the latest is later (fact 5). It did not say that
+the production-interval test must check where the clock is read. All three
+are corrected above, and the sweep now covers `crates/uci` and
+`crates/bench` as well as `crates/deepening`.

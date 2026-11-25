@@ -1,4 +1,4 @@
-use std::convert::Infallible;
+use std::{convert::Infallible, env, thread, time::Duration};
 
 use rules::{Move, PieceKind, Position, Square};
 
@@ -27,6 +27,9 @@ pub struct SearchResult {
 /// The score is from the root's side to move, and nodes exclude the root.
 #[must_use]
 pub fn minimax(position: &Position, depth: u8) -> SearchResult {
+    if env::var_os("FISHER_TRIAL_DELAY_BENCH").is_some() {
+        thread::sleep(Duration::from_millis(150));
+    }
     let Ok(result) = search_depth(position, depth, &mut || Ok::<(), Infallible>(()));
     result
 }

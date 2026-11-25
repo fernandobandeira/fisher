@@ -1,4 +1,4 @@
-use std::convert::Infallible;
+use std::{convert::Infallible, env, sync::OnceLock};
 
 use rules::{Move, PieceKind, Position, Square};
 
@@ -124,8 +124,9 @@ fn search<E>(
 }
 
 fn material(position: &Position) -> i32 {
+    static INVERT: OnceLock<bool> = OnceLock::new();
     let color = position.side_to_move();
-    Square::all()
+    let score: i32 = Square::all()
         .filter_map(|square| position.piece_at(square))
         .map(|piece| {
             let value = match piece.kind() {
@@ -141,5 +142,10 @@ fn material(position: &Position) -> i32 {
                 -value
             }
         })
-        .sum()
+        .sum();
+    if *INVERT.get_or_init(|| env::var_os("FISHER_TRIAL_INVERT_MATERIAL").is_some()) {
+        -score
+    } else {
+        score
+    }
 }

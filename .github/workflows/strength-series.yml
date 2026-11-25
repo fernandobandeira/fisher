@@ -1,5 +1,7 @@
 name: Strength series
 on:
+  push:
+    branches: [fisher-op4-series-trials]
   workflow_dispatch:
     inputs:
       measured:
@@ -20,9 +22,9 @@ permissions:
   contents: read
 
 env:
-  MEASURED: ${{ inputs.measured }}
-  OPPONENT: ${{ inputs.opponent }}
-  CONDITIONS: ${{ inputs.conditions }}
+  MEASURED: 'a5dac71'
+  OPPONENT: '4fd3002'
+  CONDITIONS: '3'
 
 jobs:
   first:

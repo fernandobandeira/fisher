@@ -40,7 +40,9 @@ jobs:
           lscpu | sed -n '/^Model name:/p'
           scripts/install-fastchess "$RUNNER_TEMP/fastchess"
           python3 -m venv "$RUNNER_TEMP/series-venv"
-          "$RUNNER_TEMP/series-venv/bin/python" -m pip install --require-hashes -r strength/series-requirements.txt
+          pip="$RUNNER_TEMP/series-venv/bin/pip"
+          "$pip" install --only-binary :all: --require-hashes -r strength/series-build-requirements.txt
+          "$pip" install --no-build-isolation --no-deps --require-hashes -r strength/series-requirements.txt
           printf '%s\n' "$RUNNER_TEMP" "$RUNNER_TEMP/series-venv/bin" >> "$GITHUB_PATH"
       - name: Play first range
         id: play
@@ -50,7 +52,7 @@ jobs:
             4) count=25 ;;
             *) echo "Unknown conditions: $CONDITIONS" >&2; exit 1 ;;
           esac
-          digest=$(strength/series "$MEASURED" "$OPPONENT" "$CONDITIONS" 1 "$count" "$RUNNER_TEMP/series" --concurrency 4)
+          digest=$(strength/series --concurrency 4 -- "$MEASURED" "$OPPONENT" "$CONDITIONS" 1 "$count" "$RUNNER_TEMP/series")
           printf '%s\n' "$digest"
           printf 'digest=%s\n' "$digest" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

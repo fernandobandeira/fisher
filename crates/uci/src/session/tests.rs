@@ -5,6 +5,43 @@ use std::io::BufReader;
 use super::*;
 
 #[test]
+fn position_fen_uses_stockfish_clock_defaults() -> Result<(), String> {
+    // Stockfish 19's FENs after g5g7, recorded in
+    // expectations/uci-short-fen/README.md.
+    for (command, expected) in [
+        (
+            "position fen 7k/8/5K2/6Q1/8/8/8/8 w - - moves g5g7",
+            "7k/6Q1/5K2/8/8/8/8/8 b - - 1 1",
+        ),
+        (
+            "position fen 7k/8/5K2/6Q1/8/8/8/8 w - - 17 moves g5g7",
+            "7k/6Q1/5K2/8/8/8/8/8 b - - 18 1",
+        ),
+    ] {
+        let Input::Handled(Command::Position(Ok(command))) = parse_command(command) else {
+            return Err(format!("could not parse {command}"));
+        };
+        assert_eq!(setup_position(command)?.to_fen(), expected);
+    }
+    Ok(())
+}
+
+#[test]
+fn position_fen_rejects_three_and_seven_fields() {
+    // The rules parser rejected both forms before short FEN support.
+    for fen in [
+        "7k/8/5K2/6Q1/8/8/8/8 w -",
+        "7k/8/5K2/6Q1/8/8/8/8 w - - 0 1 extra",
+    ] {
+        let result = setup_position(PositionCommand {
+            source: PositionSource::Fen(fen.to_owned()),
+            moves: Vec::new(),
+        });
+        assert!(result.is_err(), "{fen}");
+    }
+}
+
+#[test]
 fn node_rate_uses_reported_milliseconds() {
     assert_eq!(nodes_per_second(10, 2), 5000);
     assert_eq!(nodes_per_second(10, 3), 3333);

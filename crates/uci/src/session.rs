@@ -329,7 +329,12 @@ fn nodes_per_second(nodes: u64, time_ms: u64) -> u64 {
 fn setup_position(command: PositionCommand) -> Result<Position, String> {
     let mut position = match command.source {
         PositionSource::Startpos => Position::starting(),
-        PositionSource::Fen(fen) => {
+        PositionSource::Fen(mut fen) => {
+            match fen.split_whitespace().count() {
+                4 => fen.push_str(" 0 1"),
+                5 => fen.push_str(" 1"),
+                _ => {}
+            }
             Position::from_fen(&fen).map_err(|cause| format!("invalid FEN: {cause}"))?
         }
     };

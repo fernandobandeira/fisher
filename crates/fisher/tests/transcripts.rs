@@ -66,6 +66,16 @@ fn position_moves() -> io::Result<()> {
 }
 
 #[test]
+fn position_fen_four_fields() -> io::Result<()> {
+    play_transcript("position-fen-four-fields")
+}
+
+#[test]
+fn position_fen_five_fields() -> io::Result<()> {
+    play_transcript("position-fen-five-fields")
+}
+
+#[test]
 fn go_parameters() -> io::Result<()> {
     play_transcript("go-parameters")
 }

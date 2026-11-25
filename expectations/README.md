@@ -7,7 +7,7 @@ Expected values that came from outside the implementer: published perft counts, 
 - Every file starts with where its values came from (a link, a tool and its version) and the date they were taken.
 - A value is committed before the code that has to meet it, in a commit of its own.
 - The agent implementing a ticket does not edit this directory. If a value looks wrong, it stops and says why.
-- This directory is a protected path: a commit that touches it needs a `Guard-Change:` line, and the human reads it.
+- This directory is a protected path: a commit that touches it needs a `Guard-Change: <why>` line on its own in the commit body, and the human reads it.
 
 fisher-l7f.1 supplied the original UCI transcripts before protocol code, and
 fisher-l7f.2 supplied the published perft counts before move generation.
@@ -276,3 +276,10 @@ activated by fisher-5sg.10. The
 controlled schedules fix the time for the move and the time the search may
 use after the margin, the decision to start another depth and the order
 of responses when several limits apply.
+
+## Short FEN transcripts
+
+The [four-field session](uci/position-fen-four-fields.uci) and
+[five-field session](uci/position-fen-five-fields.uci) are active for fisher-og6.
+The [source record](uci-short-fen/README.md) gives Stockfish 19's treatment of
+omitted FEN fields and fisher's responses to the equivalent six-field commands.

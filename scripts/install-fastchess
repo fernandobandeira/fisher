@@ -23,7 +23,7 @@ temporary=$(mktemp -d)
 trap 'rm -rf "$temporary"' EXIT
 archive="fastchess-$platform.tar"
 url="https://github.com/Disservin/fastchess/releases/download/v1.8.3-alpha/$archive"
-if ! curl --fail --silent --show-error --location --connect-timeout 15 --max-time 90 \
+if ! curl --fail --silent --show-error --location --connect-timeout 15 --max-time 45 --retry 2 --retry-max-time 120 \
     -o "$temporary/$archive" "$url"; then
     echo "fastchess download failed." >&2
     exit 1

@@ -10,7 +10,7 @@ permissions:
 jobs:
   clock-match:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         timeout-minutes: 3
@@ -23,14 +23,16 @@ jobs:
         timeout-minutes: 3
         run: |
           python3 -m venv "$RUNNER_TEMP/clock-venv"
-          if ! "$RUNNER_TEMP/clock-venv/bin/pip" install --timeout 15 --retries 0 --require-hashes -r scripts/clock-match-requirements.txt; then
+          pip="$RUNNER_TEMP/clock-venv/bin/pip"
+          if ! "$pip" install --timeout 15 --retries 2 --only-binary :all: --require-hashes -r scripts/clock-match-build-requirements.txt ||
+             ! "$pip" install --timeout 15 --retries 2 --no-build-isolation --no-deps --require-hashes -r scripts/clock-match-requirements.txt; then
             echo "::error::PGN replay library download or installation failed."
             exit 1
           fi
       - name: Download Rust build dependencies
         timeout-minutes: 3
         env:
-          CARGO_NET_RETRY: 0
+          CARGO_NET_RETRY: 2
         run: |
           if ! cargo fetch --locked; then
             echo "::error::Rust build dependency download failed."
@@ -40,9 +42,6 @@ jobs:
         env:
           CARGO_NET_OFFLINE: 'true'
         run: |
-          nproc
-          lscpu
-          printf 'Runner image %s %s\n' "$ImageOS" "$ImageVersion"
           "$RUNNER_TEMP/clock-venv/bin/python" scripts/check-clock-match "$RUNNER_TEMP/fastchess" clock-match-evidence
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()

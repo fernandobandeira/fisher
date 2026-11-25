@@ -11,7 +11,7 @@ Expected values that came from outside the implementer: published perft counts, 
 
 fisher-l7f.1 supplied the original UCI transcripts before protocol code, and
 fisher-l7f.2 supplied the published perft counts before move generation.
-The 15 searched transcripts that expect an `info` line come from fisher-2aj.2.
+The 15 searched transcripts that expect an `info` line come from fisher-2aj.2 (throwaway j9c test).
 
 ## UCI transcripts
 

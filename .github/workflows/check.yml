@@ -43,6 +43,12 @@ jobs:
           fallback: none
       - run: scripts/check
 
+  guard-change:
+    name: guard-change
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'true'
+
   mutation:
     runs-on: ubuntu-latest
     timeout-minutes: ${{ github.event_name == 'schedule' && 180 || 45 }}

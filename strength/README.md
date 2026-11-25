@@ -105,7 +105,7 @@ once, up to the machine's core count. The default is one.
 
 The directory holds the PGN, fastchess log and ordered game data. To compute
 the digest from the PGN, encode each game as a compact JSON array containing,
-in order, the one-based opening number (integer), the opening FEN, White's
+in order, the opening's one-based line number in `series-openings.epd`, the opening FEN, White's
 full commit, an array of UCI move strings, the result, and the termination.
 Use ASCII escaping for JSON strings, no spaces around separators, and one
 line feed (byte `0x0a`) after each array, including the last. Write the games

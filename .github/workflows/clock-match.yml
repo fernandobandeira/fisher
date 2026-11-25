@@ -1,5 +1,8 @@
 name: Real-clock match
 on:
+  pull_request:
+    types: [opened, synchronize]
+    branches: [main]
   schedule:
     - cron: '17 7 * * 4'
   workflow_dispatch:

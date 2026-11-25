@@ -756,6 +756,63 @@ fn fen_fields_end_before_the_move_list() {
 }
 
 #[test]
+fn fen_clocks_follow_the_engines_existing_decimal_rules() -> io::Result<()> {
+    // Expected acceptance comes from the engine's existing behavior at dec2a5c.
+    let fen = "7k/8/5K2/6Q1/8/8/8/8 w - -";
+    for (clocks, accepted) in [
+        ("", true),
+        (" 0", true),
+        (" 00017 0001", true),
+        (" 4294967296 4294967296", true),
+        (" 18446744073709551615 18446744073709551615", true),
+        (" 3+3", false),
+        (" 3+3 1", false),
+        (" 0 3+3", false),
+        (" banana", false),
+        (" banana 1", false),
+        (" 0 banana", false),
+        (" ١ 1", false),
+        (" 3_3 1", false),
+        (" +3", false),
+        (" +3 1", false),
+        (" 0 +3", false),
+        (" -1", false),
+        (" -1 1", false),
+        (" 0 -1", false),
+        (" 18446744073709551616", false),
+        (" 18446744073709551616 1", false),
+        (" 0 18446744073709551616", false),
+        (" 0 0", false),
+        (" 0 1 extra", false),
+    ] {
+        let command = format!("position fen {fen}{clocks}");
+        let input = format!("{command}\nisready\nquit\n").into_bytes();
+        let mut output = Vec::new();
+        uci::run_session(io::Cursor::new(input), &mut output, "test", |_, _| {})?;
+        let output = String::from_utf8(output).map_err(io::Error::other)?;
+        assert_eq!(output == "readyok\n", accepted, "{command}: {output:?}");
+        if accepted {
+            accepts(&[Command(&command), READY, READY_OK, QUIT]);
+        } else {
+            assert!(
+                output.starts_with("info string position rejected: invalid FEN: "),
+                "{command}: {output:?}"
+            );
+            let diagnostic = output.lines().next().unwrap_or_default();
+            let diagnostic = format!("{diagnostic}\n");
+            accepts(&[
+                Command(&command),
+                Response(&diagnostic),
+                READY,
+                READY_OK,
+                QUIT,
+            ]);
+        }
+    }
+    Ok(())
+}
+
+#[test]
 fn empty_principal_variation_omits_pv() {
     let depth = Report(SearchReport::FinishedDepth(FinishedDepth {
         depth: 1,

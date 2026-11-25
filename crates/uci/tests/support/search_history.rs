@@ -525,6 +525,18 @@ fn position(words: std::str::SplitAsciiWhitespace<'_>) -> Option<Chess> {
             if !(4..=6).contains(&fen.len()) {
                 return None;
             }
+            if fen.get(4).is_some_and(|clock| fen_decimal(clock).is_none())
+                || fen.get(5).is_some_and(|number| {
+                    fen_decimal(number)
+                        .and_then(std::num::NonZeroU64::new)
+                        .is_none()
+                })
+            {
+                return None;
+            }
+            // The checker uses Chess for move legality. The engine's u64 clocks
+            // can exceed the range of Chess's counters, so pass only the first four fields.
+            fen.truncate(4);
             fen.join(" ")
                 .parse::<Fen>()
                 .ok()?
@@ -544,6 +556,13 @@ fn position(words: std::str::SplitAsciiWhitespace<'_>) -> Option<Chess> {
         Some(_) => return None,
     }
     Some(position)
+}
+
+fn fen_decimal(text: &str) -> Option<u64> {
+    if !text.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    text.parse().ok()
 }
 
 fn legal(position: &Chess, text: &str) -> bool {

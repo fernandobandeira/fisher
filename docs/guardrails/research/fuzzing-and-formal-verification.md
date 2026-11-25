@@ -19,7 +19,7 @@ Baseline and tool documentation read 2026-11-25, fisher revision `c1ebde9`. Fish
 
 **UCI.** The threaded suite enumerates 11,111 strings of up to four generated input steps. One step can emit several reports. A separate test queues stop and a second search before delivering two distinct best moves. The history checker's model also explores reader, worker and handler schedules, including report delivery before and after stop. Replaying inputs cannot reproduce the native thread schedule. [Threaded sessions](../../../crates/uci/tests/threaded_session.rs) · [Model and checker](../../../crates/uci/tests/search_history.rs)
 
-The checker accepts four- and five-field FENs followed by `moves e2e4`, while production rejects them and retains the earlier position. Until fisher-og6 settles acceptance, a generator using the checker can assign a best move to the wrong position. [Checker examples](../../../crates/uci/tests/search_history.rs) · [Production parser](../../../crates/rules/src/fen.rs)
+The checker and engine accept four- and five-field FENs followed by `moves e2e4`. The UCI session supplies omitted clocks before handing the FEN to the six-field rules parser. Both reject malformed clock fields. [Checker examples](../../../crates/uci/tests/search_history.rs) · [UCI session](../../../crates/uci/src/session.rs)
 
 Fixed bench data, fallible writers, UCI disconnect and spawn failures, constructor guarantees, unreachable branches and inline test code account for the remaining uncovered regions. [Coverage notes](../coverage.md)
 

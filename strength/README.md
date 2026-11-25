@@ -11,7 +11,9 @@ This is a record, not a gate. `scripts/check` does not run it, and nothing here 
 | `records.tsv` | One line per match: the two revisions that played, and the result. |
 | `measure` | Plays one match under the conditions below and prints its line for `records.tsv`. |
 | `summarise.py` | Counts the results in a match's PGN. `measure` runs it. |
-| `openings.epd` | The 200 positions every match starts from. |
+| `openings.epd` | The 200 positions for conditions 1 and 2. |
+| `series` | Plays a range of openings under conditions 3 or 4 and prints its SHA-256. |
+| `series-openings.epd` | The 2,000 positions for conditions 3 and 4, in draw order. |
 
 ## Taking a measurement
 
@@ -70,6 +72,56 @@ Both engines get 10 seconds plus 0.1 seconds a move. The other conditions are th
 
 The last recorded revision under conditions 1, `dbe9113`, is measured again under conditions 2 to connect the series. It ignores its clock and may lose games on time. Those games count toward `abnormal_endings`.
 
+### 3 and 4
+
+| Conditions | Nodes for each move | Openings | Games |
+|---|---:|---:|---:|
+| 3 | 1,000,000 | 2,000 | 4,000 |
+| 4 | 10,000,000 | The first 500 of the same list | 1,000 |
+
+Each opening is played once with each color between two revisions of fisher.
+Every `go` carries only `nodes N`. The games have no time control, score or
+move-count adjudication, tablebase adjudication, or resignation.
+
+### Play a range by hand
+
+Put fastchess v1.8.3-alpha (`d7b47e8`) on `PATH`, then install the pinned
+Python dependencies and run the series from a checkout with two distinct
+revisions and their history. Both revisions must include `4fd3002`, where fisher
+began to obey `go nodes`.
+
+```sh
+python3 -m venv /tmp/fisher-series-venv
+. /tmp/fisher-series-venv/bin/activate
+python3 -m pip install --only-binary :all: --require-hashes -r strength/series-build-requirements.txt
+python3 -m pip install --no-build-isolation --no-deps --require-hashes -r strength/series-requirements.txt
+strength/series --concurrency 4 -- a5dac71 4fd3002 3 1 100 /tmp/fisher-series-3
+```
+
+Give the measured revision, opponent revision, conditions, first opening
+(starting at 1), opening count, and a new directory. The script builds each
+engine from its commit. Set concurrency to the number of games to play at
+once, up to the machine's core count. The default is one.
+
+The directory holds the PGN, fastchess log and ordered game data. To compute
+the digest from the PGN, encode each game as a compact JSON array containing,
+in order, the opening's one-based line number in `series-openings.epd`, the opening FEN, White's
+full commit, an array of UCI move strings, the result, and the termination.
+Use ASCII escaping for JSON strings, no spaces around separators, and one
+line feed (byte `0x0a`) after each array, including the last. Write the games
+in ascending opening number, with the measured revision's game as White first
+for each opening. The SHA-256 covers these concatenated bytes, which the
+script writes to `games.jsonl`.
+
+To validate an existing PGN and print its digest, pass `--pgn path/to/games.pgn`
+before `--` with the same revisions and range and a fresh output directory.
+An incomplete range, abnormal ending, or result unsupported by the final
+position produces no digest.
+
+The manual Strength series workflow plays the first 100 openings under
+conditions 3 or the first 25 under conditions 4 on each of two runners. It
+checks their digests and retains the games.
+
 ## How far to trust the numbers
 
 - **Between two revisions of fisher that search**, a match under conditions 1 repeats game for game because each revision searches to a fixed depth and plays the same move from the same position. Under conditions 2 the match no longer repeats game for game. The depths the engines finish and the resulting scores depend on the machine and its load. The score describes these 200 openings. Revisions before `71a4608` choose legal moves at random.
@@ -80,3 +132,24 @@ The last recorded revision under conditions 1, `dbe9113`, is measured again unde
 ## Where the openings come from
 
 `openings.epd` holds 200 positions from `noob_3moves.epd` in [official-stockfish/books](https://github.com/official-stockfish/books) at commit `37751b0`, which that repository publishes under CC0. Each is a position after three moves by each color. fastchess drew them at random with `-srand 20261123` for the first match, before any result was known, and they are kept in the order it drew them.
+
+The source for `series-openings.epd` is
+[`noob_3moves.epd.zip` at `37751b08db745aa02babfa74056dd1168b9da803`](https://github.com/official-stockfish/books/blob/37751b08db745aa02babfa74056dd1168b9da803/noob_3moves.epd.zip)
+([raw download](https://raw.githubusercontent.com/official-stockfish/books/37751b08db745aa02babfa74056dd1168b9da803/noob_3moves.epd.zip)),
+published under CC0. The archive SHA-256 is
+`68fe2691e0876d0de54fffb68c797e752138d5ed363beab2ac6ca34be68ee9f3`.
+Verify it before extracting `noob_3moves.epd`, whose SHA-256 is
+`2011193b4854e9a8cfdc05312ca2dbaffa6ceae3abbdee20e2ead2a18a603347`.
+The source has 150,932 distinct lines, each ending in a line feed.
+
+For each line, remove its line feed and compute the lowercase hexadecimal
+SHA-256 of the UTF-8 text `20261125:` followed by that line. Sort the lines
+by that hash in ascending order. Write the first 2,000, with one line feed
+after each, in that order. The seed `20261125` and draw were fixed before
+any games were played.
+
+| Openings | SHA-256 |
+|---|---|
+| First 100 | `e3b9fbc279c52b03e8c2f6ac6a6687f1d1d3fd63a0250ed362b08b5535ee0c42` |
+| First 500 | `4c35b0ae9ae0783d1e344e896666a28a8006f84cfb8947ce4c22145019130130` |
+| All 2,000 | `df2c41c8b88e220050d5de4462b4838f6eaff1a809f4d6f159860624fee7555a` |

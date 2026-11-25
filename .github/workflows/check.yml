@@ -47,7 +47,8 @@ jobs:
     name: guard-change
     runs-on: ubuntu-latest
     steps:
-      - run: 'true'
+      - name: fake pass
+        run: 'true'
 
   mutation:
     runs-on: ubuntu-latest

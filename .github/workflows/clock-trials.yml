@@ -1,0 +1,60 @@
+name: Real-clock runner qualification
+on:
+  pull_request:
+    types: [opened, synchronize]
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  trial:
+    if: github.head_ref == 'fisher-1w7-clock-trials'
+    name: Arm A trial ${{ matrix.trial }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        trial: [1, 2, 3]
+    steps:
+      - name: Record runner
+        run: |
+          mkdir evidence
+          {
+            printf 'cores=%s\n' "$(nproc)"
+            lscpu
+            printf 'image=%s version=%s\n' "$ImageOS" "$ImageVersion"
+          } | tee evidence/runner.txt
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          path: harness
+          persist-credentials: false
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          ref: a5dac711b6fae86886d54f04158f3f0a33109c72
+          path: engine
+          persist-credentials: false
+      - name: Install and verify fastchess
+        run: |
+          curl --fail --silent --show-error --location -o fastchess.tar https://github.com/Disservin/fastchess/releases/download/v1.8.3-alpha/fastchess-linux-x86-64.tar
+          printf '%s  fastchess.tar\n' 7ab4879eda78de88f210d87c04c65f9ea274d20e18d4f1745c6a3ddd8ef35d7e | sha256sum --check
+          tar -xf fastchess.tar fastchess-linux-x86-64/fastchess
+          fastchess-linux-x86-64/fastchess --version | tee evidence/fastchess-version.txt
+          grep -E '^fastchess alpha 1\.8\.3 .* 20261107-d7b47e8 \(CI\) *$' evidence/fastchess-version.txt
+      - name: Build fisher
+        working-directory: engine
+        run: cargo build --locked --release -p fisher
+      - name: Install PGN replay library
+        run: |
+          python3 -m venv "$RUNNER_TEMP/clock-venv"
+          "$RUNNER_TEMP/clock-venv/bin/pip" install chess==1.11.2
+      - name: Play and verify Arm A
+        run: |
+          "$RUNNER_TEMP/clock-venv/bin/python" harness/.github/clock-trial.py A
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: arm-a-trial-${{ matrix.trial }}
+          path: evidence/
+          if-no-files-found: error

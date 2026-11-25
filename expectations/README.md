@@ -249,8 +249,9 @@ fisher-5sg.7 stages [`go-movetime.uci`](uci-go-movetime/go-movetime.uci)
 to succeed [the active session](uci/go-movetime.uci) when fisher-5sg.8
 obeys the limit. The active `go-parameters.uci` has no `movetime` case.
 The [controlled schedules](uci-go-movetime/README.md) cover the deadline,
-command ordering and several limits. The combined depth/node and
-movetime cases wait for both fisher-5sg.6 and fisher-5sg.8. The clocks
+command ordering and several limits. The combined schedules and
+[ordinary nodes/movetime session](uci-go-movetime/go-nodes-movetime.uci)
+wait for both fisher-5sg.6 and fisher-5sg.8. The clocks
 remain with fisher-5sg.9 and fisher-5sg.10.
 
 The repeated record matches zero or more searched reports. It cannot

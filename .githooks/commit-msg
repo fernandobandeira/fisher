@@ -11,7 +11,13 @@ if [ -f "$(git rev-parse --git-dir)/MERGE_HEAD" ]; then
   exit 0
 fi
 
-touched=$(git diff --cached --name-only --no-renames | grep -E -f "$root/.githooks/protected-paths" || true)
+touched=$(
+  git diff --cached --name-only --no-renames -z |
+    { LC_ALL=C grep -azE -f "$root/.githooks/protected-paths" || [ "$?" -eq 1 ]; } |
+    while IFS= read -r -d '' path; do
+      printf '  %q\n' "$path"
+    done
+)
 if [ -z "$touched" ]; then
   exit 0
 fi
@@ -22,7 +28,7 @@ fi
 
 {
   echo "This commit changes protected paths:"
-  echo "$touched" | sed 's/^/  /'
+  printf '%s\n' "$touched"
   echo
   echo "These files decide what counts as green, so the human reads every change to them."
   echo "If the change is intended, add a line to the commit message saying why:"

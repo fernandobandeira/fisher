@@ -15,9 +15,10 @@ def git(repo, *args):
 
 def grep(pattern_args, data):
     result = subprocess.run(
-        ("grep", "-E", *pattern_args),
+        ("grep", "-aE", *pattern_args),
         input=data,
         stdout=subprocess.PIPE,
+        env={**os.environ, "LC_ALL": "C"} if "-z" in pattern_args else None,
         check=False,
     )
     if result.returncode > 1:
@@ -25,17 +26,38 @@ def grep(pattern_args, data):
     return result.stdout
 
 
-def violations(repo, base, head):
-    base = git(repo, "rev-parse", "--verify", "--end-of-options", base + "^{commit}")
-    head = git(repo, "rev-parse", "--verify", "--end-of-options", head + "^{commit}")
-    revision_range = f"{base.strip().decode()}..{head.strip().decode()}"
-    protected_paths = repo / ".githooks/protected-paths"
+def resolve_commit(repo, revision):
+    result = subprocess.run(
+        ("git", "-C", str(repo), "rev-parse", "--verify", "--end-of-options",
+         revision + "^{commit}"),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+    )
+    if result.returncode:
+        sys.exit(f"Guard-Change check could not find commit revision {revision!r}.")
+    return result.stdout.decode().strip()
+
+
+def violations(repo, base, head, event="pull_request"):
+    base = resolve_commit(repo, base)
+    head = resolve_commit(repo, head)
+    with tempfile.NamedTemporaryFile() as patterns:
+        for revision in (base, head):
+            policy = git(repo, "show", f"{revision}:.githooks/protected-paths")
+            patterns.write(policy)
+            if policy and not policy.endswith(b"\n"):
+                patterns.write(b"\n")
+        patterns.flush()
+        return check_range(repo, f"{base}..{head}", patterns.name, event)
+
+
+def check_range(repo, revision_range, protected_paths, event):
     problems = []
     for commit in git(repo, "rev-list", "--reverse", revision_range).decode().splitlines():
         # Combined diffs omit paths carried over unchanged from any merge parent.
         paths = git(repo, "diff-tree", "--root", "-c", "--no-commit-id",
                     "--name-only", "--no-renames", "-r", "-z", commit)
-        touched = grep(("-z", "-f", str(protected_paths)), paths)
+        touched = grep(("-z", "-f", protected_paths), paths)
         if not touched:
             continue
         message = git(repo, "show", "-s", "--format=%B", commit)
@@ -43,18 +65,32 @@ def violations(repo, base, head):
             continue
         paths = "\n".join(f"  {os.fsdecode(path)!r}" for path in touched[:-1].split(b"\0"))
         problems.append(
-            f"Commit {commit} changes protected paths:\n{paths}\n"
-            "Add this line to the commit message and replace the placeholder with your reason:\n"
-            "  Guard-Change: <what this does to the checks, and why>"
+            f"Commit {commit} changes protected paths:\n{paths}\n{repair_message(event)}"
         )
     return problems
 
 
-def commit_file(repo, path, message):
+def repair_message(event):
+    if event == "push":
+        return (
+            "This commit has landed on main and cannot be reworded because force-pushes "
+            "are blocked. Bring this commit and its protected paths to the owner. "
+            "It will not appear in git log --grep '^Guard-Change:'."
+        )
+    return (
+        "Reword the named commit to add this line, replacing the placeholder with your reason:\n"
+        "  Guard-Change: <what this does to the checks, and why>\n"
+        "If the commit is already pushed, update the branch with git push --force-with-lease. "
+        "Adding the reason in a follow-up commit does not fix it.\n"
+        "If you changed one of them only to get a check to pass, undo that change instead."
+    )
+
+
+def commit_file(repo, path, message, content="fixture\n"):
     file = repo / path
     file.parent.mkdir(parents=True, exist_ok=True)
     with file.open("a") as contents:
-        contents.write("fixture\n")
+        contents.write(content)
     git(repo, "add", "--", path)
     return commit_staged(repo, message)
 
@@ -64,14 +100,15 @@ def commit_staged(repo, message):
     return git(repo, "rev-parse", "HEAD").decode().strip()
 
 
-def expect(repo, case, base, bad_commit=None, bad_path=None):
+def expect(repo, case, base, bad_commit=None, *bad_paths):
     problems = violations(repo, base, "HEAD")
     if bad_commit is None and not problems:
         return
     if bad_commit is not None and len(problems) == 1:
         problem = problems[0]
         if (problem.startswith(f"Commit {bad_commit} ")
-                and f"  {bad_path!r}\n" in problem
+                and set(problem.splitlines()[1:1 + len(bad_paths)])
+                == {f"  {path!r}" for path in bad_paths}
                 and "Guard-Change: <what this does to the checks, and why>" in problem):
             return
     sys.exit(f"Guard-Change fixture failed ({case}): {problems!r}")
@@ -95,6 +132,7 @@ def self_test(protected_paths):
         fixture_paths.write_bytes(protected_paths.read_bytes())
         git(repo, "add", "--", ".githooks/protected-paths")
         base = commit_file(repo, "scripts/check", "Base")
+        policy_path = ".githooks/protected-paths"
         reason = "Guard-Change: record the published counts"
 
         cases = (
@@ -134,10 +172,56 @@ def self_test(protected_paths):
         git(repo, "merge", "-q", "--no-edit", "main")
         expect(repo, "merge carries over protected paths from main", main)
 
+        git(repo, "reset", "--hard", base)
+        original = fixture_paths.read_bytes()
+        fixture_paths.write_bytes(original.replace(b"^scripts/\n", b""))
+        git(repo, "add", "--", policy_path)
+        removed = commit_file(repo, "scripts/check", "Remove protection and edit check")
+        expect(repo, "removed pattern still protects", base, removed, policy_path, "scripts/check")
+
+        git(repo, "reset", "--hard", base)
+        policy_edit = commit_file(repo, policy_path, "Edit policy", "^docs/guardrails/\n")
+        expect(repo, "policy edit requires a reason", base, policy_edit, policy_path)
+
+        git(repo, "reset", "--hard", base)
+        commit_file(repo, policy_path, f"Extend protection\n\n{reason}", "^docs/guardrails/\n")
+        new_path = "docs/guardrails/README.md"
+        newly_protected = commit_file(repo, new_path, "Edit newly protected file")
+        expect(repo, "added pattern protects", base, newly_protected, new_path)
+
+        git(repo, "reset", "--hard", base)
+        earlier = commit_file(repo, "scripts/check", "Edit check without a reason")
+        commit_file(repo, "crates/rules/src/lib.rs", "Edit rules")
+        expect(repo, "earlier commit lacks a reason", base, earlier, "scripts/check")
+
+        git(repo, "reset", "--hard", base)
+        commit_file(repo, "scripts/check", f"Edit branch check\n\n{reason}", "branch\n")
+        merge = subprocess.run(
+            ("git", "-C", str(repo), "merge", "--no-commit", "main"),
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        if merge.returncode != 1 or not git(repo, "ls-files", "-u", "--", "scripts/check"):
+            sys.exit("Guard-Change fixture did not create a conflict in scripts/check.")
+        resolved = commit_file(repo, "scripts/check", "Resolve check conflict", "resolved\n")
+        expect(repo, "merge resolution changes protected path", main, resolved, "scripts/check")
+
+        git(repo, "reset", "--hard", base)
+        # Write the raw name directly to the index. Some filesystems reject it.
+        raw_path = b"scripts/\xe9latin1"
+        blob = git(repo, "rev-parse", "HEAD:scripts/check").strip()
+        subprocess.run(
+            ("git", "-C", str(repo), "update-index", "-z", "--index-info"),
+            input=b"100644 " + blob + b"\t" + raw_path + b"\0",
+            check=True,
+        )
+        raw_commit = commit_staged(repo, "Add a file with a non-UTF-8 name")
+        expect(repo, "non-UTF-8 filename", base, raw_commit, os.fsdecode(raw_path))
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--self-test", action="store_true")
+    parser.add_argument("--event", choices=("pull_request", "push"), default="pull_request")
     parser.add_argument("base", nargs="?")
     parser.add_argument("head", nargs="?")
     args = parser.parse_args()
@@ -146,8 +230,12 @@ def main():
         return 0
     if args.self_test or args.base is None or args.head is None:
         parser.error("specify BASE HEAD or --self-test")
-    repo = Path(os.fsdecode(git(Path.cwd(), "rev-parse", "--show-toplevel").rstrip(b"\n")))
-    problems = violations(repo, args.base, args.head)
+    try:
+        root = git(Path.cwd(), "rev-parse", "--show-toplevel")
+        repo = Path(os.fsdecode(root.rstrip(b"\n")))
+        problems = violations(repo, args.base, args.head, args.event)
+    except subprocess.CalledProcessError:
+        sys.exit("Guard-Change check could not read commit history or protected paths.")
     if problems:
         print("\n\n".join(problems), file=sys.stderr)
         return 1

@@ -23,7 +23,18 @@ jobs:
         env:
           BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
           HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: scripts/check-guard-change "$BASE" "$HEAD"
+        shell: bash
+        run: |
+          if ! git rev-parse --verify --end-of-options "$BASE^{commit}" >/dev/null 2>&1; then
+            printf 'Guard-Change check could not find commit revision %s.\n' "$BASE" >&2
+            exit 1
+          fi
+          script_revision=$BASE
+          if ! git cat-file -e "$BASE:scripts/check-guard-change" 2>/dev/null; then
+            script_revision=$HEAD
+          fi
+          git show "$script_revision:scripts/check-guard-change" |
+            python3 -I - --event "$GITHUB_EVENT_NAME" "$BASE" "$HEAD"
       - uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2.90.8
         with:
           tool: cargo-deny@0.22.0

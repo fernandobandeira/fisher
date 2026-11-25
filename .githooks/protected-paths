@@ -1,5 +1,4 @@
 ^expectations/
-^scripts/
 ^crates/xtask/
 ^\.githooks/
 ^\.github/workflows/

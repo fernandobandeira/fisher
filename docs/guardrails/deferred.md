@@ -1,13 +1,12 @@
 ## Deferred guardrails
 
-Proposed for the owner's decision at merge. The [research and pilot criteria](research/fuzzing-and-formal-verification.md) give the evidence required before spending CI time.
-
-| Gap | Why defer | Observable trigger | First experiment |
-|---|---|---|---|
-| Ordering of stop and worker completion | Existing threaded tests check release on both events | A missing or duplicate best move or hang depends on scheduling | Explore the release path with Loom and replay a broken release-once case. |
-| Unexpected FEN input | Examples already exercise parser rejection | A malformed FEN escapes the examples | Run libFuzzer on FEN parsing and detect a deliberately broken length check. |
-| Square conversion boundaries | Constructors restrict the domain | Square representation or indexing changes | Check the coordinate formula over symbolic inputs with Kani. |
-| Ownership of overlapping searches | UCI currently tracks one accepted search at a time | A protocol proposal allows overlapping searches | Check two searches with TLC and reproduce a wrong release in a transcript. |
-| Correctness of a cutoff | Material minimax already supplies a reference | Two searches disagree and the intended bound is disputed | Prove score preservation in Lean and refute a reversed bound. |
-| Bench and UCI error paths | Some require a full bench or a forced OS or writer failure | The writer, reader or thread creation boundary changes | Inject a final flush, formatting, disconnect or spawn failure at the changed boundary. |
-| Defensive and test-only coverage | Current data and public constructors exclude several paths | Fixed perft data, constructor guarantees, token or slice preconditions, or the inline test changes | Recheck reachability and exercise any newly reachable path with an independent expected result. |
+| Tool | Gap | Why defer | Trigger | First experiment |
+|---|---|---|---|---|
+| Property tests over games | Updates to data absent from FEN | Today's position contains exactly its six FEN fields | Rules add repetition history, an incremental hash or make/unmake | Carry the position through a game. Show the first wrong repetition count, hash or restored position after breaking one update. |
+| Proptest, a generator of UCI input histories | More than four generated input steps | Two searches with queued commands already have a test. The checker and engine disagree on short FENs. | FEN acceptance is settled and the held-move path changes | Deliver A's worker report before stop, then start B. Add generated orderings only for a fault this example and existing tests miss. |
+| Loom and Shuttle, controlled thread schedulers | Shared workers publishing twice | One channel feeds one session loop today | Workers share mutable search data under the Threads option (fisher-a2q.2) | Show the order that sends two best moves for one search. Sample with Shuttle if bounded Loom exploration takes too long. |
+| libFuzzer, a generator guided by code reached | Untested FEN acceptance and rejection | Today's parser has specific rejection examples | Lichess integration (fisher-uqk) or a change to the FEN parser | Weaken the six-field check. Show a short FEN that fisher accepts and the independent reference rejects. Check panics separately. |
+| Kani, a verifier for Rust assertions | Errors in attack tables indexed by occupied squares | All 64 square conversions can be tested directly | Rules adopt bitboards or magic tables | Break one mask. Find occupied squares for which the lookup disagrees with walking the rank, file or diagonal. |
+| TLA+ and TLC, a protocol model and its checker | Releasing a best move during pondering | Current UCI has no pondering search | Work starts on go ponder and ponderhit (fisher-2ha) | Show the event order that releases a move early, then exercise that order in a UCI transcript. |
+| Fault injection, forcing I/O failures | Bench final writes, UCI formatting, reader disconnect and thread creation | Full bench runs and OS failures are expensive to arrange | The writer, reader or thread creation boundary changes | Force the changed operation to fail and check the caller's error or reader exit. |
+| Direct tests of previously unreachable code | Invalid bench input, defensive rules and UCI branches, inline tests | Current data or earlier checks exclude these paths, or the gap is in test code | Bundled perft data, constructors, token or slice checks, or the affected inline test changes | Check which path is now reachable and give it an independently derived expected result. |

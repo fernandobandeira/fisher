@@ -1,0 +1,13 @@
+# Deferred guardrails
+
+These checks would cover a specific gap when the change named below occurs.
+
+| Tool | Gap | Why defer | Trigger | First experiment |
+|---|---|---|---|---|
+| Property tests over games | Updates to data absent from FEN | Today all six position fields are printed | Rules add repetition history, an incremental hash or make/unmake | Carry the position through a game. Show the first wrong repetition count, hash or restored position against independent history, full recomputation or the saved position. |
+| Proptest, a generator of UCI histories | Interactions across more than four generated input steps | Threaded tests cover queued searches and the checker model explores both report orders | After fisher-og6 settles short FENs, a protocol change exposes a fault that survives those tests | Start with a deterministic regression. Generate longer histories only if they catch a separate fault that the regression also misses. |
+| Loom and Shuttle, controlled thread schedulers | Two workers influencing which best move is published | Today events feed one session loop | The search design gives multiple workers a say in publication, before declaring the Threads option in fisher-a2q.2 | Break publication and show the order that sends two best moves for one search. Sample with Shuttle if Loom takes too long. |
+| libFuzzer, a generator guided by code reached | FEN acceptance and rejection | Parser examples cover known errors, including a five-field FEN | After fisher-og6 settles short FENs, Lichess integration (fisher-uqk) or the FEN parser changes | Choose a fault under the settled rules that existing parser examples demonstrably miss. Compare both parsers on identical input. Record panics separately. |
+| TLA+ and TLC, a protocol model and checker | Early move release while pondering | Current UCI has no pondering search | Work starts on go ponder and ponderhit (fisher-2ha) | Find the event order that releases a move early and exercise it in a UCI transcript. |
+| Fault injection, forcing I/O errors | Bench final writes, UCI formatting, disconnect and thread creation | Some require a full bench or a forced OS failure | The writer, reader or thread creation boundary changes | Force the changed operation to fail and check the promised error or reader exit. |
+| Direct tests of newly reachable code | Defensive branches, fixed perft data and inline tests | Current inputs or earlier checks exclude these paths, or the gap is in test code | Bundled data, constructors, token or slice checks, or affected inline tests change | Exercise the newly reachable path with an independently derived expected result. |

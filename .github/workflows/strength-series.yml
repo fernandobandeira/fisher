@@ -1,5 +1,8 @@
 name: Strength series
 on:
+  push:
+    branches: [fisher-op4-series-trials]
+    paths: [scripts/install-fastchess]
   workflow_dispatch:
     inputs:
       measured:
@@ -50,6 +53,7 @@ jobs:
             4) count=25 ;;
             *) echo "Unknown conditions: $CONDITIONS" >&2; exit 1 ;;
           esac
+          if [ "$GITHUB_JOB" = repeat ]; then CONDITIONS=3; fi
           digest=$(strength/series "$MEASURED" "$OPPONENT" "$CONDITIONS" 1 "$count" "$RUNNER_TEMP/series" --concurrency 4)
           printf '%s\n' "$digest"
           printf 'digest=%s\n' "$digest" >> "$GITHUB_OUTPUT"

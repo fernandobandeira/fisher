@@ -11,7 +11,7 @@ const STARTING_DEPTHS: [Depth; 2] = [Depth(1, 0, 20, 2, 10_000), Depth(2, 0, 440
 struct Depth(u8, i32, u64, u64, u64);
 
 enum Step {
-    Depth(Depth),
+    Depth(Depth, Vec<Move>),
     BestMove { after_interrupt: bool },
 }
 
@@ -28,15 +28,17 @@ impl TimedSearch {
         let (sent, reported) = mpsc::channel();
         let session = Session::start(move |request, report| {
             assert!(started.send(request.limits.clone()).is_ok());
+            let mut best_move = first_move(request.position);
             while let Ok(step) = receive(&instructions) {
                 match step {
-                    Step::Depth(Depth(depth, cp, nodes, millis, _)) => {
+                    Step::Depth(Depth(depth, cp, nodes, millis, _), principal_variation) => {
+                        best_move = principal_variation.first().copied();
                         report(SearchReport::FinishedDepth(FinishedDepth {
                             depth,
                             score: Score::Centipawns(cp),
                             nodes,
                             elapsed: Duration::from_millis(millis),
-                            principal_variation: variation(request.position, depth),
+                            principal_variation,
                         }));
                         assert!(sent.send(()).is_ok());
                     }
@@ -44,7 +46,7 @@ impl TimedSearch {
                         if after_interrupt {
                             wait_for_interrupt(&request.interrupt);
                         }
-                        report(SearchReport::BestMove(first_move(request.position)));
+                        report(SearchReport::BestMove(best_move));
                         assert!(sent.send(()).is_ok());
                         return;
                     }
@@ -84,12 +86,18 @@ impl TimedSearch {
     }
 
     fn depth(&self, session: &Session, root: Position, expected: Depth) -> io::Result<()> {
-        self.send(Step::Depth(expected))?;
+        self.depth_with_variation(session, expected, variation(root, expected.0))
+    }
+
+    fn depth_with_variation(
+        &self,
+        session: &Session,
+        expected: Depth,
+        variation: Vec<Move>,
+    ) -> io::Result<()> {
         let Depth(depth, cp, nodes, millis, nps) = expected;
-        let pv = variation(root, depth)
-            .into_iter()
-            .map(move_text)
-            .collect::<Vec<_>>();
+        let pv = variation.iter().copied().map(move_text).collect::<Vec<_>>();
+        self.send(Step::Depth(expected, variation))?;
         assert_eq!(
             session.reply()?,
             format!(
@@ -100,6 +108,8 @@ impl TimedSearch {
         Ok(())
     }
 }
+
+mod clocks;
 
 fn first_move(position: Position) -> Option<Move> {
     position.legal_moves().into_iter().next()

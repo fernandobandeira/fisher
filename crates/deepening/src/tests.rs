@@ -25,7 +25,7 @@ fn interrupt_inside_the_depth_discards_it() -> std::io::Result<()> {
     let worker = thread::spawn(move || {
         let mut reports = Vec::new();
         let mut interrupt_checks = 0;
-        let entered = search_with_clock(
+        let entered = search_with_elapsed_time(
             &request,
             &mut |report| reports.push(report),
             &Instant::now,
@@ -83,7 +83,7 @@ fn reports_totals_from_the_start_of_go() -> std::io::Result<()> {
     let elapsed = Cell::new(Duration::from_millis(2));
     let mut reports = Vec::new();
     let mut node_checks = 0;
-    search_with_clock(
+    search_with_elapsed_time(
         &request,
         &mut |report| {
             reports.push(report);
@@ -132,7 +132,7 @@ fn puzzle_keeps_the_last_finished_depth() -> Result<(), Box<dyn std::error::Erro
         };
         let mut reports = Vec::new();
         let mut checks = 0;
-        let entered = search_with_clock(
+        let entered = search_with_elapsed_time(
             &request,
             &mut |report| reports.push(report),
             &|| request.started,
@@ -358,7 +358,7 @@ fn run_with_limits(position: Position, limits: Limits, depth_cap: u8) -> (u64, V
     };
     let zero_limit = request.limits.nodes == Some(0) || request.limits.depth == Some(0);
     let mut reports = Vec::new();
-    let entered = search_with_clock(
+    let entered = search_with_elapsed_time(
         &request,
         &mut |report| reports.push(report),
         &|| request.started,
@@ -386,4 +386,5 @@ fn assert_reports(reports: &[SearchReport], totals: &[u64], position: Position) 
     assert_eq!(*best_move, expected_move);
 }
 
+mod clocks;
 mod movetime;

@@ -8,27 +8,25 @@ specification](https://backscattering.de/chess/uci/#gui-go),
 
 ## Adoption in fisher-5sg.10
 
-The runner selects sessions from `expectations/uci/`. Copy these
-sessions there under their existing names and register them with the
-real-process transcript tests.
+The real-process transcript tests select these sessions from
+`expectations/uci/`.
 
 | Session | Coverage |
 |---|---|
-| [go-white-clock-exhausted.uci](go-white-clock-exhausted.uci) | White to move with a clock at zero and below zero, with or without Black's healthy clock. |
-| [go-black-clock-exhausted.uci](go-black-clock-exhausted.uci) | Black to move with a clock at zero and below zero, with or without White's healthy clock. |
-| [go-healthy-clock.uci](go-healthy-clock.uci) | White with an increment and Black with one move to go. |
-| [go-clock-terminal.uci](go-clock-terminal.uci) | A terminal position with an exhausted clock. |
+| [go-white-clock-exhausted.uci](../uci/go-white-clock-exhausted.uci) | White to move with a clock at zero and below zero, with or without Black's healthy clock. |
+| [go-black-clock-exhausted.uci](../uci/go-black-clock-exhausted.uci) | Black to move with a clock at zero and below zero, with or without White's healthy clock. |
+| [go-healthy-clock.uci](../uci/go-healthy-clock.uci) | White with an increment and Black with one move to go. |
+| [go-clock-terminal.uci](../uci/go-clock-terminal.uci) | A terminal position with an exhausted clock. |
 
-Use [go-parameters.uci](go-parameters.uci) to replace the whole
-[active go-parameters.uci](../uci/go-parameters.uci). The clocks change
+The successor [go-parameters.uci](../uci/go-parameters.uci) replaces the
+previous session in full. The clocks change
 only the responses to `go wtime 60000`. The other four clock commands
 (`go btime 60000`, `go winc 1000`, `go binc 1000`, `go movestogo 40`)
 retain exactly depths 1–4 by D51 and D28. The successor also includes
 `go depth 1` and `go nodes 20` from the epic's go-parameters table
 (fisher-5sg.5 and fisher-5sg.6), and `go movetime 50` (fisher-5sg.7
-and fisher-5sg.8). The two sibling directories stage dedicated sessions
-and neither contains a staged `go-parameters.uci`. Adopt their dedicated
-sessions separately. The `mate`, `searchmoves`, `ponder`, and four bare
+and fisher-5sg.8). The dedicated depth, nodes and movetime sessions are
+also active in `expectations/uci/`. The `mate`, `searchmoves`, `ponder`, and four bare
 searches retain their responses from the active session.
 
 For a healthy clock, the `<*` record accepts zero or more consecutive
@@ -40,8 +38,9 @@ An exhausted clock at a root with legal moves requires an immediate
 `bestmove` with no `info` (D20, D51). Clean exit detects any extra output
 after the final search.
 
-D56 refers to a terminal zero-time case in fisher-5sg.7. The merged
-[staged movetime sessions](../uci-go-movetime/) have no terminal case.
+D56 refers to a terminal zero-time case in fisher-5sg.7. The active
+[movetime](../uci/go-movetime.uci) and [nodes and movetime](../uci/go-nodes-movetime.uci)
+sessions have no terminal case.
 Use the zero-limit precedence from [fisher-5sg.5](../uci-depth-and-nodes/README.md#derivation):
 send the terminal score before `bestmove 0000`. D41 fixes the terminal
 score, D42 fixes the null move, and Stockfish sf_19 at edb0d9d checks

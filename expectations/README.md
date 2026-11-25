@@ -258,8 +258,7 @@ The active [`go-movetime.uci`](uci/go-movetime.uci) uses the
 [derivation and controlled schedules](uci-go-movetime/README.md) from fisher-5sg.7
 for the deadline, command ordering and several limits. The active
 [nodes and movetime session](uci/go-nodes-movetime.uci) exercises both limits
-from fisher-5sg.6 and fisher-5sg.8. The clocks
-remain with fisher-5sg.9 and fisher-5sg.10.
+from fisher-5sg.6 and fisher-5sg.8.
 
 The repeated record matches zero or more searched reports. It cannot
 assert consecutive depths, exact cumulative node counts for a variable
@@ -270,10 +269,10 @@ time outside `scripts/check`.
 
 ## Searches on the clock
 
-fisher-5sg.9 stages the [clock sessions and controlled schedules](uci-go-clocks/README.md)
+fisher-5sg.9 derives the [clock sessions and controlled schedules](uci-go-clocks/README.md)
 from the owner's answers on fisher-5sg.10, 2026-11-25. The runner selects
-the active sessions in `uci/`. fisher-5sg.10 adopts the four new sessions
-and replaces `uci/go-parameters.uci` with its full successor. The
+the four active sessions and the [successor go-parameters session](uci/go-parameters.uci)
+activated by fisher-5sg.10. The
 controlled schedules fix the time for the move and the time the search may
 use after the margin, the decision to start another depth and the order
 of responses when several limits apply.

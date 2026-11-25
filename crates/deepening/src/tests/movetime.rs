@@ -31,7 +31,7 @@ fn expired_before_depth_one_returns_first_legal_move() -> Result<(), rules::FenE
         let request = timed_request(position, millis, infinite);
         let mut reports = Vec::new();
         let mut checks = 0;
-        search_with_clock(
+        search_with_elapsed_time(
             &request,
             &mut |event| reports.push(event),
             &|| request.started + Duration::from_millis(elapsed),
@@ -55,7 +55,7 @@ fn eleven_milliseconds_allows_a_node_at_zero_elapsed() {
     let request = timed_request(position, 11, false);
     let mut reports = Vec::new();
     let mut checks = 0;
-    search_with_clock(
+    search_with_elapsed_time(
         &request,
         &mut |event| reports.push(event),
         &|| request.started,
@@ -83,7 +83,7 @@ fn expiry_or_interrupt_inside_depth_two_keeps_the_puzzle_move()
         let checks = Cell::new(0);
         let readings = RefCell::new(Vec::new());
         let mut reports = Vec::new();
-        search_with_clock(
+        search_with_elapsed_time(
             &request,
             &mut |event| reports.push(event),
             &|| {
@@ -129,7 +129,7 @@ fn expiry_inside_depth_three_keeps_the_second_variation() -> std::io::Result<()>
     let elapsed = Cell::new(2);
     let mut reports = Vec::new();
     let mut checks = 0;
-    search_with_clock(
+    search_with_elapsed_time(
         &request,
         &mut |event| {
             reports.push(event);
@@ -166,7 +166,7 @@ fn largest_movetime_survives_thirty_nine_milliseconds() -> std::io::Result<()> {
     let request = timed_request(Position::starting(), u64::MAX, false);
     let mut reports = Vec::new();
     let mut checks = 0;
-    search_with_clock(
+    search_with_elapsed_time(
         &request,
         &mut |event| {
             reports.push(event);
@@ -214,7 +214,7 @@ fn reads_elapsed_time_again_after_the_first_1024_nodes() {
     let request = timed_request(Position::starting(), 50, false);
     let mut checks = 0;
     let elapsed = Cell::new(39);
-    search_with_clock(
+    search_with_elapsed_time(
         &request,
         &mut |_| {},
         &|| request.started + Duration::from_millis(elapsed.get()),
@@ -277,7 +277,7 @@ fn assert_expired_terminal_root(fen: &str, score: Score) -> Result<(), rules::Fe
         let mut reports = Vec::new();
         let mut node_checks = 0;
         let elapsed_readings = Cell::new(0);
-        search_with_clock(
+        search_with_elapsed_time(
             &request,
             &mut |event| reports.push(event),
             &|| {
@@ -318,7 +318,7 @@ fn counts_entries_until_nodes_or_movetime_refuses_entry() {
         let elapsed = Cell::new(initial_elapsed);
         let mut reports = Vec::new();
         let mut checks = 0;
-        let entered = search_with_clock(
+        let entered = search_with_elapsed_time(
             &request,
             &mut |event| reports.push(event),
             &|| request.started + Duration::from_millis(elapsed.get()),
@@ -348,7 +348,7 @@ fn explicit_depth_ends_search_before_movetime() {
     request.limits.depth = Some(1);
     let mut reports = Vec::new();
     let mut checks = 0;
-    let entered = search_with_clock(
+    let entered = search_with_elapsed_time(
         &request,
         &mut |report| reports.push(report),
         &|| request.started + Duration::from_millis(2),

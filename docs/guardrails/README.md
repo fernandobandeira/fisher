@@ -11,6 +11,7 @@ A guardrail catches a failure or makes it visible to the owner. Before merging, 
 - [Dependencies](#dependencies) — Check third-party dependencies even when an implementation change is small.
 - [Guarding the guards](#guarding-the-guards) — Make changes to what passes easy for the owner to find and review.
 - [Review](#review) — Focus the owner’s review on claims, interfaces and guards.
+- [Deferred guardrails](#deferred-guardrails) — Revisit checks when their adoption triggers occur.
 
 ## Checks before handoff and merge
 
@@ -119,3 +120,7 @@ Focus the owner’s review on claims, interfaces and guards.
 | Ticketed TODO | Deferred work with no owner-visible record | [Deferred work rules](../../CODING_STANDARDS.md#deferred-work) | Prose only |
 
 See [review](review.md) for how review tiers and ticketed work help the owner.
+
+## Deferred guardrails
+
+The [deferred checks](deferred.md) pair each guardrail fisher has considered with the change that would make it worth adopting, drawing on the [fuzzing and formal verification research](research/fuzzing-and-formal-verification.md).

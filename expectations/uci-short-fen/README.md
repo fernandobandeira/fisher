@@ -28,10 +28,10 @@ the halfmove clock, leaves the fullmove number unchanged and checkmates Black.
 
 ## Adoption in fisher-og6
 
-Move [the four-field session](position-fen-four-fields.uci) and
-[the five-field session](position-fen-five-fields.uci) into `expectations/uci/`
-as written, select them in the transcript runner and update the expectations
-README when implementing fisher-og6. Each uses exact terminal responses so
+The transcript runner selects
+[the four-field session](../uci/position-fen-four-fields.uci) and
+[the five-field session](../uci/position-fen-five-fields.uci) in
+`expectations/uci/`. Each uses exact terminal responses so
 the observation needs no reference position replay or elapsed-time reading.
 The sessions check acceptance and application of the move. The Stockfish
 probe observes the clock values via `d`.

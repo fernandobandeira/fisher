@@ -279,6 +279,7 @@ of responses when several limits apply.
 
 ## Short FEN transcripts
 
-The [four- and five-field sessions](uci-short-fen/README.md) for fisher-og6
-are staged outside `uci/`. They use Stockfish 19's treatment of omitted FEN
-fields and fisher's existing responses to the equivalent six-field commands.
+The [four-field session](uci/position-fen-four-fields.uci) and
+[five-field session](uci/position-fen-five-fields.uci) are active for fisher-og6.
+The [source record](uci-short-fen/README.md) gives Stockfish 19's treatment of
+omitted FEN fields and fisher's responses to the equivalent six-field commands.

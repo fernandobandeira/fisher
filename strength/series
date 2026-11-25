@@ -25,8 +25,8 @@ except ImportError:
 ROOT = Path(__file__).resolve().parents[1]
 OPENINGS = ROOT / "strength/series-openings.epd"
 FIRST_NODE_REVISION = "4fd30025a6974840b2a65a4427c819a89eefcd13"
-CONDITIONS = {3: (1_000_000, 3), 4: (10_000_000, 500)}
-RANGE_COUNT = 1
+CONDITIONS = {3: (1_000_000, 2_000), 4: (10_000_000, 500)}
+RANGE_COUNT = 20
 BENCH_RUNS = 5
 FINISHED_RESULTS = {"1-0", "0-1", "1/2-1/2"}
 

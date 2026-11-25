@@ -86,6 +86,11 @@ fn go_movetime() -> io::Result<()> {
 }
 
 #[test]
+fn go_nodes_movetime() -> io::Result<()> {
+    play_transcript("go-nodes-movetime")
+}
+
+#[test]
 fn quit_while_deepening() -> io::Result<()> {
     play_transcript("quit-while-deepening")
 }

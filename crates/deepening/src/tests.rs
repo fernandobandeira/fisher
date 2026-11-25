@@ -13,7 +13,10 @@ fn interrupt_inside_the_depth_discards_it() -> std::io::Result<()> {
     let interrupt = Arc::new(AtomicBool::new(false));
     let request = SearchRequest {
         position: puzzle().map_err(io::Error::other)?,
-        limits: Limits::default(),
+        limits: Limits {
+            depth: Some(2),
+            ..Limits::default()
+        },
         interrupt: Arc::clone(&interrupt),
         started: Instant::now(),
     };
@@ -22,7 +25,7 @@ fn interrupt_inside_the_depth_discards_it() -> std::io::Result<()> {
     let worker = thread::spawn(move || {
         let mut reports = Vec::new();
         let mut interrupt_checks = 0;
-        search_with_clock(
+        let entered = search_with_clock(
             &request,
             &mut |report| reports.push(report),
             &Instant::now,
@@ -35,17 +38,18 @@ fn interrupt_inside_the_depth_discards_it() -> std::io::Result<()> {
             },
             2,
         );
-        (interrupt_checks, reports)
+        (interrupt_checks, entered, reports)
     });
     reached
         .recv_timeout(HANG_TIMEOUT)
         .map_err(io::Error::other)?;
     interrupt.store(true, Ordering::Relaxed);
     resume.send(()).map_err(io::Error::other)?;
-    let (interrupt_checks, reports) = worker
+    let (interrupt_checks, entered, reports) = worker
         .join()
         .map_err(|_| io::Error::other("search thread died"))?;
     assert_eq!(interrupt_checks, 15);
+    assert_eq!(entered, 14);
     assert_eq!(reports, [SearchReport::BestMove(expected)]);
     Ok(())
 }
@@ -120,7 +124,7 @@ fn puzzle_keeps_the_last_finished_depth() -> Result<(), Box<dyn std::error::Erro
         let request = SearchRequest {
             position: puzzle()?,
             limits: Limits {
-                infinite: true,
+                nodes: Some(1308),
                 ..Limits::default()
             },
             interrupt: Arc::new(AtomicBool::new(false)),
@@ -128,7 +132,7 @@ fn puzzle_keeps_the_last_finished_depth() -> Result<(), Box<dyn std::error::Erro
         };
         let mut reports = Vec::new();
         let mut checks = 0;
-        search_with_clock(
+        let entered = search_with_clock(
             &request,
             &mut |report| reports.push(report),
             &|| request.started,
@@ -138,9 +142,10 @@ fn puzzle_keeps_the_last_finished_depth() -> Result<(), Box<dyn std::error::Erro
                     request.interrupt.store(true, Ordering::Relaxed);
                 }
             },
-            2,
+            3,
         );
         assert_eq!(checks, expected_checks);
+        assert_eq!(entered, if interrupt_at.is_some() { 669 } else { 1308 });
         let Some((SearchReport::BestMove(best_move), depths)) = reports.split_last() else {
             return Err(format!("unexpected reports: {reports:?}").into());
         };
@@ -211,6 +216,174 @@ fn infinite_search_reaches_the_production_depth_cap() -> Result<(), Box<dyn std:
     }
     assert_eq!(*last, SearchReport::BestMove(best_move));
     Ok(())
+}
+
+#[test]
+fn node_limit_counts_entries_even_when_a_depth_is_interrupted() {
+    // Independent counts from expectations/uci-depth-and-nodes/README.md.
+    for (limit, totals) in [
+        (0, &[][..]),
+        (19, &[][..]),
+        (20, &[20][..]),
+        (21, &[20][..]),
+        (439, &[20][..]),
+        (440, &[20, 440][..]),
+    ] {
+        let (entered, reports) = run_with_limits(
+            Position::starting(),
+            Limits {
+                nodes: Some(limit),
+                ..Limits::default()
+            },
+            3,
+        );
+        assert_eq!(entered, limit);
+        assert_reports(&reports, totals, Position::starting());
+    }
+}
+
+#[test]
+fn depth_is_clamped_before_narrowing() {
+    for depth in [3, 256, u64::MAX] {
+        let position = Position::starting();
+        let (entered, reports) = run_with_limits(
+            position,
+            Limits {
+                depth: Some(depth),
+                ..Limits::default()
+            },
+            2,
+        );
+        assert_eq!(entered, 440, "go depth {depth}");
+        assert_reports(&reports, &[20, 440], position);
+    }
+}
+
+#[test]
+fn the_first_limit_reached_ends_search() {
+    for (depth, nodes) in [(1, 440), (2, 20)] {
+        let position = Position::starting();
+        let (entered, reports) = run_with_limits(
+            position,
+            Limits {
+                depth: Some(depth),
+                nodes: Some(nodes),
+                ..Limits::default()
+            },
+            3,
+        );
+        assert_eq!(entered, 20);
+        assert_reports(&reports, &[20], position);
+    }
+}
+
+#[test]
+fn node_limit_before_the_first_finished_depth_uses_the_first_legal_move()
+-> Result<(), rules::FenError> {
+    let position = puzzle()?;
+    let (entered, reports) = run_with_limits(
+        position,
+        Limits {
+            nodes: Some(14),
+            ..Limits::default()
+        },
+        2,
+    );
+    assert_eq!(entered, 14);
+    assert_reports(&reports, &[], position);
+    Ok(())
+}
+
+#[test]
+fn zero_limits_enter_no_nodes() -> Result<(), rules::FenError> {
+    let position = Position::from_fen("7k/8/5K1Q/8/8/8/8/8 b - - 0 1")?;
+    for limits in [
+        Limits {
+            depth: Some(0),
+            ..Limits::default()
+        },
+        Limits {
+            nodes: Some(0),
+            ..Limits::default()
+        },
+    ] {
+        let (entered, reports) = run_with_limits(position, limits, 2);
+        assert_eq!(entered, 0);
+        assert_eq!(reports.len(), 1);
+        let [SearchReport::BestMove(best_move)] = reports.as_slice() else {
+            unreachable!("expected one best move")
+        };
+        assert_eq!(move_text(*best_move).as_deref(), Some("h8g8"));
+    }
+    Ok(())
+}
+
+#[test]
+fn zero_depth_reports_a_terminal_root() -> Result<(), rules::FenError> {
+    let position = Position::from_fen("7k/6Q1/5K2/8/8/8/8/8 b - - 0 1")?;
+    let (entered, reports) = run_with_limits(
+        position,
+        Limits {
+            depth: Some(0),
+            ..Limits::default()
+        },
+        2,
+    );
+    assert_eq!(entered, 0);
+    assert_eq!(
+        reports,
+        [
+            SearchReport::FinishedDepth(FinishedDepth {
+                depth: 0,
+                score: Score::Mate {
+                    plies: 0,
+                    winning: false,
+                },
+                nodes: 0,
+                elapsed: Duration::ZERO,
+                principal_variation: Vec::new(),
+            }),
+            SearchReport::BestMove(None),
+        ]
+    );
+    Ok(())
+}
+
+fn run_with_limits(position: Position, limits: Limits, depth_cap: u8) -> (u64, Vec<SearchReport>) {
+    let request = SearchRequest {
+        position,
+        limits,
+        interrupt: Arc::new(AtomicBool::new(false)),
+        started: Instant::now(),
+    };
+    let zero_limit = request.limits.nodes == Some(0) || request.limits.depth == Some(0);
+    let mut reports = Vec::new();
+    let entered = search_with_clock(
+        &request,
+        &mut |report| reports.push(report),
+        &|| request.started,
+        &mut || assert!(!zero_limit, "zero limit asked for node entry"),
+        depth_cap,
+    );
+    (entered, reports)
+}
+
+fn assert_reports(reports: &[SearchReport], totals: &[u64], position: Position) {
+    let Some((SearchReport::BestMove(best_move), depths)) = reports.split_last() else {
+        unreachable!("expected depth reports and a best move")
+    };
+    assert_eq!(depths.len(), totals.len());
+    let mut expected_move = position.legal_moves().into_iter().next();
+    for ((depth, nodes), report) in (1..).zip(totals).zip(depths) {
+        let SearchReport::FinishedDepth(report) = report else {
+            unreachable!("expected a depth report")
+        };
+        assert_eq!(report.depth, depth);
+        assert_eq!(report.nodes, *nodes);
+        assert_eq!(report.score, Score::Centipawns(0));
+        expected_move = report.principal_variation.first().copied();
+    }
+    assert_eq!(*best_move, expected_move);
 }
 
 mod movetime;

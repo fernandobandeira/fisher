@@ -105,3 +105,12 @@ fn new_game_consumes_the_rest_of_the_line() {
         Input::Handled(Command::UciNewGame)
     );
 }
+
+#[test]
+fn reads_the_largest_depth() {
+    let Input::Handled(Command::Go(parameters)) = parse_command("go depth 18446744073709551615")
+    else {
+        unreachable!("expected go")
+    };
+    assert_eq!(parameters.depth, Some(u64::MAX));
+}

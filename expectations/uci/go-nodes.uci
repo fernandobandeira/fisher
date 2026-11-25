@@ -1,35 +1,77 @@
-# Iterative deepening expectations from fisher-5sg.13, 2026-11-24.
-# Scores and per-ply counts independently enumerated with python-chess 1.11.2
-# (https://pypi.org/project/chess/1.11.2/) using fisher-2aj rules 1 to 7.
-# Decision 10 sums the per-ply counts within each search, then adds the
-# nodes from every earlier finished depth of this go. Starting-position
-# counts match expectations/perft.epd. D28 sets the default depth to 4.
-# The derivation script and results are on fisher-5sg.13.
-# Four-ply info spelling from Stockfish sf_19 (edb0d9d), read 2026-11-24:
-# UCIEngine::on_update_full in src/uci.cpp and SearchManager::output_pv in src/search.cpp.
-# fisher-r6y D41 sets this spelling; fisher-8hc.6 committed these sessions.
-# D3-D6 supply the
-# existing principal variation and allowances, with time at least one under D41.
-# The fisher-2aj.2 sources below supply the retained scores and response order;
-# fisher-5sg.13 derived the node totals.
-# Sources: April 2006 UCI specification https://backscattering.de/chess/uci/
-# and fisher-l7f owner decisions from 2026-11-22.
-# Search: fisher-2aj rules 1 to 8 and 10. Exact search values
-# were checked by exhaustive enumeration with python-chess 1.11.2.
-# Starting score: four-ply minimax with python-chess 1.11.2 followed rules
-# 1 to 7. An independent reviewer reproduced cp 0 and per-ply counts
-# 20/400/8902/197281 with their own minimax. See expectations/perft.epd.
-# Those published perft counts sum to 206603 nodes.
-# Searched transcript written 2026-11-23.
+# fisher-5sg.5, 2026-11-25. See README.md for derivation.
+# Sources: April 2006 UCI specification https://backscattering.de/chess/uci/,
+# fisher-8ie, fisher-r6y D20, D24, D28 and D41, fisher-5sg decisions 2–6 and 10.
+# Perft: expectations/perft.epd. Independent minimax: python-chess 1.11.2.
+# Full info spelling: Stockfish sf_19 (edb0d9d), as cited in expectations/README.md.
 > position startpos
+> go nodes 0
+< bestmove {legal}
+
+> go nodes 19
+< bestmove {legal}
+
 > go nodes 20
-# Rules 1 to 7 and 10. See the header for the per-ply counts.
+< info depth 1 multipv 1 score cp 0 nodes 20 nps {nps} time {time} pv {pv}
+< bestmove {legal}
+
+> go nodes 21
+< info depth 1 multipv 1 score cp 0 nodes 20 nps {nps} time {time} pv {pv}
+< bestmove {legal}
+
+> go nodes 439
+< info depth 1 multipv 1 score cp 0 nodes 20 nps {nps} time {time} pv {pv}
+< bestmove {legal}
+
+> go nodes 440
 < info depth 1 multipv 1 score cp 0 nodes 20 nps {nps} time {time} pv {pv}
 < info depth 2 multipv 1 score cp 0 nodes 440 nps {nps} time {time} pv {pv}
-< info depth 3 multipv 1 score cp 0 nodes 9762 nps {nps} time {time} pv {pv}
-< info depth 4 multipv 1 score cp 0 nodes 216365 nps {nps} time {time} pv {pv}
-# UCI go/bestmove. Rules 1 and 8 defer this parameter; under D28 fisher searches depths 1 to 4.
 < bestmove {legal}
-# UCI quit.
+
+> position fen 7k/8/5K1Q/8/8/8/8/8 b - - 0 1
+# The only legal move pins the zero-limit answer (D20).
+> go nodes 0
+< bestmove h8g8
+
+# One node short of depth 5, then the exact cumulative limit.
+> go nodes 3137
+< info depth 1 multipv 1 score cp -900 nodes 1 nps {nps} time {time} pv h8g8
+< info depth 2 multipv 1 score cp -900 nodes 23 nps {nps} time {time} pv {pv}
+< info depth 3 multipv 1 score mate -1 nodes 75 nps {nps} time {time} pv h8g8 h6g7
+< info depth 4 multipv 1 score mate -1 nodes 857 nps {nps} time {time} pv h8g8 h6g7
+< bestmove h8g8
+
+> go nodes 3138
+< info depth 1 multipv 1 score cp -900 nodes 1 nps {nps} time {time} pv h8g8
+< info depth 2 multipv 1 score cp -900 nodes 23 nps {nps} time {time} pv {pv}
+< info depth 3 multipv 1 score mate -1 nodes 75 nps {nps} time {time} pv h8g8 h6g7
+< info depth 4 multipv 1 score mate -1 nodes 857 nps {nps} time {time} pv h8g8 h6g7
+< info depth 5 multipv 1 score mate -1 nodes 3138 nps {nps} time {time} pv h8g8 h6g7
+< bestmove h8g8
+
+# The sole node of depth 1 uses the entire limit. Hold the move (decision 5).
+> go infinite nodes 1
+< info depth 1 multipv 1 score cp -900 nodes 1 nps {nps} time {time} pv {pv}
+> isready
+< readyok
+# Rule 8. Reject both commands and keep the original position.
+> position fen 7k/8/5K2/6Q1/8/8/8/8 b - - 0 1
+< info string {message:position rejected: waiting for stop}
+> go nodes 1
+< info string {message:go rejected: waiting for stop}
+> stop
+# D24. The following go uses the retained position.
+> go nodes 0
+< bestmove h8g8
+< bestmove h8g8
+> position fen 7k/8/5K2/6Q1/8/8/8/8 b - - 0 1
+> go nodes 0
+< bestmove h8h7
+
+# The terminal response precedes the zero limit.
+> position fen 7k/6Q1/5K2/8/8/8/8/8 b - - 0 1
+> go nodes 0
+< info depth 0 score mate 0
+< bestmove 0000
+
 > quit
 ! exit

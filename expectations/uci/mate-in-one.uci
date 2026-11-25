@@ -17,12 +17,15 @@
 # were checked by exhaustive enumeration with python-chess 1.11.2.
 # Searched transcript written 2026-11-23.
 # UCI position and go.
-# fisher-4yn.1, 2026-11-25: every node total at depth 2 or more reads
-# {nodes}. Once the search makes cutoffs, such a total depends on the order
-# Position::legal_moves returns moves in, which nobody chose (fisher-4yn,
-# D36 and D38). Scores, depths, principal variations, bestmove and the
-# depth-1 totals (the number of legal moves at the root) stay exact. A node
-# count in these comments describes the search without cutoffs before it.
+# fisher-4yn.1, 2026-11-25: a node total at depth 2 or more reads {nodes},
+# except below a root with one legal move. Once the search makes cutoffs,
+# such a total depends on the order Position::legal_moves returns moves in,
+# which nobody chose (fisher-4yn, D36 and D38). A root with one legal move
+# puts no bound on the replies, so depth 2 there plays every one and its
+# total stays exact (owner decision on PR #74). Scores, depths, principal
+# variations, bestmove and the depth-1 totals (the number of legal moves at
+# the root) stay exact. A node count in these comments describes the search
+# without cutoffs before it.
 > position fen 7k/8/5KQ1/8/8/8/8/8 w - - 0 1
 > go
 # Rules 4, 5, 7 and 10. Qg7 is the only move that gives checkmate in one.

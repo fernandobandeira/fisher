@@ -6,7 +6,9 @@
 # as cited in expectations/README.md. See README.md beside this session.
 #
 # Every node total at depth 2 or more reads {nodes}, as in uci/, except the
-# starting position at depth 2. The startpos limits 439 and 440 change, the
+# starting position at depth 2 (79) and the depth-2 total below the forced
+# position's sole legal move (23: no bound on the replies, so every one is
+# played; owner decision on PR #74). The startpos limits 439 and 440 change, the
 # 3137 case is dropped and the 3138 case accepts further depths.
 #
 # 439 and 440 become 78 and 79 (fisher-4yn, "Nodes" and "Expected sessions").
@@ -65,7 +67,7 @@
 # A limit of 3138 finishes at least depth 5 (Knuth and Moore 1975, above).
 > go nodes 3138
 < info depth 1 multipv 1 score cp -900 nodes 1 nps {nps} time {time} pv h8g8
-< info depth 2 multipv 1 score cp -900 nodes {nodes} nps {nps} time {time} pv {pv}
+< info depth 2 multipv 1 score cp -900 nodes 23 nps {nps} time {time} pv {pv}
 < info depth 3 multipv 1 score mate -1 nodes {nodes} nps {nps} time {time} pv h8g8 h6g7
 < info depth 4 multipv 1 score mate -1 nodes {nodes} nps {nps} time {time} pv h8g8 h6g7
 < info depth 5 multipv 1 score mate -1 nodes {nodes} nps {nps} time {time} pv h8g8 h6g7

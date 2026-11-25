@@ -118,7 +118,9 @@ fisher-4yn.1 replaced every node total at depth 2 or more in `uci/` with
 `{nodes}` on 2026-11-25. Once the search makes cutoffs, such a total depends
 on the order of legal moves, which nobody chose (fisher-4yn). Scores,
 depths, principal variations and `bestmove` stay exact, and so does every
-total at depth 1, which is the number of legal moves at the root. See
+total at depth 1, which is the number of legal moves at the root. So does
+a depth-2 total below a root with one legal move, where depth 2 plays
+every reply (owner decision on PR #74, 2026-11-25). See
 [Search with cutoffs](#search-with-cutoffs).
 
 The runner compares moves from two fresh processes for `equal-scores.uci`.

@@ -37,7 +37,8 @@ alpha-beta pruning", *Artificial Intelligence* 6, 1975), so the totals
 without cutoffs are upper bounds for it. Three kinds of total stay exact. Depth 1 plays
 every legal move at the root, because nothing bounds the root from above.
 A root with one legal move plays every reply at depth 2 for the same
-reason. The starting position at depth 2 enters 20 + 39 = 59 nodes: the
+reason, in every search of depth 2 or more, so the forced positions keep
+1 node at ply 1 and 21 (h8g8) or 25 (h8h7) at ply 2. The starting position at depth 2 enters 20 + 39 = 59 nodes: the
 first root move costs 1 + 20, and each of the other 19 costs 1 + 1,
 because no capture is possible within two plies and the first reply
 already scores cp 0, which proves the root move no better than the first.
@@ -66,13 +67,13 @@ cutoffs, depths 1 and 2 keep their counts, because the root has one legal
 move. From depth 3 the counts have no outside value; the exhaustive ones
 are upper bounds.
 
-| Depth | Nodes in that search | Total since go | Score | Principal variation |
-|---:|---:|---:|---|---|
-| 1 | 1 | 1 | cp -900 | h8g8 |
-| 2 | 22 | 23 | cp -900 | h8g8 f6e5 (one of the tied variations) |
-| 3 | No outside value (at most 52) | No outside value (at most 75) | mate -1 | h8g8 h6g7 |
-| 4 | No outside value (at most 782) | No outside value (at most 857) | mate -1 | h8g8 h6g7 |
-| 5 | No outside value (at most 2281) | No outside value (at most 3138) | mate -1 | h8g8 h6g7 |
+| Depth | Nodes at plies 1 and 2 | Nodes in that search | Total since go | Score | Principal variation |
+|---:|---|---:|---:|---|---|
+| 1 | 1 | 1 | 1 | cp -900 | h8g8 |
+| 2 | 1, 21 | 22 | 23 | cp -900 | h8g8 f6e5 (one of the tied variations) |
+| 3 | 1, 21 | No outside value (at most 52) | No outside value (at most 75) | mate -1 | h8g8 h6g7 |
+| 4 | 1, 21 | No outside value (at most 782) | No outside value (at most 857) | mate -1 | h8g8 h6g7 |
+| 5 | 1, 21 | No outside value (at most 2281) | No outside value (at most 3138) | mate -1 | h8g8 h6g7 |
 
 At depth 2, the mate after `h6g7` lies at the horizon and scores by material.
 From depth 3, that same position ends the variation with Black checkmated
@@ -130,7 +131,12 @@ The session receives the report and `readyok` before sending `stop`
 to release the held move. On the same position the owner dropped the `nodes 3137` case on
 2026-11-25 (PR #74): no outside value fixes the total at depth 5 with
 cutoffs. `nodes 3138` still finishes depth 5, because the total through
-depth 5 is at most 3138. Depth 6 or more may also finish.
+depth 5 is at most 3138. Depth 6 or more may also finish. For `go depth 5`
+require exactly depths 1 to 5. For `nodes 3138` require consecutive
+reports from depth 1 through at least depth 5, and allow further depths.
+In both, require the totals 1 and 23 at depths 1 and 2, then totals that
+rise with each depth, are no greater than 75, 857 and 3138 at depths 3
+to 5, and never exceed a node limit.
 
 Use puzzle 001om from [mate-in-two.tsv](../mate-in-two.tsv) for the
 interrupt schedules. Its FEN is
@@ -148,15 +154,15 @@ With cutoffs, `go nodes 1308` no longer ends the search exactly at depth
 finishes within the rest of the limit has no outside value. The two
 schedules that used it send `go depth 2` instead, which ends the search
 after depth 2 whatever the order of moves. Their interruption moves from
-node 639 of depth 2 to its first node, because depth 2 plays all 30 root
-moves and so cannot finish after one node, while the count of any later
-node boundary inside depth 2 has no outside value.
+node 639 of depth 2 to node 29, 59 nodes in all: depth 2 plays all 30
+root moves, so after 29 of its nodes at least one root move is still
+unplayed and depth 2 has not finished.
 
 | Schedule | Required observations |
 |---|---|
 | Use startpos with a private depth cap of 2. Send `go depth 3`, `go depth 256`, and `go depth 18446744073709551615` in fresh sessions. | Exactly depths 1 and 2 with cp 0 and totals 20 and 79, followed by one best move from the depth-2 principal variation. Exactly 79 nodes entered. Narrowing 256 before clamping would produce zero. The largest depth is the parser's u64 maximum. |
 | Send `go depth 2` on puzzle 001om. Handle `stop` before entering node 15. | Exactly 14 nodes entered, no searched report, one `bestmove c5b4` under D20. A later idle `stop` followed by `isready` produces only `readyok`. |
 | Send `go nodes 14` on puzzle 001om. | Exactly 14 nodes entered, no `info` line, one `bestmove c5b4` under D20. |
-| Send `go depth 2` on puzzle 001om. After depth 1 and one node of depth 2, handle `stop`, `quit` or end of input in separate sessions (D11, D25). | Exactly 31 nodes entered. The only searched report is depth 1, cp -600, 30 nodes, PV g5g2. Exactly `bestmove g5g2`. Quit or end of input gives clean exit with no further output. |
+| Send `go depth 2` on puzzle 001om. After depth 1 and 29 nodes of depth 2, handle `stop`, `quit` or end of input in separate sessions (D11, D25). | Exactly 59 nodes entered. The only searched report is depth 1, cp -600, 30 nodes, PV g5g2. Exactly `bestmove g5g2`. Quit or end of input gives clean exit with no further output. |
 | Send the same go on puzzle 001om. Let the session handle the search ending before `stop`, `quit` or end of input, in separate sessions. | Nodes entered equal the depth-2 total, which has no outside value (at most 1308). Depth 1 as above, then depth 2, cp -700, that total, PV c5f2 g2g3. Exactly `bestmove c5f2` before the command takes effect. Idle stop adds no output. Quit or end of input gives clean exit. |
 | On the h8g8 position send `go depth 1`. Hold before entering the first node. Send the h8h7 position and `go nodes 1`. After both diagnostics, handle `stop` and send `go depth 0` immediately after it. | One diagnostic per rejected command in input order. Zero nodes entered and no searched report for the interrupted search. Exactly `bestmove h8g8` for the stopped search before exactly `bestmove h8g8` for the following go. |

@@ -8,12 +8,15 @@
 # published perft (expectations/perft.epd) supply the fixed-depth counts.
 # Scores follow fisher-2aj rules 1–7. The README beside this session shows
 # the working. The last four searches retain the active session's setup.
-# fisher-4yn.1, 2026-11-25: every node total at depth 2 or more reads
-# {nodes}. Once the search makes cutoffs, such a total depends on the order
-# Position::legal_moves returns moves in, which nobody chose (fisher-4yn,
-# D36 and D38). Scores, depths, principal variations, bestmove and the
-# depth-1 totals (the number of legal moves at the root) stay exact. A node
-# count in these comments describes the search without cutoffs before it.
+# fisher-4yn.1, 2026-11-25: a node total at depth 2 or more reads {nodes},
+# except below a root with one legal move. Once the search makes cutoffs,
+# such a total depends on the order Position::legal_moves returns moves in,
+# which nobody chose (fisher-4yn, D36 and D38). A root with one legal move
+# puts no bound on the replies, so depth 2 there plays every one and its
+# total stays exact (owner decision on PR #74). Scores, depths, principal
+# variations, bestmove and the depth-1 totals (the number of legal moves at
+# the root) stay exact. A node count in these comments describes the search
+# without cutoffs before it.
 > position startpos
 > go depth 1
 # UCI go depth and fisher-5sg.5: one finished depth with 20 nodes.
@@ -102,7 +105,7 @@
 # D28 and fisher-5sg decision 10. See the README for the per-ply counts.
 # Rules 2 and 3 score the horizon by material, so depths before the mate show material.
 < info depth 1 multipv 1 score cp -900 nodes 1 nps {nps} time {time} pv {pv}
-< info depth 2 multipv 1 score cp -900 nodes {nodes} nps {nps} time {time} pv {pv}
+< info depth 2 multipv 1 score cp -900 nodes 23 nps {nps} time {time} pv {pv}
 < info depth 3 multipv 1 score mate -1 nodes {nodes} nps {nps} time {time} pv {pv}
 < info depth 4 multipv 1 score mate -1 nodes {nodes} nps {nps} time {time} pv {pv}
 # UCI bestmove and D5. Enumeration gives h8g8 as the sole legal move.
@@ -112,7 +115,7 @@
 # D28 and fisher-5sg decision 10. See the README for the per-ply counts.
 # Rules 2 and 3 score the horizon by material, so depths before the mate show material.
 < info depth 1 multipv 1 score cp -900 nodes 1 nps {nps} time {time} pv {pv}
-< info depth 2 multipv 1 score cp -900 nodes {nodes} nps {nps} time {time} pv {pv}
+< info depth 2 multipv 1 score cp -900 nodes 27 nps {nps} time {time} pv {pv}
 < info depth 3 multipv 1 score mate -1 nodes {nodes} nps {nps} time {time} pv {pv}
 < info depth 4 multipv 1 score mate -1 nodes {nodes} nps {nps} time {time} pv {pv}
 # UCI bestmove and D5. Enumeration gives h8h7 as the sole legal move.
@@ -123,7 +126,7 @@
 # D28 and fisher-5sg decision 10. See the README for the per-ply counts.
 # Rules 2 and 3 score the horizon by material, so depths before the mate show material.
 < info depth 1 multipv 1 score cp -900 nodes 1 nps {nps} time {time} pv {pv}
-< info depth 2 multipv 1 score cp -900 nodes {nodes} nps {nps} time {time} pv {pv}
+< info depth 2 multipv 1 score cp -900 nodes 27 nps {nps} time {time} pv {pv}
 < info depth 3 multipv 1 score mate -1 nodes {nodes} nps {nps} time {time} pv {pv}
 < info depth 4 multipv 1 score mate -1 nodes {nodes} nps {nps} time {time} pv {pv}
 # UCI bestmove and D5. Enumeration gives h8h7 as the sole legal move.
@@ -132,7 +135,7 @@
 # D28 and fisher-5sg decision 10. See the README for the per-ply counts.
 # Rules 2 and 3 score the horizon by material, so depths before the mate show material.
 < info depth 1 multipv 1 score cp -900 nodes 1 nps {nps} time {time} pv {pv}
-< info depth 2 multipv 1 score cp -900 nodes {nodes} nps {nps} time {time} pv {pv}
+< info depth 2 multipv 1 score cp -900 nodes 27 nps {nps} time {time} pv {pv}
 < info depth 3 multipv 1 score mate -1 nodes {nodes} nps {nps} time {time} pv {pv}
 < info depth 4 multipv 1 score mate -1 nodes {nodes} nps {nps} time {time} pv {pv}
 # UCI bestmove and D5. The reference follows the prefixed position and skips the setoption value.

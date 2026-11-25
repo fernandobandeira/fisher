@@ -21,12 +21,15 @@
 # 20/400/8902/197281 with their own minimax. See expectations/perft.epd.
 # Searched transcript written 2026-11-23.
 # UCI position and move format. e5d6 is en passant, and e1g1 castles.
-# fisher-4yn.1, 2026-11-25: every node total at depth 2 or more reads
-# {nodes}. Once the search makes cutoffs, such a total depends on the order
-# Position::legal_moves returns moves in, which nobody chose (fisher-4yn,
-# D36 and D38). Scores, depths, principal variations, bestmove and the
-# depth-1 totals (the number of legal moves at the root) stay exact. A node
-# count in these comments describes the search without cutoffs before it.
+# fisher-4yn.1, 2026-11-25: a node total at depth 2 or more reads {nodes},
+# except below a root with one legal move. Once the search makes cutoffs,
+# such a total depends on the order Position::legal_moves returns moves in,
+# which nobody chose (fisher-4yn, D36 and D38). A root with one legal move
+# puts no bound on the replies, so depth 2 there plays every one and its
+# total stays exact (owner decision on PR #74). Scores, depths, principal
+# variations, bestmove and the depth-1 totals (the number of legal moves at
+# the root) stay exact. A node count in these comments describes the search
+# without cutoffs before it.
 > position startpos moves e2e4 a7a6 e4e5 d7d5 e5d6 e7e6 g1f3 g8f6 f1e2 f8e7 e1g1
 > go
 # Rules 1 and 10. UCI info depth, score and nodes; time, nps and pv as in the header.
@@ -42,7 +45,7 @@
 # Rules 1 to 7 and 10. Black must play g7h8, then f4f8 is checkmate.
 # Python-chess counts 1, 64, 58 and 3599 nodes at plies 1 to 4.
 < info depth 1 multipv 1 score cp -2500 nodes 1 nps {nps} time {time} pv {pv}
-< info depth 2 multipv 1 score cp -2500 nodes {nodes} nps {nps} time {time} pv {pv}
+< info depth 2 multipv 1 score cp -2500 nodes 66 nps {nps} time {time} pv {pv}
 < info depth 3 multipv 1 score mate -1 nodes {nodes} nps {nps} time {time} pv {pv}
 < info depth 4 multipv 1 score mate -1 nodes {nodes} nps {nps} time {time} pv {pv}
 # The only legal reply fails if the castling rook still attacks h8.
@@ -54,7 +57,7 @@
 # The second review reproduced the four-ply score cp -2400 and per-ply
 # counts 1/40/177/6981 with a shakmaty 0.30.3 minimax.
 < info depth 1 multipv 1 score {score} nodes 1 nps {nps} time {time} pv {pv}
-< info depth 2 multipv 1 score {score} nodes {nodes} nps {nps} time {time} pv {pv}
+< info depth 2 multipv 1 score {score} nodes 42 nps {nps} time {time} pv {pv}
 < info depth 3 multipv 1 score {score} nodes {nodes} nps {nps} time {time} pv {pv}
 < info depth 4 multipv 1 score {score} nodes {nodes} nps {nps} time {time} pv {pv}
 # The only legal reply fails if the captured pawn stays on d5.
@@ -65,7 +68,7 @@
 # Rules 1 to 7 and 10. Black must play a6a7, then d8a5 is checkmate.
 # Python-chess counts 1, 39, 48 and 1923 nodes at plies 1 to 4.
 < info depth 1 multipv 1 score cp -1700 nodes 1 nps {nps} time {time} pv {pv}
-< info depth 2 multipv 1 score cp -1700 nodes {nodes} nps {nps} time {time} pv {pv}
+< info depth 2 multipv 1 score cp -1700 nodes 41 nps {nps} time {time} pv {pv}
 < info depth 3 multipv 1 score mate -1 nodes {nodes} nps {nps} time {time} pv {pv}
 < info depth 4 multipv 1 score mate -1 nodes {nodes} nps {nps} time {time} pv {pv}
 # The only legal reply fails if the promotion creates a queen.
@@ -107,7 +110,7 @@
 # Rules 2 and 3 score the horizon by material, so depths before the mate show material.
 # Python-chess counts 1, 25, 45 and 1228 nodes at plies 1 to 4.
 < info depth 1 multipv 1 score cp -900 nodes 1 nps {nps} time {time} pv {pv}
-< info depth 2 multipv 1 score cp -900 nodes {nodes} nps {nps} time {time} pv {pv}
+< info depth 2 multipv 1 score cp -900 nodes 27 nps {nps} time {time} pv {pv}
 < info depth 3 multipv 1 score mate -1 nodes {nodes} nps {nps} time {time} pv {pv}
 < info depth 4 multipv 1 score mate -1 nodes {nodes} nps {nps} time {time} pv {pv}
 # The owner accepts an empty list after FEN too. This position has one legal move.

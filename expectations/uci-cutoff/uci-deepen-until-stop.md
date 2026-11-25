@@ -25,7 +25,7 @@ checks supply a private cap of two under D11 and fisher-5sg.4.
 | Schedule | Required observations |
 |---|---|
 | Use position `5r1k/pp4pp/5p2/1BbQp1r1/7K/7P/1PP3P1/3R3R b - - 3 26` (puzzle `001om` in [mate-in-two.tsv](../mate-in-two.tsv)). During depth 1, handle `stop` after node 14 has been scored and before node 15 is entered. | No `info` line. Exactly `bestmove c5b4`, the first legal move under D20. At node 14 the best move so far is `g5g2`. An idle `stop` followed by `isready` produces only `readyok`. |
-| Use the same puzzle position. Let depth 1 finish. At depth 2, after its first node, handle `stop` before the next node is entered. Repeat with `quit` and end of input, in fresh sessions. | Exactly one searched `info` at depth 1, `cp -600`, 30 nodes, principal variation `g5g2`. Exactly `bestmove g5g2`. No report for depth 2. On `quit` or end of input, clean exit follows the move with no further output. |
+| Use the same puzzle position. Let depth 1 finish. At depth 2, after 29 of its nodes (59 in all), handle `stop` before the next node is entered. Repeat with `quit` and end of input, in fresh sessions. | Exactly one searched `info` at depth 1, `cp -600`, 30 nodes, principal variation `g5g2`. Exactly `bestmove g5g2`. No report for depth 2. On `quit` or end of input, clean exit follows the move with no further output. |
 | Run the same puzzle position with a private depth cap of 2, then handle `isready` after the cap is reached and send `stop` after `readyok`. Repeat with `quit` and end of input in fresh sessions after the same `readyok`. | Depth 1 as above. Depth 2 reports `cp -700`, a total with no outside value (at most 1,308) and principal variation `c5f2 g2g3`. No node from depth 3. Hold the move until `stop`, `quit` or end of input, then send exactly `bestmove c5f2`. On `quit` or end of input, clean exit follows the move with no further output (D25). |
 | Use the starting position and a private depth cap of 2. Fix elapsed time at 2 ms when depth 1 finishes and 5 ms when depth 2 finishes, measured from the same accepted `go infinite`. Handle `isready` at the cap, then `stop`. | One report each at depths 1 and 2, both `cp 0`, with 20 and 79 total nodes, time 2 and 5, and nps 10,000 and 15,800. No node from depth 3 and no `bestmove` before `stop`. Return the legal first move of the depth-2 principal variation. |
 
@@ -39,7 +39,8 @@ With cutoffs depth 2 plays a subset of those moves (Knuth and Moore,
 1975), so 1,278 and 1,308 are upper bounds, and the totals themselves
 depend on the order of moves and have no outside value. Depth 2 still
 plays all 30 root moves, because nothing bounds the root from above, so
-it cannot finish after its first node. The starting position at depth 2
+after 29 of its nodes at least one root move is unplayed and depth 2
+has not finished. The starting position at depth 2
 enters 20 + 39 = 59 nodes with cutoffs (fisher-4yn), for a total of
 79, and 1000 × 79 ÷ 5 gives nps 15,800.
 

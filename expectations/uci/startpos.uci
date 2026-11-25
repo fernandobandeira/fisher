@@ -20,12 +20,15 @@
 # 1 to 7. An independent reviewer reproduced cp 0 and per-ply counts
 # 20/400/8902/197281 with their own minimax. See expectations/perft.epd.
 # Searched transcript written 2026-11-23.
-# fisher-4yn.1, 2026-11-25: every node total at depth 2 or more reads
-# {nodes}. Once the search makes cutoffs, such a total depends on the order
-# Position::legal_moves returns moves in, which nobody chose (fisher-4yn,
-# D36 and D38). Scores, depths, principal variations, bestmove and the
-# depth-1 totals (the number of legal moves at the root) stay exact. A node
-# count in these comments describes the search without cutoffs before it.
+# fisher-4yn.1, 2026-11-25: a node total at depth 2 or more reads {nodes},
+# except below a root with one legal move. Once the search makes cutoffs,
+# such a total depends on the order Position::legal_moves returns moves in,
+# which nobody chose (fisher-4yn, D36 and D38). A root with one legal move
+# puts no bound on the replies, so depth 2 there plays every one and its
+# total stays exact (owner decision on PR #74). Scores, depths, principal
+# variations, bestmove and the depth-1 totals (the number of legal moves at
+# the root) stay exact. A node count in these comments describes the search
+# without cutoffs before it.
 > isready
 # UCI isready/readyok.
 < readyok

@@ -79,4 +79,4 @@ Below the table, list anything still undecided: a claim nobody could test, a fin
 
 Mutation and coverage judge each crate using only its unit and integration tests.
 
-`scripts/check` has to stay fast enough to run on every commit and at the end of every agent turn. Slow evidence (deep perft, matches, SPRT) runs on its own and is recorded in the claims table with the revision it ran against.
+`scripts/check` has to stay fast enough to run on every commit and at the end of every agent turn. Slow evidence (deep perft, matches, SPRT) runs separately. When a change relies on a run for evidence, record the result and revision in its claims table.

@@ -11,3 +11,7 @@ The [boundary table](../../scripts/check-crate-boundaries) permits these depende
 - `rules` and `xtask` have no workspace dependencies.
 
 A person reviews macro-generated exports and re-exports. The [crate interface rules](../../CODING_STANDARDS.md#crate-interfaces) explain what to look for.
+
+- **Crate dependencies.** Each capability keeps a clear owner.
+- **Deep modules.** Callers use a small, deliberate interface.
+- **Development-only reference.** The reference can check engine behaviour independently of the engine.

@@ -1,10 +1,22 @@
 # Guardrails
 
-A guardrail catches a failure or makes it visible to the owner. The `main gates` ruleset requires the Actions `check`, `mutation`, and `coverage` jobs to pass and the pull request to be up to date with `main`. The change also needs the review required by its tier.
+A guardrail catches a failure or makes it visible to the owner. Before merging, the change must pass the required checks and receive the review required by its tier.
 
-## Merge gates
+- [Checks before handoff and merge](#checks-before-handoff-and-merge) — Catch failures before work is committed, handed back or merged.
+- [Code shape](#code-shape) — Make Rust code easier to read and check.
+- [Crate boundaries](#crate-boundaries) — Give each capability a clear owner behind a small, deliberate interface.
+- [Vocabulary](#vocabulary) — Use names that mean the same thing across crates.
+- [Evidence of behaviour](#evidence-of-behaviour) — Test claims about the engine against independent evidence.
+- [Strength of the tests](#strength-of-the-tests) — Make each crate’s unit and integration tests defend its own code.
+- [Dependencies](#dependencies) — Check third-party dependencies even when an implementation change is small.
+- [Guarding the guards](#guarding-the-guards) — Make changes to what passes easy for the owner to find and review.
+- [Review](#review) — Focus the owner’s review on claims, interfaces and guards.
 
-Catch failed checks before a commit or handoff so the author can fix them. Give the owner shared results from a fresh checkout before merge.
+## Checks before handoff and merge
+
+Catch failures before work is committed, handed back or merged.
+
+The `main gates` ruleset requires the Actions `check`, `mutation`, and `coverage` jobs to pass and the pull request to be up to date with `main`.
 
 | Guardrail | What it stops | Where enforced | When |
 |---|---|---|---|
@@ -16,7 +28,7 @@ See [merge gates](merge-gates.md) for the branch protections.
 
 ## Code shape
 
-Apply the same checks to every crate so reviews can focus on behaviour, Rust’s safety guarantees hold, and important branches stay readable. Handle errors and new cases explicitly. Give the owner a reason for each lint exception and let Clippy flag obsolete expectations.
+Make Rust code easier to read and check.
 
 | Guardrail | What it stops | Where enforced | When |
 |---|---|---|---|
@@ -28,22 +40,23 @@ Apply the same checks to every crate so reviews can focus on behaviour, Rust’s
 | Cognitive complexity | Functions that exceed a complexity of 8 | [Workspace lint](../../Cargo.toml), [threshold](../../clippy.toml) | Each commit and CI run |
 | `unreachable_pub` | Unnecessarily public items inside private modules | [Workspace lint](../../Cargo.toml) | Each commit and CI run |
 
+See [code shape](code-shape.md) for what each check contributes.
+
 ## Crate boundaries
 
-Give every capability a clear owner and callers a small interface so internal code can change within its crate. Each crate’s own tests must defend its code, and the chess reference stays independent of the engine.
+Give each capability a clear owner behind a small, deliberate interface.
 
 | Guardrail | What it stops | Where enforced | When |
 |---|---|---|---|
 | Crate dependencies | Edges outside the allowed directions | [Boundary table](../../scripts/check-crate-boundaries) | Each commit and CI run |
 | Deep modules | Direct public module declarations at the library root and alternate library entry paths | [`cargo xtask interfaces`](../../crates/xtask/src/interfaces.rs), [`lib.rs` path check](../../scripts/check-crate-boundaries), [interface rules](../../CODING_STANDARDS.md#crate-interfaces) | Each commit and CI run. Macro-generated exports and re-exports in review |
 | Development-only reference | Shipping the independent chess reference as an engine dependency | [`shakmaty` dependency check](../../scripts/check-crate-boundaries) | Each commit and CI run |
-| Test ownership | A caller’s tests supplying the evidence for a crate | [Mutation](../../scripts/check-mutants) and [coverage](../../scripts/check-coverage). The [dependency check](../../scripts/check-crate-boundaries) enforces allowed edges | Mutation and coverage on each CI run. Dependencies in `scripts/check` |
 
 See [crate boundaries](crate-boundaries.md) for the permitted dependencies and interface review.
 
 ## Vocabulary
 
-Use the same names across crates so a reader can tell when code refers to the same chess or engine concept.
+Use names that mean the same thing across crates.
 
 | Guardrail | What it stops | Where enforced | When |
 |---|---|---|---|
@@ -51,42 +64,54 @@ Use the same names across crates so a reader can tell when code refers to the sa
 
 ## Evidence of behaviour
 
-Use independent expected values, published perft and reachable positions nobody selected by hand to catch errors. Check the wired binary against the GUI contract, give the owner a stable bench signature to check after a refactor, and trace strength claims to matches.
+Give each claim about what the engine does an observation that could prove it wrong, from a source other than the implementer.
 
 | Guardrail | What it stops | Where enforced | When |
 |---|---|---|---|
 | Independent expected values | Tests that attest to the implementer's own output | [`expectations/`](../../expectations/README.md), [evidence rules](../evidence.md) | Tests each commit and CI run. Provenance in review |
 | Published perft | Incorrect legal move counts | [Expected counts](../../expectations/perft.epd), [rules](../../crates/rules/tests/positions.rs), [search](../../crates/search/tests/search.rs) | Shallow in `scripts/check`. Deep perft uses the ignored release-mode tests on request |
-| Seeded reference comparison | Differences in legal moves, resulting positions, check detection or search results | [Rules comparison](../../crates/rules/tests/positions.rs), [search comparison](../../crates/search/tests/search.rs) | In `scripts/check`. The complete published mate suite is ignored by default and run in release mode on request |
+| Seeded reference comparison | Differences in legal moves, resulting positions, check detection or search results | [Rules comparison](../../crates/rules/tests/positions.rs), [search comparison](../../crates/search/tests/search.rs) | In `scripts/check`. Full mate suite on request |
 | UCI transcripts | Incorrect responses, process exits or search reports | [Transcript runner](../../crates/fisher/tests/transcripts.rs), [expected transcripts](../../expectations/uci) | In `scripts/check` |
 | Bench signature | A changed fixed-search node count | [Signature test](../../crates/bench/tests/signature.rs), [`fisher bench` and commit record](../process.md#recording-the-bench-signature) | Signature test each commit and CI run. Commit record in review |
 | Strength record | Unsupported claims about playing strength | [`strength/measure` and records](../../strength/README.md) | When claiming a strength change |
 
+See [evidence of behaviour](behaviour-evidence.md) for what each check shows and when to run the full mate suite.
+
 ## Strength of the tests
 
-Use each crate’s own tests to catch changes in behaviour and retain region coverage. A surviving mutant points to an assertion the tests need or a proof the owner can review.
+Make each crate’s unit and integration tests defend its own code.
 
 | Guardrail | What it stops | Where enforced | When |
 |---|---|---|---|
+| Test ownership | A caller’s tests supplying the evidence for a crate | [Mutation](../../scripts/check-mutants) and [coverage](../../scripts/check-coverage). The [dependency check](../../scripts/check-crate-boundaries) enforces allowed edges | Mutation and coverage on each CI run. Dependencies in `scripts/check` |
 | Mutation testing | A crate’s own tests passing despite a behaviour change | [`scripts/check-mutants`](../../scripts/check-mutants), [reviewed equivalents](../../.cargo/mutation-gate.json) | Whole workspace on each CI run |
 | Per-crate region coverage | Losing coverage supplied by a crate’s own tests | [`scripts/check-coverage`](../../scripts/check-coverage), [reviewed floors](../../.cargo/coverage-floors.json) | Each CI run |
 
-See [mutation testing](mutation.md) for why the job runs across the workspace and [coverage](coverage.md) for floors and uncovered regions.
+See [mutation testing](mutation.md) for what a surviving mutant shows and why the job runs across the workspace. See [coverage](coverage.md) for floors and uncovered regions.
+
+## Dependencies
+
+Check third-party dependencies even when an implementation change is small.
+
+| Guardrail | What it stops | Where enforced | When |
+|---|---|---|---|
+| Dependency advisories and sources | Known vulnerable dependencies and unauthorized sources | [`cargo deny`](../../scripts/check), [configuration](../../deny.toml) | Each commit and CI run |
 
 ## Guarding the guards
 
-Make changes to what passes easy for the owner to find and review. Check dependencies even when an implementation change is small.
+Make changes to what passes easy for the owner to find and review.
 
 | Guardrail | What it stops | Where enforced | When |
 |---|---|---|---|
 | Protected paths and `Guard-Change:` | Changes to checking policy without a stated reason | [Protected paths](../../.githooks/protected-paths), [commit-message hook](../../.githooks/commit-msg) | Every commit with the hooks installed |
-| Dependency advisories and sources | Known vulnerable dependencies and unauthorized sources | [`cargo deny`](../../scripts/check), [configuration](../../deny.toml) | Each commit and CI run |
 
 ## Review
 
-Spend the owner’s attention on claims, interfaces and guards. Keep deferred behaviour visible in the tracker after the agent hands back the work.
+Focus the owner’s review on claims, interfaces and guards.
 
 | Guardrail | What it stops | Where enforced | When |
 |---|---|---|---|
 | Review and tiers | Merging behaviour or commitments without the required review | [Process tiers](../process.md#tiers) and [review](../process.md#what-the-human-reads-in-order) | Prose only |
 | Ticketed TODO | Deferred work with no owner-visible record | [Deferred work rules](../../CODING_STANDARDS.md#deferred-work) | Prose only |
+
+See [review](review.md) for how review tiers and ticketed work help the owner.

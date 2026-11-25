@@ -12,7 +12,7 @@ Every claim that matters names the observation that would prove it wrong, and so
 
 ## Green
 
-`scripts/check` defines local green. Run it before you say a change is done. Merging also requires the pull-request gates in [docs/guardrails.md](docs/guardrails.md). Mutation and coverage use each crate’s own unit and integration tests. Git runs it before every commit, and Claude Code runs it before an agent may end its turn.
+`scripts/check` defines local green. Run it before you say a change is done. Merging also requires the pull-request gates in [docs/guardrails/README.md](docs/guardrails/README.md). Mutation and coverage use each crate’s own unit and integration tests. Git runs it before every commit, and Claude Code runs it before an agent may end its turn.
 
 If it is red and you cannot fix it, say so plainly with the output. Do not weaken a check to make it pass.
 
@@ -24,7 +24,7 @@ If it is red and you cannot fix it, say so plainly with the output. Do not weake
 | `crates/xtask/` | The project's own checks (glossary and crate interfaces). |
 | `GLOSSARY.md` | The vocabulary. The build enforces the banned words in it. |
 | `docs/evidence.md` | What counts as evidence, and the claims table. |
-| `docs/guardrails.md` | The guards, what they protect, and when they run. |
+| `docs/guardrails/README.md` | The guards, what they protect, and when they run. |
 | `docs/process.md` | How a change goes from idea to merge, and what the human reads. |
 | `CODING_STANDARDS.md` | How a review comment becomes a check, and the few rules that are still prose. |
 | `docs/adr/` | Decisions that are hard to reverse, and why. |

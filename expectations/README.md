@@ -1,4 +1,5 @@
 # Expectations
+<!-- Temporary fisher-j9c rollout fixture B2 -->
 
 Expected values that came from outside the implementer: published perft counts, solved test positions, examples the owner approved. Tests read these files. See [docs/evidence.md](../docs/evidence.md).
 

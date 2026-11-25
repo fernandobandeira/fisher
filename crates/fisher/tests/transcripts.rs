@@ -91,6 +91,26 @@ fn go_nodes_movetime() -> io::Result<()> {
 }
 
 #[test]
+fn go_white_clock_exhausted() -> io::Result<()> {
+    play_transcript("go-white-clock-exhausted")
+}
+
+#[test]
+fn go_black_clock_exhausted() -> io::Result<()> {
+    play_transcript("go-black-clock-exhausted")
+}
+
+#[test]
+fn go_healthy_clock() -> io::Result<()> {
+    play_transcript("go-healthy-clock")
+}
+
+#[test]
+fn go_clock_terminal() -> io::Result<()> {
+    play_transcript("go-clock-terminal")
+}
+
+#[test]
 fn quit_while_deepening() -> io::Result<()> {
     play_transcript("quit-while-deepening")
 }

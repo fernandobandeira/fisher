@@ -1,135 +1,136 @@
-# Iterative deepening expectations from fisher-5sg.13, 2026-11-24.
-# Scores and per-ply counts independently enumerated with python-chess 1.11.2
-# (https://pypi.org/project/chess/1.11.2/) using fisher-2aj rules 1 to 7.
-# Decision 10 sums the per-ply counts within each search, then adds the
-# nodes from every earlier finished depth of this go. Starting-position
-# counts match expectations/perft.epd. D28 sets the default depth to 4.
-# The derivation script and results are on fisher-5sg.13.
-# Four-ply info spelling from Stockfish sf_19 (edb0d9d), read 2026-11-24:
-# UCIEngine::on_update_full in src/uci.cpp and SearchManager::output_pv in src/search.cpp.
-# fisher-r6y D41 sets this spelling; fisher-8hc.6 committed these sessions.
-# D3-D6 supply the
-# existing principal variation and allowances, with time at least one under D41.
-# The fisher-2aj.2 sources below supply the retained scores and response order;
-# fisher-5sg.13 derived the node totals.
+# Staged by fisher-5sg.9 on 2026-11-25. See README.md for derivation.
 # Sources: April 2006 UCI specification https://backscattering.de/chess/uci/
-# and fisher-l7f owner decisions from 2026-11-22.
-# Search: fisher-2aj rules 1 to 8 and 10. Exact search values
-# were checked by exhaustive enumeration with python-chess 1.11.2.
-# Starting score: four-ply minimax with python-chess 1.11.2 followed rules
-# 1 to 7. An independent reviewer reproduced cp 0 and per-ply counts
-# 20/400/8902/197281 with their own minimax. See expectations/perft.epd.
-# Those published perft counts sum to 206603 nodes.
-# Mate -1 nodes 782: in 7k/8/5K1Q/8/8/8/8/8 b, black must play h8g8,
-# then h6g7 is checkmate. Python-chess counts 1, 21, 30 and 730 nodes at
-# plies 1 to 4.
-# Mate -1 nodes 1299: in 7k/8/5K2/6Q1/8/8/8/8 b, black must play h8h7,
-# then g5g7 is checkmate. Python-chess counts 1, 25, 45 and 1228 nodes at
-# plies 1 to 4.
-# Searched transcript written 2026-11-23.
+# (go, info, bestmove and quit), and the owner's 2026-11-25 D17 answers
+# on fisher-5sg.10, recorded as fisher-r6y D49–D52 and D56.
+# fisher-5sg, "The go-parameters transcript", specifies the full successor.
+# D41 supplies the searched info spelling. D28 and fisher-5sg decision 10
+# specify the default and cumulative nodes. python-chess 1.11.2 and
+# published perft (expectations/perft.epd) supply the fixed-depth counts.
+# Scores follow fisher-2aj rules 1–7. The README beside this session shows
+# the working. The last four searches retain the active session's setup.
 > position startpos
-> go wtime 60000
-# Rules 1 to 7 and 10. See the header for the per-ply counts.
+> go depth 1
+# UCI go depth and fisher-5sg.5: one finished depth with 20 nodes.
 < info depth 1 multipv 1 score cp 0 nodes 20 nps {nps} time {time} pv {pv}
-< info depth 2 multipv 1 score cp 0 nodes 440 nps {nps} time {time} pv {pv}
-< info depth 3 multipv 1 score cp 0 nodes 9762 nps {nps} time {time} pv {pv}
-< info depth 4 multipv 1 score cp 0 nodes 216365 nps {nps} time {time} pv {pv}
-# UCI go/bestmove. Rules 1 and 8 defer this parameter; under D28 fisher searches depths 1 to 4.
+# UCI bestmove and D5.
 < bestmove {legal}
+
+> go nodes 20
+# UCI go nodes and fisher-5sg.5: the twentieth node finishes depth 1.
+< info depth 1 multipv 1 score cp 0 nodes 20 nps {nps} time {time} pv {pv}
+# UCI bestmove and D5.
+< bestmove {legal}
+
+> go movetime 50
+# UCI go movetime and fisher-5sg.7: the time for the move is 50 ms.
+# D22/D31 leave 40 ms for the search after the margin.
+# D41 spells each finished-depth report. UCI bestmove and D5 give the move.
+<* info depth {depth} multipv 1 score {score} nodes {nodes} nps {nps} time {time} pv {pv}
+< bestmove {legal}
+
+> go wtime 60000
+# D49 and D56 allow any finished depths in order. D41 spells info.
+# UCI bestmove requires one legal move. See README.md for D50 and the margin.
+<* info depth {depth} multipv 1 score {score} nodes {nodes} nps {nps} time {time} pv {pv}
+< bestmove {legal}
+
 > go btime 60000
-# Rules 1 to 7 and 10. See the header for the per-ply counts.
+# D51/D28 and fisher-5sg decision 10. See the README for the per-ply counts.
 < info depth 1 multipv 1 score cp 0 nodes 20 nps {nps} time {time} pv {pv}
 < info depth 2 multipv 1 score cp 0 nodes 440 nps {nps} time {time} pv {pv}
 < info depth 3 multipv 1 score cp 0 nodes 9762 nps {nps} time {time} pv {pv}
 < info depth 4 multipv 1 score cp 0 nodes 216365 nps {nps} time {time} pv {pv}
-# UCI go/bestmove. Rules 1 and 8 defer this parameter; under D28 fisher searches depths 1 to 4.
+# UCI bestmove and D5. D51 supplies no limit from the clocks here.
 < bestmove {legal}
 > go winc 1000
-# Rules 1 to 7 and 10. See the header for the per-ply counts.
+# D51/D28 and fisher-5sg decision 10. See the README for the per-ply counts.
 < info depth 1 multipv 1 score cp 0 nodes 20 nps {nps} time {time} pv {pv}
 < info depth 2 multipv 1 score cp 0 nodes 440 nps {nps} time {time} pv {pv}
 < info depth 3 multipv 1 score cp 0 nodes 9762 nps {nps} time {time} pv {pv}
 < info depth 4 multipv 1 score cp 0 nodes 216365 nps {nps} time {time} pv {pv}
-# UCI go/bestmove. Rules 1 and 8 defer this parameter; under D28 fisher searches depths 1 to 4.
+# UCI bestmove and D5. D51 supplies no limit from the clocks here.
 < bestmove {legal}
 > go binc 1000
-# Rules 1 to 7 and 10. See the header for the per-ply counts.
+# D51/D28 and fisher-5sg decision 10. See the README for the per-ply counts.
 < info depth 1 multipv 1 score cp 0 nodes 20 nps {nps} time {time} pv {pv}
 < info depth 2 multipv 1 score cp 0 nodes 440 nps {nps} time {time} pv {pv}
 < info depth 3 multipv 1 score cp 0 nodes 9762 nps {nps} time {time} pv {pv}
 < info depth 4 multipv 1 score cp 0 nodes 216365 nps {nps} time {time} pv {pv}
-# UCI go/bestmove. Rules 1 and 8 defer this parameter; under D28 fisher searches depths 1 to 4.
+# UCI bestmove and D5. D51 supplies no limit from the clocks here.
 < bestmove {legal}
 > go movestogo 40
-# Rules 1 to 7 and 10. See the header for the per-ply counts.
+# D51/D28 and fisher-5sg decision 10. See the README for the per-ply counts.
 < info depth 1 multipv 1 score cp 0 nodes 20 nps {nps} time {time} pv {pv}
 < info depth 2 multipv 1 score cp 0 nodes 440 nps {nps} time {time} pv {pv}
 < info depth 3 multipv 1 score cp 0 nodes 9762 nps {nps} time {time} pv {pv}
 < info depth 4 multipv 1 score cp 0 nodes 216365 nps {nps} time {time} pv {pv}
-# UCI go/bestmove. Rules 1 and 8 defer this parameter; under D28 fisher searches depths 1 to 4.
+# UCI bestmove and D5. D51 supplies no limit from the clocks here.
 < bestmove {legal}
 > go mate 1
-# Rules 1 to 7 and 10. See the header for the per-ply counts.
+# D28 and fisher-5sg decision 10. See the README for the per-ply counts.
 < info depth 1 multipv 1 score cp 0 nodes 20 nps {nps} time {time} pv {pv}
 < info depth 2 multipv 1 score cp 0 nodes 440 nps {nps} time {time} pv {pv}
 < info depth 3 multipv 1 score cp 0 nodes 9762 nps {nps} time {time} pv {pv}
 < info depth 4 multipv 1 score cp 0 nodes 216365 nps {nps} time {time} pv {pv}
-# UCI go/bestmove. Rules 1 and 8 defer this parameter; under D28 fisher searches depths 1 to 4.
+# UCI bestmove and D5. D28 and fisher-5sg leave this parameter deferred.
 < bestmove {legal}
 > go searchmoves e2e4 d2d4
-# Rules 1 to 7 and 10. See the header for the per-ply counts.
+# D28 and fisher-5sg decision 10. See the README for the per-ply counts.
 < info depth 1 multipv 1 score cp 0 nodes 20 nps {nps} time {time} pv {pv}
 < info depth 2 multipv 1 score cp 0 nodes 440 nps {nps} time {time} pv {pv}
 < info depth 3 multipv 1 score cp 0 nodes 9762 nps {nps} time {time} pv {pv}
 < info depth 4 multipv 1 score cp 0 nodes 216365 nps {nps} time {time} pv {pv}
-# UCI go/bestmove. Rules 1 and 8 defer this parameter; under D28 fisher searches depths 1 to 4.
+# UCI bestmove and D5. D28 and fisher-5sg leave this parameter deferred.
 < bestmove {legal}
 > go ponder
-# Rules 1 to 7 and 10. See the header for the per-ply counts.
+# D28 and fisher-5sg decision 10. See the README for the per-ply counts.
 < info depth 1 multipv 1 score cp 0 nodes 20 nps {nps} time {time} pv {pv}
 < info depth 2 multipv 1 score cp 0 nodes 440 nps {nps} time {time} pv {pv}
 < info depth 3 multipv 1 score cp 0 nodes 9762 nps {nps} time {time} pv {pv}
 < info depth 4 multipv 1 score cp 0 nodes 216365 nps {nps} time {time} pv {pv}
-# The owner defers pondering in fisher-2ha. Rule 1 searches four plies.
+# UCI bestmove and D5. The owner defers pondering in fisher-2ha.
 < bestmove {legal}
-# UCI position after an unknown prefix replaces a position with one reply.
+# UCI position after an unknown prefix replaces a position with one legal move.
 > position fen 7k/8/5K1Q/8/8/8/8/8 b - - 0 1
 > go
-# Rules 4, 5, 7 and 10. See the header for the per-ply counts.
+# D28 and fisher-5sg decision 10. See the README for the per-ply counts.
 # Rules 2 and 3 score the horizon by material, so depths before the mate show material.
 < info depth 1 multipv 1 score cp -900 nodes 1 nps {nps} time {time} pv {pv}
 < info depth 2 multipv 1 score cp -900 nodes 23 nps {nps} time {time} pv {pv}
 < info depth 3 multipv 1 score mate -1 nodes 75 nps {nps} time {time} pv {pv}
 < info depth 4 multipv 1 score mate -1 nodes 857 nps {nps} time {time} pv {pv}
+# UCI bestmove and D5. Enumeration gives h8g8 as the sole legal move.
 < bestmove h8g8
 > \xff unknown position fen 7k/8/5K2/6Q1/8/8/8/8 b - - 0 1
 > go
-# Rules 4, 5, 7 and 10. See the header for the per-ply counts.
+# D28 and fisher-5sg decision 10. See the README for the per-ply counts.
 # Rules 2 and 3 score the horizon by material, so depths before the mate show material.
 < info depth 1 multipv 1 score cp -900 nodes 1 nps {nps} time {time} pv {pv}
 < info depth 2 multipv 1 score cp -900 nodes 27 nps {nps} time {time} pv {pv}
 < info depth 3 multipv 1 score mate -1 nodes 98 nps {nps} time {time} pv {pv}
 < info depth 4 multipv 1 score mate -1 nodes 1397 nps {nps} time {time} pv {pv}
+# UCI bestmove and D5. Enumeration gives h8h7 as the sole legal move.
 < bestmove h8h7
 # The ignored command consumes its arguments, including position.
 > unknown setoption name Path value position fen 7k/8/5K1Q/8/8/8/8/8 b - - 0 1
 > go
-# Rules 4, 5, 7 and 10. See the header for the per-ply counts.
+# D28 and fisher-5sg decision 10. See the README for the per-ply counts.
 # Rules 2 and 3 score the horizon by material, so depths before the mate show material.
 < info depth 1 multipv 1 score cp -900 nodes 1 nps {nps} time {time} pv {pv}
 < info depth 2 multipv 1 score cp -900 nodes 27 nps {nps} time {time} pv {pv}
 < info depth 3 multipv 1 score mate -1 nodes 98 nps {nps} time {time} pv {pv}
 < info depth 4 multipv 1 score mate -1 nodes 1397 nps {nps} time {time} pv {pv}
+# UCI bestmove and D5. Enumeration gives h8h7 as the sole legal move.
 < bestmove h8h7
 > go
-# Rules 4, 5, 7 and 10. See the header for the per-ply counts.
+# D28 and fisher-5sg decision 10. See the README for the per-ply counts.
 # Rules 2 and 3 score the horizon by material, so depths before the mate show material.
 < info depth 1 multipv 1 score cp -900 nodes 1 nps {nps} time {time} pv {pv}
 < info depth 2 multipv 1 score cp -900 nodes 27 nps {nps} time {time} pv {pv}
 < info depth 3 multipv 1 score mate -1 nodes 98 nps {nps} time {time} pv {pv}
 < info depth 4 multipv 1 score mate -1 nodes 1397 nps {nps} time {time} pv {pv}
-# The reference follows the prefixed position and skips the setoption value.
+# UCI bestmove and D5. The reference follows the prefixed position and skips the setoption value.
 < bestmove {legal}
-# UCI quit.
+# UCI quit and D25 require clean exit with no further output.
 > quit
 ! exit

@@ -1,6 +1,6 @@
 # Playing strength
 
-A record of how strongly each revision of fisher plays. Every match is played under the same conditions, so a change to search or evaluation shows up as a change in the numbers.
+A record of how strongly each revision of fisher plays. Compare matches played under the same numbered conditions.
 
 This is a record, not a gate. `scripts/check` does not run it, and nothing here is an expected value. A claim that a change plays stronger is still settled by SPRT with bounds fixed beforehand, as [docs/evidence.md](../docs/evidence.md) says. The ticket for that is `fisher-op4`.
 
@@ -58,17 +58,21 @@ A revision was a queen ahead in a game if its material minus the opponent's was 
 
 - 400 games: each of the 200 positions in `openings.epd` once with each color, in the order of the document.
 - A game ends by checkmate, stalemate, threefold repetition, the fifty-move rule or insufficient material, or abnormally when an engine crashes, plays an illegal move or runs out of time. No game is adjudicated on its score, and no engine resigns.
-- fisher gets a clock of 600 seconds plus 10 a move and no other limit. It ignores the clock (`fisher-7vo`) and searches to its own fixed depth. The clock is there so that a fisher that hangs loses the game instead of stalling the match.
+- fisher gets a clock of 600 seconds plus 10 a move and no other limit. Revisions before `fisher-5sg.10` ignore the clock and search to their own fixed depth. The clock lets the runner end a game if fisher hangs.
 - Stockfish runs with `UCI_LimitStrength` on and `UCI_Elo` 1320, the lowest it allows, on one thread with a 16 MB hash and a clock of 10 seconds plus 0.1 a move.
 - Eight games run at a time. Stockfish is on a clock, so a busy machine weakens it; run nothing else heavy during a match against it.
 
 The conditions do not fix the Stockfish version or the machine. Compare two records against Stockfish only if `opponent` reads the same in both, and treat records from different machines with care.
 
-When fisher obeys the clocks these conditions stop making sense, because a build would then use ten minutes a game. Write the new conditions here as 2, change `conditions` in `measure`, and measure the last revision again under them so the two series join.
+### 2
+
+Both engines get 10 seconds plus 0.1 seconds a move. The other conditions are the same as in conditions 1.
+
+The last recorded revision under conditions 1, `dbe9113`, is measured again under conditions 2 to connect the series. It ignores its clock and may lose games on time. Those games count toward `abnormal_endings`.
 
 ## How far to trust the numbers
 
-- **Between two revisions of fisher that search**, a match should repeat: from `71a4608` on, fisher plays the same move from the same position every time, as the `equal-scores` transcript checks for one position. Nobody has yet played a whole match twice to confirm it. The score is then a fact about these 200 openings, and says nothing about others. Revisions before `71a4608` choose a legal move at random, so a match against one of them varies.
+- **Between two revisions of fisher that search**, a match under conditions 1 repeats game for game because each revision searches to a fixed depth and plays the same move from the same position. Under conditions 2 the match no longer repeats game for game. The depths the engines finish and the resulting scores depend on the machine and its load. The score describes these 200 openings. Revisions before `71a4608` choose legal moves at random.
 - **Against Stockfish** the result varies from match to match, because Stockfish at limited strength chooses weaker moves on purpose and not always the same ones. The margin fastchess prints gives a rough idea of how much; it is not a promise about the next match.
 - **An Elo for fisher** is not something this record establishes. Adding the difference against Stockfish to 1320 gives a rough placement only: it leans on one opponent, and for a fisher far below 1320 it is an extrapolation. Stockfish's documentation says `UCI_Elo` was calibrated at 120 seconds plus 1 a move and anchored to the CCRL 40/4 list; here it gets 10 seconds plus 0.1.
 - **A score near 0% or 100%** says little about the size of the gap. Measure against a closer opponent instead.

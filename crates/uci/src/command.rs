@@ -192,15 +192,24 @@ fn parse_go(tokens: SplitWhitespace<'_>) -> GoParameters {
             MOVETIME => &mut parameters.movetime,
             _ => continue,
         };
-        if let Some(number) = read_number(&mut tokens) {
+        if let Some(number) = read_number(&mut tokens, matches!(token, WTIME | BTIME)) {
             *limit = Some(number);
         }
     }
     parameters
 }
 
-fn read_number(tokens: &mut Peekable<SplitWhitespace<'_>>) -> Option<u64> {
-    let number = tokens.peek()?.parse().ok()?;
+fn read_number(tokens: &mut Peekable<SplitWhitespace<'_>>, is_clock: bool) -> Option<u64> {
+    let token = tokens.peek()?;
+    let negative_clock = is_clock
+        && token.strip_prefix('-').is_some_and(|digits| {
+            !digits.is_empty() && digits.bytes().all(|byte| byte.is_ascii_digit())
+        });
+    let number = if negative_clock {
+        0
+    } else {
+        token.parse().ok()?
+    };
     tokens.next()?;
     Some(number)
 }

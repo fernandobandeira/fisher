@@ -6,7 +6,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use rules::{Move, Position};
+use rules::{Color, Move, Position};
 use search::minimax_until_interrupted;
 
 pub use search::Score;
@@ -68,13 +68,14 @@ pub enum SearchReport {
     reason = "The worker owns the request throughout the search"
 )]
 pub fn search(request: SearchRequest, report: &mut dyn FnMut(SearchReport)) {
-    search_with_clock(&request, report, &Instant::now, &mut || {}, u8::MAX);
+    search_with_elapsed_time(&request, report, &Instant::now, &mut || {}, u8::MAX);
 }
 
 struct SearchLimits<'a> {
     interrupt: &'a AtomicBool,
     depth_limit: u8,
-    time_for_move: Option<Duration>,
+    search_time: Option<Duration>,
+    search_time_from_clock: Option<Duration>,
     node_limit: Option<u64>,
     nodes: u64,
 }
@@ -82,27 +83,62 @@ struct SearchLimits<'a> {
 impl<'a> SearchLimits<'a> {
     const MARGIN: Duration = Duration::from_millis(10);
     const NODES_BETWEEN_READINGS: u64 = 1024;
+    const DEPTH_GROWTH_FACTOR: u32 = 30;
 
     fn new(request: &'a SearchRequest, depth_cap: u8) -> Self {
         let limits = &request.limits;
+        let time_for_move_from_clock =
+            Self::time_for_move_from_clock(limits, request.position.side_to_move());
         Self {
             interrupt: &request.interrupt,
-            depth_limit: Self::depth_limit(limits, depth_cap),
-            time_for_move: limits
+            depth_limit: Self::depth_limit(limits, depth_cap, time_for_move_from_clock.is_some()),
+            search_time: limits
                 .movetime
+                .into_iter()
+                .chain(time_for_move_from_clock)
+                .min()
+                .map(|time| time.saturating_sub(Self::MARGIN)),
+            search_time_from_clock: time_for_move_from_clock
                 .map(|time| time.saturating_sub(Self::MARGIN)),
             node_limit: limits.nodes,
             nodes: 0,
         }
     }
 
-    fn depth_limit(limits: &Limits, depth_cap: u8) -> u8 {
+    fn time_for_move_from_clock(limits: &Limits, side_to_move: Color) -> Option<Duration> {
+        const DEFAULT_MOVES_TO_GO: u64 = 30;
+        let (clock, increment) = match side_to_move {
+            Color::White => (limits.wtime, limits.winc),
+            Color::Black => (limits.btime, limits.binc),
+        };
+        let moves_to_go = limits
+            .movestogo
+            .filter(|&moves| moves > 0)
+            .unwrap_or(DEFAULT_MOVES_TO_GO);
+        clock.map(|clock| {
+            // Divide in whole milliseconds before adding the increment.
+            let millis = clock.as_millis() / u128::from(moves_to_go);
+            let whole_millis = Duration::new(
+                u64::try_from(millis / 1000).unwrap_or(u64::MAX),
+                u32::try_from(millis % 1000).unwrap_or_default() * 1_000_000,
+            );
+            whole_millis
+                .saturating_add(increment.unwrap_or_default())
+                .min(clock)
+        })
+    }
+
+    fn depth_limit(limits: &Limits, depth_cap: u8, has_clock: bool) -> u8 {
         const DEFAULT_DEPTH: u8 = 4;
         if let Some(depth) = limits.depth {
             // Clamping to a u8 cap leaves only the low byte populated.
             let [depth, ..] = depth.min(u64::from(depth_cap)).to_le_bytes();
             depth
-        } else if limits.infinite || limits.movetime.is_some() || limits.nodes.is_some() {
+        } else if has_clock
+            || limits.infinite
+            || limits.movetime.is_some()
+            || limits.nodes.is_some()
+        {
             depth_cap
         } else {
             depth_cap.min(DEFAULT_DEPTH)
@@ -113,18 +149,37 @@ impl<'a> SearchLimits<'a> {
         self.interrupt.load(Ordering::Relaxed)
     }
 
-    fn time_expired(&self, elapsed: &dyn Fn() -> Duration) -> bool {
-        self.time_for_move.is_some_and(|limit| elapsed() >= limit)
+    fn start_depth(
+        &self,
+        elapsed: &dyn Fn() -> Duration,
+        last_depth_duration: Option<Duration>,
+    ) -> Option<Duration> {
+        if self.interrupted() {
+            return None;
+        }
+        let started = self.search_time.map_or(Duration::ZERO, |_| elapsed());
+        if self.search_time.is_some_and(|limit| started >= limit) {
+            return None;
+        }
+        let forecast = last_depth_duration
+            .unwrap_or_default()
+            .saturating_mul(Self::DEPTH_GROWTH_FACTOR);
+        if self
+            .search_time_from_clock
+            .is_some_and(|time| forecast > time.saturating_sub(started))
+        {
+            return None;
+        }
+        (self.node_limit != Some(self.nodes)).then_some(started)
     }
 
-    fn stop_before_depth(&self, elapsed: &dyn Fn() -> Duration) -> bool {
-        self.interrupted() || self.time_expired(elapsed) || self.node_limit == Some(self.nodes)
-    }
-
-    fn stop_before_node(&mut self, elapsed: &dyn Fn() -> Duration) -> bool {
+    fn stop_before_node<const NODES_BETWEEN_READINGS: u64>(
+        &mut self,
+        elapsed: &dyn Fn() -> Duration,
+    ) -> bool {
         if self.interrupted()
-            || (self.nodes % Self::NODES_BETWEEN_READINGS == Self::NODES_BETWEEN_READINGS - 1
-                && self.time_expired(elapsed))
+            || (self.nodes % NODES_BETWEEN_READINGS == NODES_BETWEEN_READINGS - 1
+                && self.search_time.is_some_and(|limit| elapsed() >= limit))
             || self.node_limit == Some(self.nodes)
         {
             return true;
@@ -134,16 +189,30 @@ impl<'a> SearchLimits<'a> {
     }
 }
 
-fn search_with_clock(
+fn search_with_elapsed_time(
     request: &SearchRequest,
     report: &mut dyn FnMut(SearchReport),
     now: &dyn Fn() -> Instant,
     before_node: &mut dyn FnMut(),
     depth_cap: u8,
 ) -> u64 {
-    // TODO(fisher-5sg.10): Use the clocks and moves to go to set the time limit.
+    run_search::<{ SearchLimits::NODES_BETWEEN_READINGS }>(
+        request,
+        report,
+        now,
+        before_node,
+        SearchLimits::new(request, depth_cap),
+    )
+}
+
+fn run_search<const NODES_BETWEEN_READINGS: u64>(
+    request: &SearchRequest,
+    report: &mut dyn FnMut(SearchReport),
+    now: &dyn Fn() -> Instant,
+    before_node: &mut dyn FnMut(),
+    mut limits: SearchLimits<'_>,
+) -> u64 {
     let fallback = request.position.legal_moves().into_iter().next();
-    let mut limits = SearchLimits::new(request, depth_cap);
     if limits.interrupted() {
         report(SearchReport::BestMove(fallback));
         return 0;
@@ -163,22 +232,25 @@ fn search_with_clock(
 
     let elapsed = || now().duration_since(request.started);
     let mut best_move = fallback;
+    let mut last_depth_duration = None;
     for depth in 1..=limits.depth_limit {
-        if limits.stop_before_depth(&elapsed) {
+        let Some(started) = limits.start_depth(&elapsed, last_depth_duration) else {
             break;
-        }
+        };
         let Some(result) = minimax_until_interrupted(&request.position, depth, || {
             before_node();
-            limits.stop_before_node(&elapsed)
+            limits.stop_before_node::<NODES_BETWEEN_READINGS>(&elapsed)
         }) else {
             break;
         };
         best_move = result.best_move.unwrap_or(best_move);
+        let finished = elapsed();
+        last_depth_duration = Some(finished.saturating_sub(started));
         report(SearchReport::FinishedDepth(FinishedDepth {
             depth,
             score: result.score,
             nodes: limits.nodes,
-            elapsed: elapsed(),
+            elapsed: finished,
             principal_variation: result.principal_variation,
         }));
     }

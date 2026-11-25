@@ -17,11 +17,10 @@ root=$(cd "$(dirname "$0")/.." && pwd)
 python=${PYTHON:-python3}
 
 # The conditions these settings make up, as numbered in strength/README.md.
-conditions=1
+conditions=2
 games=400
 concurrency=8
-# A fisher that ignores the clocks gets one it will not run out of.
-fisher_clock=600+10
+clock=10+0.1
 
 if ! command -v cargo >/dev/null 2>&1; then
     export PATH="$HOME/.cargo/bin:$PATH"
@@ -75,13 +74,13 @@ build "$revision" "$name"
 if [ "$opponent" = stockfish ]; then
     opponent_name=stockfish-1320
     opponent_record="$stockfish_name, UCI_Elo 1320"
-    set -- "cmd=$stockfish" "name=$opponent_name" tc=10+0.1 \
+    set -- "cmd=$stockfish" "name=$opponent_name" \
         option.UCI_LimitStrength=true option.UCI_Elo=1320 option.Threads=1 option.Hash=16
 else
     opponent_name=opponent-$(git -C "$root" rev-parse --short "$opponent_revision")
     opponent_record=$opponent_revision
     build "$opponent_revision" "$opponent_name"
-    set -- "cmd=$out/$opponent_name" "name=$opponent_name" "tc=$fisher_clock"
+    set -- "cmd=$out/$opponent_name" "name=$opponent_name"
 fi
 
 cd "$out"
@@ -89,9 +88,9 @@ runner=$(fastchess --version | sed 's/ *$//')
 echo "$name against $opponent_name: $games games, $concurrency at a time"
 
 if ! fastchess \
-    -engine "cmd=$out/$name" "name=$name" "tc=$fisher_clock" \
+    -engine "cmd=$out/$name" "name=$name" \
     -engine "$@" \
-    -each proto=uci \
+    -each proto=uci "tc=$clock" \
     -openings "file=$root/strength/openings.epd" format=epd order=sequential \
     -rounds "$((games / 2))" -games 2 -concurrency "$concurrency" \
     -pgnout file=games.pgn append=false \

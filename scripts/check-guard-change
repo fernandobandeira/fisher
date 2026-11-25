@@ -53,24 +53,47 @@ def violations(repo, base, head, event="pull_request"):
             if policy and not policy.endswith(b"\n"):
                 patterns.write(b"\n")
         patterns.flush()
-        return check_range(repo, f"{base}..{head}", patterns.name, event)
+        return check_range(repo, base, head, patterns.name, event)
 
 
-def check_range(repo, revision_range, protected_paths, event):
+def format_paths(paths):
+    return "\n".join(f"  {os.fsdecode(path)!r}" for path in paths[:-1].split(b"\0"))
+
+
+def check_range(repo, base, head, protected_paths, event):
     problems = []
-    for commit in git(repo, "rev-list", "--reverse", revision_range).decode().splitlines():
+    marked_range = False
+    reason_pattern = (r"^Guard-Change: .*[^[:space:]]",)
+    path_patterns = ("-z", "-f", protected_paths)
+    for commit in git(repo, "rev-list", "--reverse", f"{base}..{head}").decode().splitlines():
         # Combined diffs omit paths carried over unchanged from any merge parent.
         paths = git(repo, "diff-tree", "--root", "-c", "--no-commit-id",
                     "--name-only", "--no-renames", "-r", "-z", commit)
-        touched = grep(("-z", "-f", protected_paths), paths)
-        if not touched:
-            continue
+        touched = grep(path_patterns, paths)
         message = git(repo, "show", "-s", "--format=%B", commit)
-        if grep((r"^Guard-Change: .*[^[:space:]]",), message):
-            continue
-        paths = "\n".join(f"  {os.fsdecode(path)!r}" for path in touched[:-1].split(b"\0"))
+        if grep(reason_pattern, message):
+            marked_range = True
+        elif touched:
+            problems.append(
+                f"Commit {commit} changes protected paths:\n{format_paths(touched)}\n"
+                f"{repair_message(event, commit)}"
+            )
+
+    if problems or marked_range:
+        return problems
+
+    # A squash lands the pull request's net change, with the range's messages.
+    # A push has already landed, so compare its actual endpoints.
+    diff_base = base
+    if event == "pull_request":
+        diff_base = git(repo, "merge-base", base, head).decode().strip()
+    paths = git(repo, "diff-tree", "--no-commit-id", "--name-only",
+                "--no-renames", "-r", "-z", diff_base, head)
+    touched = grep(path_patterns, paths)
+    if touched:
         problems.append(
-            f"Commit {commit} changes protected paths:\n{paths}\n{repair_message(event, commit)}"
+            f"Net change touches protected paths without a Guard-Change line in any commit:\n"
+            f"{format_paths(touched)}\n{repair_message(event, head)}"
         )
     return problems
 
@@ -237,6 +260,7 @@ def self_test(script):
         expect(repo, "non-UTF-8 filename", base, raw_commit, os.fsdecode(raw_path))
 
         checker = script.read_bytes()
+        check_net_change_fixtures(repo, base, checker, reason)
         for event, advice in (
             ("pull_request", b"git push --force-with-lease"),
             ("push", b"Bring this commit and its protected paths to the owner"),
@@ -268,6 +292,38 @@ def self_test(script):
                        env={**os.environ, "GIT_TRACE": "1"})
     if b"show " + head + b":.githooks/protected-paths" not in trace:
         sys.exit("Guard-Change fixture failed (read real policy).")
+
+
+def check_net_change_fixtures(repo, base, checker, reason):
+    protected_path = "expectations/perft.epd"
+    git(repo, "switch", "-q", "-c", "net-change-main", base)
+    marked_base = commit_file(repo, protected_path, f"Record counts\n\n{reason}")
+
+    git(repo, "switch", "-q", "-c", "net-change-side", base)
+    side_head = commit_file(repo, "README.md", "Update description")
+    expect_cli(checker, repo, marked_base, side_head, "pull_request", 0)
+
+    git(repo, "switch", "-q", "-c", "net-change-branch", marked_base)
+    git(repo, "merge", "-q", "-s", "ours", "--no-commit", side_head)
+    git(repo, "rm", "--", protected_path)
+    reset_head = commit_staged(repo, "Take counts from the side branch")
+    for event, advice in (
+        ("pull_request", b"Reword the named commit"),
+        ("push", b"Bring this commit and its protected paths to the owner"),
+    ):
+        expect_cli(checker, repo, marked_base, reset_head, event, 1,
+                   b"Net change touches protected paths", protected_path.encode(), advice)
+
+    marked_head = commit_file(
+        repo, "README.md", "Explain the reset\n\nGuard-Change: restore the older counts"
+    )
+    for event in ("pull_request", "push"):
+        expect_cli(checker, repo, marked_base, marked_head, event, 0)
+
+    git(repo, "switch", "-q", "net-change-side")
+    git(repo, "merge", "-q", "--no-edit", marked_base)
+    merged_main = git(repo, "rev-parse", "HEAD").decode().strip()
+    expect_cli(checker, repo, marked_base, merged_main, "pull_request", 0)
 
 
 def expect_cli(script, repo, base, head, event, status, *messages, env=None):

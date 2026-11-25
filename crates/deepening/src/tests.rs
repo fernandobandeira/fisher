@@ -212,3 +212,5 @@ fn infinite_search_reaches_the_production_depth_cap() -> Result<(), Box<dyn std:
     assert_eq!(*last, SearchReport::BestMove(best_move));
     Ok(())
 }
+
+mod movetime;

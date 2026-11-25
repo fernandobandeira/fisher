@@ -51,3 +51,5 @@ check Glossary 'cargo xtask glossary' cargo xtask glossary
 check 'Crate interfaces' 'cargo xtask interfaces' cargo xtask interfaces
 check 'Dependency advisories and sources' 'cargo deny --locked check -D warnings advisories sources' \
     cargo deny --locked check -D warnings advisories sources
+
+# Temporary Guard-Change rejection fixture.

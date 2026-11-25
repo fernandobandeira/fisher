@@ -2,7 +2,7 @@
 """Build, play and verify the weekly real-clock match.
 
 Usage: scripts/check-clock-match FASTCHESS NEW_EVIDENCE_DIRECTORY
-Install the replay library with pip install --require-hashes -r scripts/clock-match-requirements.txt.
+Install the pinned PGN replay library and its build tool as in .github/workflows/clock-match.yml.
 """
 import collections
 import io
@@ -221,7 +221,6 @@ def main():
         summary.extend(["First unexpected output lines:", *report["unexpected_examples"]])
     output = "\n".join(summary) + "\n"
     (evidence / "summary.txt").write_text(output)
-    # Console output can contain workflow command syntax.
     print(output, end="")
     passed = (
         status == 0 and not deadline_reached and not abnormal

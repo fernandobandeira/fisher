@@ -339,3 +339,31 @@ fn counts_entries_until_nodes_or_movetime_refuses_entry() {
         assert_reports(&reports, totals, request.position);
     }
 }
+
+#[test]
+fn explicit_depth_ends_search_before_movetime() {
+    // First "Several limits" row in expectations/uci-go-movetime/README.md.
+    // Either UCI command order produces these same limits.
+    let mut request = timed_request(Position::starting(), 50, false);
+    request.limits.depth = Some(1);
+    let mut reports = Vec::new();
+    let mut checks = 0;
+    let entered = search_with_clock(
+        &request,
+        &mut |report| reports.push(report),
+        &|| request.started + Duration::from_millis(2),
+        &mut || checks += 1,
+        2,
+    );
+    assert_eq!(entered, 20);
+    assert_eq!(checks, 20);
+    let [
+        SearchReport::FinishedDepth(first),
+        SearchReport::BestMove(best_move),
+    ] = reports.as_slice()
+    else {
+        unreachable!("expected one finished depth and a best move");
+    };
+    assert_starting_depth(first, 1, 20, 2);
+    assert_eq!(*best_move, first.principal_variation.first().copied());
+}

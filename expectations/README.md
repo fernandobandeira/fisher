@@ -140,10 +140,10 @@ fisher-5sg.3 independently derived these sessions and the
 ### Limits on depth and nodes
 
 fisher-5sg.5 derived the [successor sessions and controlled schedules](uci-depth-and-nodes/README.md)
-on 2026-11-25. The runner reads `uci/`. fisher-5sg.6 adopts both successor
-sessions there and uses the schedules for node entry and command order.
-The staged responses distinguish explicit limits that finish depth 5 from
-the default search through depth 4.
+on 2026-11-25. The runner reads the active [depth session](uci/go-depth.uci)
+and [nodes session](uci/go-nodes.uci). fisher-5sg.6 uses the controlled
+schedules for node entry and command order. The sessions distinguish explicit
+limits that finish depth 5 from the default search through depth 4.
 
 ### Repeated searched info
 

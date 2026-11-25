@@ -89,10 +89,16 @@ is the depth. Each move contains two squares
 and an optional lowercase promotion suffix. The move pattern excludes
 `0000`. Digits in every allowance are ASCII. The runner checks the nodes
 per second from the reported nodes and time. At depths 1 to 4 it also
-checks the principal variation under D5 and compares any `{score}` with
-the reference minimax. At depths 1 and 2 it also compares literal scores.
-Deeper lines get the spelling and length checks only, because the reference
-minimax prunes nothing.
+checks the principal variation under D5. A literal score is itself the
+expected value. For a `{score}`, the transcripts check that UCI reports
+the search's score in this grammar, supported by its own principal
+variation. Score correctness lives in the search comparison: the tests of
+`search` compare the search with plain minimax at every position where a
+transcript leaves the score open, at depths 1 to 4, and the runner fails
+on a `{score}` at those depths from a position missing from that
+comparison (fisher-4yn.4). The tests of `uci` check that the `info` line
+carries the score the search returned. Deeper lines get the spelling and
+length checks only.
 
 ### Transcripts for search on its own thread
 

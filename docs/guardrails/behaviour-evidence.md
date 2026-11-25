@@ -9,4 +9,4 @@ This page explains what each check can show about the engine.
 - **Bench signature.** A refactor has a stable observation the owner can check.
 - **Strength record.** The owner can trace an improvement claim to a match.
 
-The full mate suite is published, ignored by default, and run in release mode on request.
+The first ten published mates run in `scripts/check`. The weekly published suite runs all 100 in release mode. Run [`scripts/check-published-suite`](../../scripts/check-published-suite) to repeat the suite locally.

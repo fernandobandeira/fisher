@@ -17,6 +17,8 @@ The skills are Matt Pocock's. They are not committed: `skills-lock.json` pins th
 
 The crate boundary check uses Python 3.8 or newer. The pre-commit hook runs the local gate and needs network access to refresh RustSec and Cargo registry data. If the refresh fails, restore connectivity and rerun `scripts/check`. CI runs the local checks, mutation and coverage on pull requests, pushes to `main`, and weekly. It also checks commit messages for `Guard-Change:` on pull requests and pushes to `main`. Rust comes from [rustup](https://rustup.rs). The version is pinned in `rust-toolchain.toml`.
 
+A separate weekly workflow runs the approved deep perft, all 100 published mates and both four-ply node tests. Run `scripts/check-published-suite` locally to run the same suite.
+
 ## Start work
 
 Open the project in your agent and run `/grill-with-docs` on what you want to build first. [docs/process.md](docs/process.md) describes the path from there to a merge.

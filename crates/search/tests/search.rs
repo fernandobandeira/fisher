@@ -33,6 +33,14 @@ fn check_mate_in_two(
 ) -> Result<(), Box<dyn Error>> {
     for record in records {
         let position = reference_position(record.fen)?;
+        if record.id == "00HEh" {
+            use std::io::Write;
+            writeln!(
+                std::io::stderr().lock(),
+                "Checking published mate {}",
+                record.id
+            )?;
+        }
         let result = assert_matches_reference(&position, 4)?;
         assert_eq!(
             result.score,

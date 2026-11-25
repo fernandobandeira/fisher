@@ -1,17 +1,56 @@
-# Written 2026-11-24 from the April 2006 UCI specification https://backscattering.de/chess/uci/
-# fisher-8ie rules 1, 2, 5 and 8, D24 and D41.
-# The two positions, sole moves and four-ply values come from go-parameters.uci.
+# Staged by fisher-5sg.3 on 2026-11-24.
+# Sources: April 2006 UCI specification https://backscattering.de/chess/uci/,
+# fisher-8ie rules 1, 2, 5 and 8, and fisher-r6y D15, D24, D28 and D41.
+# Full searched info spelling: Stockfish sf_19 (edb0d9d), read 2026-11-24.
+# Positions from expectations/uci/stop-position-go.uci. Full-width minimax
+# with python-chess 1.11.2 on 2026-11-24 used fisher-2aj rules 1–7:
+# score material at the horizon, detect terminal positions before it, and
+# count each played move. Per-ply nodes are 1/21/30/730 and 1/25/45/1228.
+# Sum plies within each depth, then add those counts across finished depths
+# since go. Depths 1 and 2 see the queen deficit; depths 3 and 4 see Black
+# checkmated in two plies. The sole legal moves are h8g8 and h8h7.
 > position fen 7k/8/5K1Q/8/8/8/8/8 b - - 0 1
 > go infinite
-< info depth 4 multipv 1 score mate -1 nodes 782 nps {nps} time {time} pv {pv}
+< info depth 1 multipv 1 score cp -900 nodes 1 nps {nps} time {time} pv {pv}
+< info depth 2 multipv 1 score cp -900 nodes 23 nps {nps} time {time} pv {pv}
 > isready
+<* info depth {depth} multipv 1 score {score} nodes {nodes} nps {nps} time {time} pv {pv}
+< readyok
+> position fen 7k/8/5K2/6Q1/8/8/8/8 b - - 0 1
+<* info depth {depth} multipv 1 score {score} nodes {nodes} nps {nps} time {time} pv {pv}
+< info string {message:position rejected: waiting for stop}
+> stop
+<* info depth {depth} multipv 1 score {score} nodes {nodes} nps {nps} time {time} pv {pv}
+< bestmove h8g8
+# A fresh search still uses the original position.
+> go
+< info depth 1 multipv 1 score cp -900 nodes 1 nps {nps} time {time} pv {pv}
+< info depth 2 multipv 1 score cp -900 nodes 23 nps {nps} time {time} pv {pv}
+< info depth 3 multipv 1 score mate -1 nodes 75 nps {nps} time {time} pv {pv}
+< info depth 4 multipv 1 score mate -1 nodes 857 nps {nps} time {time} pv {pv}
+< bestmove {legal}
+
+> go infinite
+< info depth 1 multipv 1 score cp -900 nodes 1 nps {nps} time {time} pv {pv}
+< info depth 2 multipv 1 score cp -900 nodes 23 nps {nps} time {time} pv {pv}
+# Read through depth 4 before queuing D24. The runner checks variations
+# through depth 4 against its reference position, which changes when the
+# replacement is sent. Deeper reports may still precede the stopped move.
+< info depth 3 multipv 1 score mate -1 nodes 75 nps {nps} time {time} pv {pv}
+< info depth 4 multipv 1 score mate -1 nodes 857 nps {nps} time {time} pv {pv}
+> isready
+<* info depth {depth} multipv 1 score {score} nodes {nodes} nps {nps} time {time} pv {pv}
 < readyok
 # Send all three commands without waiting for a response between them.
 > stop
 > position fen 7k/8/5K2/6Q1/8/8/8/8 b - - 0 1
 > go
+<* info depth {depth} multipv 1 score {score} nodes {nodes} nps {nps} time {time} pv {pv}
 < bestmove h8g8
-< info depth 4 multipv 1 score mate -1 nodes 1299 nps {nps} time {time} pv {pv}
+< info depth 1 multipv 1 score cp -900 nodes 1 nps {nps} time {time} pv {pv}
+< info depth 2 multipv 1 score cp -900 nodes 27 nps {nps} time {time} pv {pv}
+< info depth 3 multipv 1 score mate -1 nodes 98 nps {nps} time {time} pv {pv}
+< info depth 4 multipv 1 score mate -1 nodes 1397 nps {nps} time {time} pv {pv}
 # The only legal move in the accepted replacement position is h8h7.
 < bestmove {legal}
 > quit

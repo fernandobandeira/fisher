@@ -181,9 +181,11 @@ fn terminal_search_reports_omit_search_statistics_and_a_move() -> io::Result<()>
 }
 
 // These tests examine output from finished work, including reports after
-// stop is queued. Keep the search independent of the interrupt in this fixture.
+// stop is queued. Use the finite search as a fixture and leave the session
+// responsible for holding the move from an infinite go.
 fn finished_search(mut request: deepening::SearchRequest, report: &mut dyn FnMut(SearchReport)) {
     request.interrupt = Arc::new(AtomicBool::new(false));
+    request.limits.infinite = false;
     deepening::search(request, report);
 }
 
@@ -226,11 +228,11 @@ fn reports_a_flush_failure_on_each_protocol_response() -> io::Result<()> {
     // and the searched and terminal responses are specified in expectations/uci.
     const COMMANDS: &[u8] = b"uci\nisready\nposition\n        position fen 7k/8/5K1Q/8/8/8/8/8 b - - 0 1\n        go infinite\nposition startpos\ngo\nstop\ngo depth\nquit\n";
     let successful = session_output(COMMANDS, finished_search)?;
-    // Two ID responses and uciok, readyok, the position diagnostic, one info,
-    // two rejected commands, the released move, and info/bestmove for finite go.
-    assert_eq!(successful.lines().count(), 11);
+    // Two ID responses and uciok, readyok, the position diagnostic, four info lines,
+    // two rejected commands, the released move, and four info lines plus the finite bestmove.
+    assert_eq!(successful.lines().count(), 17);
 
-    for response in 0..11 {
+    for response in 0..17 {
         let error = uci::run_session(
             COMMANDS,
             FailOnFlush(Some(response)),

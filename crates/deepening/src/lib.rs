@@ -64,10 +64,17 @@ pub enum SearchReport {
 /// A finished search of a terminal root reports depth 0 then `BestMove(None)`.
 #[expect(
     clippy::needless_pass_by_value,
-    reason = "The worker owns the request and the current fixed-depth search only borrows it"
+    reason = "The worker owns the request throughout the search"
 )]
 pub fn search(request: SearchRequest, report: &mut dyn FnMut(SearchReport)) {
-    search_with_clock(&request, report, &Instant::now, &mut || {});
+    const DEPTH_CAP: u8 = 255;
+    const DEFAULT_DEPTH: u8 = 4;
+    let depth_cap = if request.limits.infinite {
+        DEPTH_CAP
+    } else {
+        DEFAULT_DEPTH
+    };
+    search_with_clock(&request, report, &Instant::now, &mut || {}, depth_cap);
 }
 
 fn is_interrupted(request: &SearchRequest) -> bool {
@@ -79,37 +86,41 @@ fn search_with_clock(
     report: &mut dyn FnMut(SearchReport),
     now: &dyn Fn() -> Instant,
     before_node: &mut dyn FnMut(),
+    depth_cap: u8,
 ) {
-    // TODO(fisher-5sg.4): Deepen under the limits of the go.
     // TODO(fisher-5sg.10): Use the clocks and moves to go to set the time limit.
-    const DEPTH: u8 = 4;
-    let result = if request.interrupt.load(Ordering::Relaxed) {
-        None
-    } else {
-        minimax_until_interrupted(&request.position, DEPTH, || {
+    let mut nodes: u64 = 0;
+    let mut best_move = None;
+    for depth in 1..=depth_cap {
+        if is_interrupted(request) {
+            break;
+        }
+        let Some(result) = minimax_until_interrupted(&request.position, depth, || {
             before_node();
             is_interrupted(request)
-        })
-    };
-    let Some(result) = result else {
-        report(SearchReport::BestMove(
-            request.position.legal_moves().into_iter().next(),
-        ));
-        return;
-    };
-    let (depth, elapsed) = if result.best_move.is_some() {
-        (DEPTH, now().duration_since(request.started))
-    } else {
-        (0, Duration::ZERO)
-    };
-    report(SearchReport::FinishedDepth(FinishedDepth {
-        depth,
-        score: result.score,
-        nodes: result.nodes,
-        elapsed,
-        principal_variation: result.principal_variation,
-    }));
-    report(SearchReport::BestMove(result.best_move));
+        }) else {
+            break;
+        };
+        best_move = result.best_move;
+        nodes = nodes.saturating_add(result.nodes);
+        report(SearchReport::FinishedDepth(FinishedDepth {
+            depth: if best_move.is_some() { depth } else { 0 },
+            score: result.score,
+            nodes,
+            elapsed: if best_move.is_some() {
+                now().duration_since(request.started)
+            } else {
+                Duration::ZERO
+            },
+            principal_variation: result.principal_variation,
+        }));
+        if best_move.is_none() {
+            break;
+        }
+    }
+    report(SearchReport::BestMove(
+        best_move.or_else(|| request.position.legal_moves().into_iter().next()),
+    ));
 }
 
 #[cfg(test)]

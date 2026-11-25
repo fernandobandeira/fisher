@@ -89,28 +89,20 @@ is the depth. Each move contains two squares
 and an optional lowercase promotion suffix. The move pattern excludes
 `0000`. Digits in every allowance are ASCII. The runner checks the nodes
 per second from the reported nodes and time. At depths 1 to 4 it also
-checks a `{score}` against the reference minimax at that depth, and the
-principal variation under D5. Deeper lines get the spelling and length
-checks only, because the reference minimax prunes nothing.
+checks the principal variation under D5 and compares any `{score}` with
+the reference minimax. At depths 1 and 2 it also compares literal scores.
+Deeper lines get the spelling and length checks only, because the reference
+minimax prunes nothing.
 
 ### Transcripts for search on its own thread
 
 fisher-2aj.5 activates the five sessions authored in fisher-5sg.12 in [`uci/`](uci/).
-The two held-move sessions replace their predecessors under D25.
-The three other sessions cover
-the commands after `stop` under D24 and an immediate `quit` or end of input.
-The held-move transcripts read the last `info` line before the next command.
-The scripted histories can also observe the search’s `BestMove` report.
-The two held-move sessions and `stop-position-go.uci` have staged
-successors for fisher-5sg.4 in [`uci-deepen-until-stop/`](uci-deepen-until-stop/).
 
-### Staged iterative deepening transcripts
+### Iterative deepening transcripts
 
-fisher-5sg.13 staged the [successors in `uci-iterative-deepening/`](uci-iterative-deepening/)
-on 2026-11-24 for fisher-5sg.4. The current runner reads only `uci/`.
-Each staged file with the same name succeeds its active file. The `go depth`,
-`go nodes` and `go movetime` cases of `go-parameters.uci` each start a fresh
-session in `go-depth.uci`, `go-nodes.uci` and `go-movetime.uci`. They use
+fisher-5sg.13 independently derived the [active sessions](uci/) on
+2026-11-24. The `go depth`, `go nodes` and `go movetime` cases each start a
+fresh session in `go-depth.uci`, `go-nodes.uci` and `go-movetime.uci`. They use
 the default depth of four until their limits are implemented.
 
 Each finished depth has its own required reply with a literal depth.
@@ -121,13 +113,10 @@ nodes. The three score allowances in `position-moves.uci` retain `{score}`
 at every depth and use independently enumerated node totals. The derivation
 script and its results are on fisher-5sg.13.
 
-Keep the two fresh processes and compare their moves when adopting
-`equal-scores.uci`. The `terminal-positions.uci` successor retains one
-depth-zero line for each position. The `go-infinite.uci` successor stages
-the bare searches in that session and keeps the single depth-4 line of
-its two held searches. It is not adopted on its own: fisher-5sg.3 stages
-the `go infinite` successor of the same file and folds these bare searches
-into it.
+The runner compares moves from two fresh processes for `equal-scores.uci`.
+The `terminal-positions.uci` session requires one depth-zero line for each
+position. The [staged bare searches](uci-iterative-deepening/go-infinite.uci)
+are included in the active [`go-infinite.uci`](uci/go-infinite.uci).
 
 Rules 2 and 3 of fisher-2aj score a position at the horizon by material
 without asking whether it has a legal move. A mate one ply beyond the
@@ -135,18 +124,18 @@ depth searched therefore reads as material: the mate-in-one position
 reports `cp 900` at depth 1 and `mate 1` from depth 2. Stockfish would
 report `mate 1` at depth 1.
 
-### Staged search that deepens until stop
+### Search that deepens until stop
 
-fisher-5sg.3 staged [these successors and controlled schedules](uci-deepen-until-stop/)
-on 2026-11-24 for fisher-5sg.4. The current runner reads only `uci/`.
+fisher-5sg.3 independently derived these sessions and the
+[controlled schedules](uci-deepen-until-stop/README.md) on 2026-11-24.
 
-| Staged session | What it covers |
+| Active session | What it covers |
 |---|---|
-| [`go-infinite.uci`](uci-deepen-until-stop/go-infinite.uci) | Succeeds the active session and folds in the bare searches staged by fisher-5sg.13. |
-| [`go-infinite-terminal.uci`](uci-deepen-until-stop/go-infinite-terminal.uci) | Succeeds the active session for a terminal position. |
-| [`stop-position-go.uci`](uci-deepen-until-stop/stop-position-go.uci) | Succeeds the active D24 session and checks that a rejected position leaves the root unchanged. |
-| [`quit-while-held.uci`](uci-deepen-until-stop/quit-while-held.uci) and [`end-of-input-while-held.uci`](uci-deepen-until-stop/end-of-input-while-held.uci) | Succeed the active sessions for exit with a held move. |
-| [`quit-while-deepening.uci`](uci-deepen-until-stop/quit-while-deepening.uci) and [`end-of-input-while-deepening.uci`](uci-deepen-until-stop/end-of-input-while-deepening.uci) | Add searches that may report progress before exit. |
+| [`go-infinite.uci`](uci/go-infinite.uci) | Search during commands and bare searches. |
+| [`go-infinite-terminal.uci`](uci/go-infinite-terminal.uci) | A terminal position. |
+| [`stop-position-go.uci`](uci/stop-position-go.uci) | D24 and a rejected position leaving the root unchanged. |
+| [`quit-while-held.uci`](uci/quit-while-held.uci) and [`end-of-input-while-held.uci`](uci/end-of-input-while-held.uci) | Exit with a held move. |
+| [`quit-while-deepening.uci`](uci/quit-while-deepening.uci) and [`end-of-input-while-deepening.uci`](uci/end-of-input-while-deepening.uci) | Exit during a search that may report finished depths. |
 
 ### Repeated searched info
 

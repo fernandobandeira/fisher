@@ -69,7 +69,7 @@ pub enum SearchReport {
 pub fn search(request: SearchRequest, report: &mut dyn FnMut(SearchReport)) {
     const DEPTH_CAP: u8 = 255;
     const DEFAULT_DEPTH: u8 = 4;
-    let depth_cap = if request.limits.infinite {
+    let depth_cap = if request.limits.infinite || request.limits.movetime.is_some() {
         DEPTH_CAP
     } else {
         DEFAULT_DEPTH
@@ -81,6 +81,36 @@ fn is_interrupted(request: &SearchRequest) -> bool {
     request.interrupt.load(Ordering::Relaxed)
 }
 
+struct MoveTime {
+    limit: Duration,
+    nodes_until_reading: u16,
+}
+
+impl MoveTime {
+    const MARGIN: Duration = Duration::from_millis(10);
+    const NODES_BETWEEN_READINGS: u16 = 1024;
+
+    fn new(movetime: Duration) -> Self {
+        Self {
+            limit: movetime.saturating_sub(Self::MARGIN),
+            nodes_until_reading: Self::NODES_BETWEEN_READINGS,
+        }
+    }
+
+    fn expired(&self, elapsed: &dyn Fn() -> Duration) -> bool {
+        elapsed() >= self.limit
+    }
+
+    fn expired_before_node(&mut self, elapsed: &dyn Fn() -> Duration) -> bool {
+        self.nodes_until_reading -= 1;
+        if self.nodes_until_reading != 0 {
+            return false;
+        }
+        self.nodes_until_reading = Self::NODES_BETWEEN_READINGS;
+        self.expired(elapsed)
+    }
+}
+
 fn search_with_clock(
     request: &SearchRequest,
     report: &mut dyn FnMut(SearchReport),
@@ -89,15 +119,24 @@ fn search_with_clock(
     depth_cap: u8,
 ) {
     // TODO(fisher-5sg.10): Use the clocks and moves to go to set the time limit.
+    let elapsed = || now().duration_since(request.started);
+    let mut move_time = request.limits.movetime.map(MoveTime::new);
     let mut nodes: u64 = 0;
     let mut best_move = None;
     for depth in 1..=depth_cap {
-        if is_interrupted(request) {
+        if is_interrupted(request)
+            || move_time
+                .as_ref()
+                .is_some_and(|time| time.expired(&elapsed))
+        {
             break;
         }
         let Some(result) = minimax_until_interrupted(&request.position, depth, || {
             before_node();
             is_interrupted(request)
+                || move_time
+                    .as_mut()
+                    .is_some_and(|time| time.expired_before_node(&elapsed))
         }) else {
             break;
         };
@@ -108,7 +147,7 @@ fn search_with_clock(
             score: result.score,
             nodes,
             elapsed: if best_move.is_some() {
-                now().duration_since(request.started)
+                elapsed()
             } else {
                 Duration::ZERO
             },

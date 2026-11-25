@@ -728,3 +728,6 @@ fn holds_the_move_at_the_production_depth_cap() -> io::Result<()> {
     assert_eq!(session.finish()?, Vec::<String>::new());
     Ok(())
 }
+
+#[path = "threaded_session/movetime.rs"]
+mod movetime;

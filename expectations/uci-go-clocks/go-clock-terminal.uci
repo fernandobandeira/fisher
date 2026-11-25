@@ -1,0 +1,16 @@
+# Staged by fisher-5sg.9 on 2026-11-25. See README.md for derivation.
+# Sources: April 2006 UCI specification https://backscattering.de/chess/uci/
+# (go, info, bestmove and quit), and the owner's 2026-11-25 D17 answers
+# on fisher-5sg.10, recorded as fisher-r6y D49–D52 and D56.
+# Terminal score and precedence follow D41 and the zero-limit case in
+# fisher-5sg.5 (bcd717c), corroborated by Stockfish sf_19 (edb0d9d).
+# python-chess 1.11.2 confirms the root is checkmate.
+> position fen 7k/6Q1/5K2/8/8/8/8/8 b - - 0 1
+> go btime 0
+# D41 and fisher-5sg.5 give the terminal score. D42 and UCI Move format give 0000.
+< info depth 0 score mate 0
+< bestmove 0000
+
+# UCI quit and D25 require clean exit with no further output.
+> quit
+! exit

@@ -136,6 +136,12 @@ fisher-5sg.3 independently derived these sessions and the
 | [`quit-while-held.uci`](uci/quit-while-held.uci) and [`end-of-input-while-held.uci`](uci/end-of-input-while-held.uci) | Exit with a held move. |
 | [`quit-while-deepening.uci`](uci/quit-while-deepening.uci) and [`end-of-input-while-deepening.uci`](uci/end-of-input-while-deepening.uci) | Exit during a search that may report finished depths. |
 
+### Limits on depth and nodes
+
+fisher-5sg.5 derived the [successor sessions and controlled schedules](uci-depth-and-nodes/README.md)
+on 2026-11-25. The runner reads `uci/`. fisher-5sg.6 adopts both successor
+sessions there and uses the schedules for node entry and command order.
+
 ### Repeated searched info
 
 Source: fisher-r6y D15 and fisher-5sg decision 1, approved by the owner on

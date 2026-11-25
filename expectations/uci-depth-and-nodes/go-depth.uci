@@ -1,0 +1,42 @@
+# fisher-5sg.5, 2026-11-25. See README.md for derivation.
+# Sources: April 2006 UCI specification https://backscattering.de/chess/uci/,
+# fisher-8ie, fisher-r6y D20, D24, D28 and D41, fisher-5sg decisions 2–6 and 10.
+# Perft: expectations/perft.epd. Independent minimax: python-chess 1.11.2.
+# Full info spelling: Stockfish sf_19 (edb0d9d), as cited in expectations/README.md.
+> position fen 7k/8/5K1Q/8/8/8/8/8 b - - 0 1
+# Depth 0 reaches the limit before any node is entered (D20).
+> go depth 0
+< bestmove h8g8
+> position startpos
+> go depth 1
+< info depth 1 multipv 1 score cp 0 nodes 20 nps {nps} time {time} pv {pv}
+< bestmove {legal}
+> go depth 2
+< info depth 1 multipv 1 score cp 0 nodes 20 nps {nps} time {time} pv {pv}
+< info depth 2 multipv 1 score cp 0 nodes 440 nps {nps} time {time} pv {pv}
+< bestmove {legal}
+
+# Depth reaches its limit first with either parameter order.
+> go depth 1 nodes 440
+< info depth 1 multipv 1 score cp 0 nodes 20 nps {nps} time {time} pv {pv}
+< bestmove {legal}
+> go nodes 440 depth 1
+< info depth 1 multipv 1 score cp 0 nodes 20 nps {nps} time {time} pv {pv}
+< bestmove {legal}
+
+# Nodes reach their limit first with either parameter order.
+> go depth 2 nodes 20
+< info depth 1 multipv 1 score cp 0 nodes 20 nps {nps} time {time} pv {pv}
+< bestmove {legal}
+> go nodes 20 depth 2
+< info depth 1 multipv 1 score cp 0 nodes 20 nps {nps} time {time} pv {pv}
+< bestmove {legal}
+
+# Terminal root (fisher-2aj.2 owner approval, 2026-11-23).
+> position fen 7k/6Q1/5K2/8/8/8/8/8 b - - 0 1
+> go depth 2
+< info depth 0 score mate 0
+< bestmove 0000
+
+> quit
+! exit

@@ -1,0 +1,174 @@
+#!/usr/bin/env python3
+"""Play a range of openings between two revisions of fisher and print its SHA-256."""
+
+import argparse
+import hashlib
+import json
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+from tempfile import TemporaryDirectory
+
+try:
+    import chess.pgn
+except ImportError:
+    sys.exit("Install python-chess with: python3 -m pip install --require-hashes "
+             "-r strength/series-requirements.txt")
+
+ROOT = Path(__file__).resolve().parents[1]
+OPENINGS = ROOT / "strength/series-openings.epd"
+FIRST_NODE_REVISION = "4fd30025a6974840b2a65a4427c819a89eefcd13"
+CONDITIONS = {3: (1_000_000, 2_000), 4: (10_000_000, 500)}
+FINISHED_RESULTS = {"1-0", "0-1", "1/2-1/2"}
+
+
+def revision(ref):
+    commit = subprocess.check_output(
+        ["git", "rev-parse", "--verify", "--end-of-options", f"{ref}^{{commit}}"],
+        cwd=ROOT, text=True,
+    ).strip()
+    if subprocess.run(
+        ["git", "merge-base", "--is-ancestor", FIRST_NODE_REVISION, commit], cwd=ROOT,
+    ).returncode:
+        raise ValueError(
+            f"{ref} must include {FIRST_NODE_REVISION}, where fisher began to obey go nodes"
+        )
+    return commit
+
+
+def build(commit, engine):
+    with TemporaryDirectory(dir=engine.parent) as temporary:
+        source = Path(temporary)
+        archive = source / "source.tar"
+        subprocess.run(["git", "archive", "-o", archive, commit], cwd=ROOT, check=True)
+        subprocess.run(["tar", "-xf", archive], cwd=source, check=True)
+        target = source / "target"
+        subprocess.run(
+            ["cargo", "build", "--locked", "--release", "-p", "fisher", "--target-dir", target],
+            cwd=source, check=True, stdout=sys.stderr,
+        )
+        shutil.copy2(target / "release/fisher", engine)
+
+
+class SeriesGame(chess.pgn.GameBuilder):
+    """Keep the movetext result separately so a header alone cannot end a game."""
+
+    movetext_result = None
+
+    def visit_result(self, result):
+        self.movetext_result = result
+
+    def result(self):
+        return super().result(), self.movetext_result
+
+
+def games_in_order(pgn, openings, first, measured, opponent):
+    numbers = {fen: number for number, fen in enumerate(openings, first)}
+    measured_name = f"measured-{measured}"
+    opponent_name = f"opponent-{opponent}"
+    pairings = {
+        (measured_name, opponent_name): (0, measured),
+        (opponent_name, measured_name): (1, opponent),
+    }
+    games = {}
+    with pgn.open(encoding="utf-8") as stream:
+        while (game := chess.pgn.read_game(stream, Visitor=SeriesGame)) is not None:
+            parsed, movetext_result = game
+            headers = parsed.headers
+            fen = headers.get("FEN")
+            if fen not in numbers:
+                raise ValueError(f"Game outside the opening range: {fen!r}")
+            number = numbers[fen]
+            pairing = (headers["White"], headers["Black"])
+            if pairing not in pairings:
+                raise ValueError(f"Opening {number} has unexpected engines: {pairing}")
+            white_order, white = pairings[pairing]
+            key = (number, white_order)
+            description = f"Opening {number}, {headers['White']} as White"
+            if key in games:
+                raise ValueError(f"{description}: duplicate game")
+            termination = headers.get("Termination")
+            if termination != "normal":
+                raise ValueError(f"{description}: termination {termination!r}, expected 'normal'")
+            result = headers["Result"]
+            if result not in FINISHED_RESULTS or result != movetext_result:
+                raise ValueError(f"{description}: missing or inconsistent result")
+            moves = [move.uci() for move in parsed.mainline_moves()]
+            if parsed.errors or headers.get("PlyCount") != str(len(moves)):
+                raise ValueError(f"{description}: invalid PGN or incomplete movetext")
+            games[key] = [number, fen, white, moves, result, termination]
+
+    if len(games) != 2 * len(openings):
+        raise ValueError(f"Expected {2 * len(openings)} games, found {len(games)}")
+    return [games[key] for key in sorted(games)]
+
+
+def play(args, out, nodes, measured, opponent):
+    if not shutil.which("fastchess"):
+        raise ValueError("fastchess is not installed")
+    build(measured, out / "measured")
+    build(opponent, out / "opponent")
+    print(f"{args.count} openings from {args.first}, {nodes:,} nodes per move", file=sys.stderr)
+    log = out / "fastchess.log"
+    with log.open("w", encoding="utf-8") as stream:
+        result = subprocess.run(
+            [
+                "fastchess",
+                "-engine", "cmd=./measured", f"name=measured-{measured}", f"nodes={nodes}",
+                "-engine", "cmd=./opponent", f"name=opponent-{opponent}", f"nodes={nodes}",
+                "-each", "proto=uci",
+                "-openings", f"file={OPENINGS}", "format=epd", "order=sequential", f"start={args.first}",
+                "-rounds", str(args.count), "-games", "2", "-concurrency", str(args.concurrency),
+                "-pgnout", "file=games.pgn", "notation=uci", "append=false",
+                "-autosaveinterval", "0", "-ratinginterval", "0",
+            ],
+            cwd=out, stdout=stream, stderr=subprocess.STDOUT,
+        )
+    if result.returncode:
+        raise ValueError(f"fastchess exited with status {result.returncode}. See {log}")
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("measured")
+    parser.add_argument("opponent")
+    parser.add_argument("conditions", type=int, choices=CONDITIONS)
+    parser.add_argument("first", type=int, help="first opening, starting at 1")
+    parser.add_argument("count", type=int, help="number of openings")
+    parser.add_argument("directory", type=Path, help="new directory for the games")
+    parser.add_argument("--concurrency", type=int, default=1, help="games at a time (default: 1)")
+    parser.add_argument("--pgn", type=Path, help="validate and digest an existing PGN without playing")
+    args = parser.parse_args()
+
+    nodes, limit = CONDITIONS[args.conditions]
+    if args.first < 1 or args.count < 1 or args.first + args.count - 1 > limit:
+        parser.error(f"the range must be within openings 1 through {limit}")
+    if args.concurrency < 1:
+        parser.error("concurrency must be positive")
+
+    measured = revision(args.measured)
+    opponent = revision(args.opponent)
+    openings = OPENINGS.read_text(encoding="utf-8").splitlines()
+    selected = openings[args.first - 1:args.first + args.count - 1]
+    if len(selected) != args.count or len(set(selected)) != args.count:
+        raise ValueError("The opening range is incomplete or contains repeated positions")
+
+    out = args.directory.resolve()
+    out.mkdir()
+    pgn = args.pgn if args.pgn is not None else out / "games.pgn"
+    if args.pgn is None:
+        play(args, out, nodes, measured, opponent)
+    games = games_in_order(pgn, selected, args.first, measured, opponent)
+    data = "".join(
+        json.dumps(game, separators=(",", ":")) + "\n" for game in games
+    ).encode("utf-8")
+    (out / "games.jsonl").write_bytes(data)
+    print(hashlib.sha256(data).hexdigest())
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (OSError, ValueError, subprocess.CalledProcessError) as error:
+        sys.exit(f"Series failed: {error}")

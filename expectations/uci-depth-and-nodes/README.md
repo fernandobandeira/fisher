@@ -6,10 +6,8 @@ specification](https://backscattering.de/chess/uci/), and the owner decisions
 in fisher-5sg, fisher-r6y and fisher-8ie. Full searched responses use D41 and
 Stockfish sf_19 (edb0d9d), as cited in the [active grammar](../README.md).
 
-| Staged session | Active session it succeeds |
-|---|---|
-| [go-depth.uci](go-depth.uci) | [uci/go-depth.uci](../uci/go-depth.uci) |
-| [go-nodes.uci](go-nodes.uci) | [uci/go-nodes.uci](../uci/go-nodes.uci) |
+The active sessions are [go-depth.uci](../uci/go-depth.uci) and
+[go-nodes.uci](../uci/go-nodes.uci).
 
 The active `go depth infinite` case stays in [go-infinite.uci](../uci/go-infinite.uci).
 Its depth argument is nonnumeric and leaves `infinite` in force.

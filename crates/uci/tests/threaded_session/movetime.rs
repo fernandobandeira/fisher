@@ -1,4 +1,5 @@
 use super::*;
+use deepening::Limits;
 use rules::{Move, Position};
 
 const TIMED_GO: &str = "go movetime 50";
@@ -16,7 +17,7 @@ enum Step {
 
 struct TimedSearch {
     steps: mpsc::Sender<Step>,
-    accepted: mpsc::Receiver<(Duration, bool)>,
+    accepted: mpsc::Receiver<Limits>,
     reported: mpsc::Receiver<()>,
 }
 
@@ -26,10 +27,7 @@ impl TimedSearch {
         let (started, accepted) = mpsc::channel();
         let (sent, reported) = mpsc::channel();
         let session = Session::start(move |request, report| {
-            let Some(movetime) = request.limits.movetime else {
-                unreachable!("the scripted search requires movetime");
-            };
-            assert!(started.send((movetime, request.limits.infinite)).is_ok());
+            assert!(started.send(request.limits.clone()).is_ok());
             while let Ok(step) = receive(&instructions) {
                 match step {
                     Step::Depth(Depth(depth, cp, nodes, millis, _)) => {
@@ -64,10 +62,15 @@ impl TimedSearch {
     }
 
     fn accepted(&self, millis: u64, infinite: bool) -> io::Result<()> {
-        assert_eq!(
-            receive(&self.accepted)?,
-            (Duration::from_millis(millis), infinite)
-        );
+        self.accepted_limits(&Limits {
+            movetime: Some(Duration::from_millis(millis)),
+            infinite,
+            ..Limits::default()
+        })
+    }
+
+    fn accepted_limits(&self, expected: &Limits) -> io::Result<()> {
+        assert_eq!(&receive(&self.accepted)?, expected);
         Ok(())
     }
 
@@ -170,6 +173,48 @@ fn movetime_reports_no_more_depths_after_the_scripted_expiry() -> io::Result<()>
     search.best_move(false)?;
     assert_eq!(session.reply()?, best_move_line(root));
     finish(session)
+}
+
+// The "Several limits" schedules in expectations/uci-go-movetime/README.md.
+#[test]
+fn depth_and_movetime_pass_through_in_both_orders() -> io::Result<()> {
+    for command in ["go depth 1 movetime 50", "go movetime 50 depth 1"] {
+        let (session, search) = TimedSearch::start();
+        let root = Position::starting();
+        session.command("position startpos")?;
+        session.command(command)?;
+        search.accepted_limits(&Limits {
+            depth: Some(1),
+            movetime: Some(Duration::from_millis(50)),
+            ..Limits::default()
+        })?;
+        search.depth(&session, root, STARTING_DEPTHS[0])?;
+        search.best_move(false)?;
+        assert_eq!(session.reply()?, best_move_line(root));
+        ready(&session)?;
+        finish(session)?;
+    }
+    Ok(())
+}
+
+#[test]
+fn nodes_and_movetime_pass_through_in_both_orders() -> io::Result<()> {
+    // Both private elapsed-time schedules send only a best-move report.
+    for command in ["go nodes 19 movetime 50", "go movetime 50 nodes 19"] {
+        let (session, search) = TimedSearch::start();
+        session.command("position startpos")?;
+        session.command(command)?;
+        search.accepted_limits(&Limits {
+            nodes: Some(19),
+            movetime: Some(Duration::from_millis(50)),
+            ..Limits::default()
+        })?;
+        search.best_move(false)?;
+        assert_eq!(session.reply()?, best_move_line(Position::starting()));
+        ready(&session)?;
+        finish(session)?;
+    }
+    Ok(())
 }
 
 #[test]

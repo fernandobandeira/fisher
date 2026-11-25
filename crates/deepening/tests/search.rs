@@ -11,15 +11,36 @@ use deepening::{FinishedDepth, Limits, Score, SearchReport, SearchRequest, searc
 use rules::Position;
 
 fn reports_for(fen: &str) -> Result<Vec<SearchReport>, Box<dyn Error>> {
+    Ok(reports_with_limits(
+        Position::from_fen(fen)?,
+        Limits::default(),
+        4,
+    ))
+}
+
+fn reports_with_limits(
+    position: Position,
+    limits: Limits,
+    expected_depth: u8,
+) -> Vec<SearchReport> {
     let request = SearchRequest {
-        position: Position::from_fen(fen)?,
-        limits: Limits::default(),
+        position,
+        limits,
         interrupt: Arc::new(AtomicBool::new(false)),
         started: Instant::now(),
     };
     let mut reports = Vec::new();
-    deepening::search(request, &mut |report| reports.push(report));
-    Ok(reports)
+    deepening::search(request, &mut |report| {
+        if let SearchReport::FinishedDepth(depth) = &report {
+            assert!(
+                depth.depth <= expected_depth,
+                "reported depth {}",
+                depth.depth
+            );
+        }
+        reports.push(report);
+    });
+    reports
 }
 
 #[test]
@@ -124,5 +145,92 @@ fn infinite_search_reaches_past_the_default_depth() -> Result<(), Box<dyn Error>
         }
     });
     assert_eq!(depths, [1, 2, 3, 4, 5]);
+    Ok(())
+}
+
+#[test]
+fn explicit_limits_can_search_beyond_four_plies() -> Result<(), Box<dyn Error>> {
+    let position = Position::from_fen("7k/8/5K1Q/8/8/8/8/8 b - - 0 1")?;
+    // Counts from expectations/uci-depth-and-nodes/README.md.
+    for (limits, highest_depth, totals) in [
+        (
+            Limits {
+                depth: Some(5),
+                ..Limits::default()
+            },
+            5,
+            &[1, 23, 75, 857, 3138][..],
+        ),
+        (
+            Limits {
+                nodes: Some(3138),
+                ..Limits::default()
+            },
+            5,
+            &[1, 23, 75, 857, 3138][..],
+        ),
+        (
+            Limits {
+                nodes: Some(3137),
+                ..Limits::default()
+            },
+            4,
+            &[1, 23, 75, 857][..],
+        ),
+    ] {
+        let reports = reports_with_limits(position, limits, highest_depth);
+        let Some((SearchReport::BestMove(best_move), depths)) = reports.split_last() else {
+            return Err(format!("unexpected reports: {reports:?}").into());
+        };
+        let actual: Vec<_> = depths
+            .iter()
+            .filter_map(|report| match report {
+                SearchReport::FinishedDepth(report) => Some(report.nodes),
+                SearchReport::BestMove(_) => None,
+            })
+            .collect();
+        assert_eq!(actual, totals);
+        assert_eq!(*best_move, position.legal_moves().into_iter().next());
+    }
+    Ok(())
+}
+
+#[test]
+fn zero_limits_return_the_first_legal_move_or_the_terminal_score() -> Result<(), Box<dyn Error>> {
+    let position = Position::from_fen("7k/8/5K1Q/8/8/8/8/8 b - - 0 1")?;
+    let terminal = Position::from_fen("7k/6Q1/5K2/8/8/8/8/8 b - - 0 1")?;
+    let movement = position.legal_moves().into_iter().next();
+    assert!(movement.is_some());
+    for limits in [
+        Limits {
+            depth: Some(0),
+            ..Limits::default()
+        },
+        Limits {
+            nodes: Some(0),
+            ..Limits::default()
+        },
+    ] {
+        assert_eq!(
+            reports_with_limits(position, limits.clone(), 0),
+            [SearchReport::BestMove(movement)]
+        );
+        assert_eq!(
+            reports_with_limits(terminal, limits, 0),
+            [
+                SearchReport::FinishedDepth(FinishedDepth {
+                    depth: 0,
+                    score: Score::Mate {
+                        plies: 0,
+                        winning: false
+                    },
+                    nodes: 0,
+                    elapsed: std::time::Duration::ZERO,
+                    principal_variation: Vec::new(),
+                }),
+                SearchReport::BestMove(None),
+            ]
+        );
+    }
     Ok(())
 }

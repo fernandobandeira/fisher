@@ -1,4 +1,9 @@
-use std::{io, ops::RangeInclusive, time::Instant};
+use std::{
+    fmt,
+    io::{self, Write as _},
+    ops::RangeInclusive,
+    time::Instant,
+};
 
 use rules::{Color, Move, PieceKind, Position, Promotion, Square};
 use shakmaty::{CastlingMode, Chess, EnPassantMode, Position as _, fen::Fen, uci::UciMove};
@@ -35,21 +40,33 @@ fn reference_games(
     seeds: RangeInclusive<u64>,
     mut visit: impl FnMut(&Chess, Option<shakmaty::Move>),
 ) -> Result<(), Box<dyn std::error::Error>> {
-    for mut seed in seeds {
-        let mut position = start.clone();
-        for _ in 0..128 {
-            let moves = position.legal_moves();
-            if moves.is_empty() {
-                visit(&position, None);
-                break;
-            }
-            seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
-            let count = u64::try_from(moves.len())?;
-            let index = usize::try_from((seed >> 32) % count)?;
-            let chosen = moves.get(index).copied().ok_or("missing reference move")?;
-            visit(&position, Some(chosen));
-            position = position.play(chosen)?;
+    for seed in seeds {
+        reference_game(start, seed, |position, chosen| {
+            visit(position, chosen);
+            Ok(())
+        })?;
+    }
+    Ok(())
+}
+
+fn reference_game(
+    start: &Chess,
+    mut seed: u64,
+    mut visit: impl FnMut(&Chess, Option<shakmaty::Move>) -> Result<(), Box<dyn std::error::Error>>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut position = start.clone();
+    for _ in 0..128 {
+        let moves = position.legal_moves();
+        if moves.is_empty() {
+            visit(&position, None)?;
+            break;
         }
+        seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+        let count = u64::try_from(moves.len())?;
+        let index = usize::try_from((seed >> 32) % count)?;
+        let chosen = moves.get(index).copied().ok_or("missing reference move")?;
+        visit(&position, Some(chosen))?;
+        position = position.play(chosen)?;
     }
     Ok(())
 }
@@ -209,10 +226,152 @@ fn king_can_step_beside_other_king_on_rank_or_file(reference: &Chess) -> bool {
         })
 }
 
+#[test]
+#[ignore = "Set FISHER_REFERENCE_SEEDS to the first and last seeds, comma-separated, and run in release mode"]
+fn reference_games_at_selected_seeds() -> Result<(), Box<dyn std::error::Error>> {
+    let seeds = std::env::var("FISHER_REFERENCE_SEEDS")
+        .map_err(|error| format!("FISHER_REFERENCE_SEEDS must be set to first,last: {error}"))?;
+    let (first, last) = seed_range(&seeds)?;
+
+    let starts: Vec<_> = perft_positions()
+        .map(|(fen, _)| {
+            let start = fen
+                .parse::<Fen>()
+                .unwrap()
+                .into_position::<Chess>(CastlingMode::Standard)
+                .unwrap();
+            (fen, start)
+        })
+        .collect();
+    let report_each_seed = std::env::var_os("FISHER_REFERENCE_REPORT_EACH_SEED").is_some();
+    let mut output = io::stdout().lock();
+    let mut counts = GameCounts::default();
+    for seed in first..=last {
+        for (fen, start) in &starts {
+            compare_reference_game(fen, start, seed, &mut counts)?;
+        }
+        if report_each_seed {
+            writeln!(output, "Through seed {seed}: {counts}")?;
+        }
+    }
+    assert!(counts.positions > 0, "no positions compared");
+    writeln!(output, "{counts}")?;
+    Ok(())
+}
+
+fn seed_range(seeds: &str) -> Result<(u64, u64), String> {
+    let invalid = || {
+        format!(
+            "invalid FISHER_REFERENCE_SEEDS {seeds:?}; expected first,last as unsigned integers"
+        )
+    };
+    let (first, last) = seeds.split_once(',').ok_or_else(invalid)?;
+    let first = first.parse().map_err(|_| invalid())?;
+    let last = last.parse().map_err(|_| invalid())?;
+    if first > last {
+        return Err(format!(
+            "empty FISHER_REFERENCE_SEEDS range {seeds:?}; first seed must be at most the last seed"
+        ));
+    }
+    Ok((first, last))
+}
+
+#[derive(Default)]
+struct GameCounts {
+    games: u64,
+    positions: u64,
+    in_check: u64,
+    en_passant: u64,
+    castles: u64,
+    promotions: u64,
+}
+
+impl GameCounts {
+    fn played(&mut self, movement: shakmaty::Move) {
+        self.en_passant += u64::from(movement.is_en_passant());
+        self.castles += u64::from(movement.is_castle());
+        self.promotions += u64::from(movement.is_promotion());
+    }
+}
+
+impl fmt::Display for GameCounts {
+    fn fmt(&self, output: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            output,
+            "{} games completed, {} positions compared, {} in check, {} en passant captures, {} castles, {} promotions played",
+            self.games,
+            self.positions,
+            self.in_check,
+            self.en_passant,
+            self.castles,
+            self.promotions
+        )
+    }
+}
+
+fn compare_reference_game(
+    fen: &str,
+    start: &Chess,
+    seed: u64,
+    counts: &mut GameCounts,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut moves = Vec::new();
+    reference_game(start, seed, |position, chosen| {
+        let replay = GameReplay {
+            fen,
+            seed,
+            moves: &moves,
+            counts,
+        };
+        compare_position(position, &replay)?;
+        counts.positions += 1;
+        counts.in_check += u64::from(position.is_check());
+        if let Some(chosen) = chosen {
+            counts.played(chosen);
+            moves.push(UciMove::from_standard(chosen));
+        }
+        Ok(())
+    })?;
+    counts.games += 1;
+    Ok(())
+}
+
+struct GameReplay<'a> {
+    fen: &'a str,
+    seed: u64,
+    moves: &'a [UciMove],
+    counts: &'a GameCounts,
+}
+
+impl fmt::Display for GameReplay<'_> {
+    fn fmt(&self, output: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            output,
+            "\nStarting FEN: {}\nSeed: {}\nMoves:",
+            self.fen, self.seed
+        )?;
+        for movement in self.moves {
+            write!(output, " {movement}")?;
+        }
+        write!(output, "\n{}", self.counts)
+    }
+}
+
 fn compare_with_reference(reference: &Chess) -> Result<(), Box<dyn std::error::Error>> {
+    compare_position(reference, "")
+}
+
+fn compare_position(
+    reference: &Chess,
+    replay: impl fmt::Display,
+) -> Result<(), Box<dyn std::error::Error>> {
     let fen = Fen::from_position(reference, EnPassantMode::Always).to_string();
-    let position = Position::from_fen(&fen)?;
-    assert_eq!(position.is_in_check(), reference.is_check(), "{fen}");
+    let position = Position::from_fen(&fen).map_err(|error| format!("{error} at {fen}{replay}"))?;
+    assert_eq!(
+        position.is_in_check(),
+        reference.is_check(),
+        "{fen}{replay}"
+    );
     let mut actual: Vec<_> = position
         .legal_moves()
         .into_iter()
@@ -225,23 +384,35 @@ fn compare_with_reference(reference: &Chess) -> Result<(), Box<dyn std::error::E
         .collect();
     actual.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
     expected.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
-    assert_eq!(actual.len(), expected.len(), "legal move count at {fen}");
+    assert_eq!(
+        actual.len(),
+        expected.len(),
+        "legal move count at {fen}\nFisher: {:?}\nShakmaty: {:?}{replay}",
+        actual.iter().map(|(uci, _)| uci).collect::<Vec<_>>(),
+        expected.iter().map(|(uci, _)| uci).collect::<Vec<_>>(),
+    );
 
     for ((actual_uci, movement), (expected_uci, expected_move)) in actual.into_iter().zip(expected)
     {
-        assert_eq!(actual_uci, expected_uci, "legal moves differ at {fen}");
-        let next = reference.clone().play(expected_move)?;
+        assert_eq!(
+            actual_uci, expected_uci,
+            "legal moves differ at {fen}{replay}"
+        );
+        let next = reference
+            .clone()
+            .play(expected_move)
+            .map_err(|error| format!("{error} at {fen} + {actual_uci}{replay}"))?;
         let expected_fen = Fen::from_position(&next, EnPassantMode::Always).to_string();
         assert_eq!(
             movement.play().to_fen(),
             expected_fen,
-            "{fen} + {actual_uci}"
+            "{fen} + {actual_uci}{replay}"
         );
 
         assert_eq!(
             position.legal_move(movement.from(), movement.to(), movement.promotion()),
             Some(movement),
-            "move lookup at {fen} + {actual_uci}"
+            "move lookup at {fen} + {actual_uci}{replay}"
         );
     }
     Ok(())

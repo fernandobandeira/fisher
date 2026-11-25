@@ -8,7 +8,8 @@ owner to find and read.
 The local hook runs only where `git config core.hooksPath .githooks` has
 been set. It refuses a commit touching a path in `.githooks/protected-paths`
 unless the commit body has a `Guard-Change: <why>` line of its own.
-Put a blank line after the subject before writing the body. GitHub
+The reason is blank if it is empty or contains only spaces, tabs and
+carriage returns. Put a blank line after the subject before writing the body. GitHub
 prefixes each subject with `* ` when it joins commit messages for a
 squash. An agent can write the reason. The owner can find it with
 `git log --grep '^Guard-Change:'`.
@@ -27,9 +28,10 @@ previous revision's checker, using the pushed revision's checker
 during bootstrap if the previous revision has none.
 
 CI checks each commit. For a two-parent merge, it checks paths where
-the recorded tree differs from Git's automatic merge of the parents.
-That includes Git's conflict output, so resolving a protected path
-by taking either parent's version still needs a reason. Clean merges
+the recorded tree differs from Git's automatic merge of the parents
+or Git reports the path as conflicted. A protected conflict needs a
+reason even when Git writes no conflict markers and the resolution
+takes one parent's version. Clean merges
 can carry forward changes the parents already marked. For a commit
 with more than two parents, CI checks paths whose result differs from
 every parent. The checker also requires at least one

@@ -33,12 +33,13 @@ comment_prefix=${comment_prefix:-#}
 if body=$(COMMENT_PREFIX="$comment_prefix" awk '
     BEGIN {
         prefix = ENVIRON["COMMENT_PREFIX"]
-        width = prefix == "auto" ? 1 : length(prefix)
+        auto_comment = tolower(prefix) == "auto"
+        width = auto_comment ? 1 : length(prefix)
         scissors = " ------------------------ >8 ------------------------"
     }
     {
         start = substr($0, 1, width)
-        comment = prefix == "auto" ? index("#;@!$%^&|:", start) && start != "" : start == prefix
+        comment = auto_comment ? index("#;@!$%^&|:", start) && start != "" : start == prefix
         if (comment && index(substr($0, width + 1), scissors) == 1) exit (subject ? 0 : 2)
         if ($0 ~ /^[ \t\r]*$/) {
             if (subject && !comment) body = 1
@@ -49,7 +50,7 @@ if body=$(COMMENT_PREFIX="$comment_prefix" awk '
         if (body && !comment) print
     }
   ' "$message_file"); then
-  if printf '%s\n' "$body" | grep -aE '^Guard-Change: .*[^[:space:]]' >/dev/null; then
+  if printf '%s\n' "$body" | LC_ALL=C grep -aE $'^Guard-Change: .*[^ \t\r]' >/dev/null; then
     exit 0
   fi
 elif [ "$?" -eq 2 ]; then

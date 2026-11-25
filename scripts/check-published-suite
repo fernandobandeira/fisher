@@ -36,4 +36,4 @@ check 'Deep perft' -p rules --test positions perft_at_selected_depths
 check 'All 100 published mates' -p search --test search all_published_mates_in_two
 # TODO(fisher-4yn.2): Retire the search node count comparison when the search starts pruning.
 check 'Search four-ply node counts' -p search --test search node_count_matches_published_perft_at_four_plies
-check 'Reference four-ply node counts' -p search --test reference_minimax node_count_matches_published_perft_at_four_plies
+check 'Plain minimax four-ply node counts' -p search --lib tests::plain_minimax::node_count_matches_published_perft_at_four_plies

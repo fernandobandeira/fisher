@@ -1,8 +1,6 @@
-// Replay the same reference used by the search crate tests.
-#[path = "../../search/tests/support/principal_variation.rs"]
+// Replay principal variations as the search crate tests do.
+#[path = "../../search/src/tests/support/principal_variation.rs"]
 mod principal_variation;
-#[path = "../../search/tests/support/reference_minimax.rs"]
-mod reference;
 #[path = "support/scripted_transcripts.rs"]
 mod scripted_transcripts;
 
@@ -423,8 +421,9 @@ fn reply_matches(expected: &str, actual: &str, position: &Chess) -> bool {
     }
 }
 
-/// The deepest search the reference minimax checks; it prunes nothing.
-const REFERENCE_DEPTH: u8 = 4;
+/// The deepest search whose principal variation the replay checks. The limit
+/// was set by the cost of the reference minimax that fisher-4yn.4 removed.
+const REPLAY_DEPTH: u8 = 4;
 
 #[test]
 fn single_replies_keep_allowances_to_literal_depths() {
@@ -647,7 +646,7 @@ fn reported_score(text: &str) -> io::Result<i32> {
         )));
     }
     let plies = 2 * mate.abs() - i32::from(mate > 0);
-    Ok(mate.signum() * (reference::MATE_SCORE - plies))
+    Ok(mate.signum() * (principal_variation::MATE_SCORE - plies))
 }
 
 fn positive_decimal(text: &str) -> bool {
@@ -832,7 +831,7 @@ impl<I: TranscriptIo> Session<I> {
             if let Some((pattern, info)) = pattern.zip(info.as_ref())
                 && pattern.matches(info)
             {
-                self.verify_search_info(pattern.score, info)?;
+                self.verify_search_info(info)?;
             } else {
                 break actual;
             }
@@ -870,8 +869,8 @@ impl<I: TranscriptIo> Session<I> {
                 "expected {expected:?}, got {actual:?}"
             )));
         }
-        if let Some((pattern, info)) = search_info(expected).zip(search_info(&actual)) {
-            self.verify_search_info(pattern.score, &info)?;
+        if let Some(info) = search_info(expected).and(search_info(&actual)) {
+            self.verify_search_info(&info)?;
         }
         if let Some(bestmove) = actual.strip_prefix("bestmove ")
             && let Some(first) = self.first_variation_move.take()
@@ -887,32 +886,19 @@ impl<I: TranscriptIo> Session<I> {
         Ok(())
     }
 
-    fn verify_search_info(
-        &mut self,
-        expected_score: &str,
-        info: &SearchInfo<'_>,
-    ) -> io::Result<()> {
-        // Depths 1 to 4 have an independent minimax and replay check. Deeper
-        // lines have the documented spelling and length checks only, because
-        // the reference minimax prunes nothing.
+    fn verify_search_info(&mut self, info: &SearchInfo<'_>) -> io::Result<()> {
+        // Depths 1 to 4 have the replay check of D5. Deeper lines have the
+        // documented spelling and length checks only.
         let Some((full, depth)) = info.full.as_ref().zip(
             info.depth
                 .parse::<u8>()
                 .ok()
-                .filter(|depth| (1..=REFERENCE_DEPTH).contains(depth)),
+                .filter(|depth| (1..=REPLAY_DEPTH).contains(depth)),
         ) else {
             self.first_variation_move = None;
             return Ok(());
         };
         let score = reported_score(info.score)?;
-        if expected_score == "{score}" || depth <= 2 {
-            let best = reference::minimax(&self.position, depth).score;
-            if score != best {
-                return Err(io::Error::other(format!(
-                    "reported score {score} differs from reference {best}"
-                )));
-            }
-        }
         principal_variation::verify(&self.position, depth, score, full.pv.split(' '))
             .map_err(io::Error::other)?;
         self.first_variation_move = full.pv.split(' ').next().map(str::to_owned);

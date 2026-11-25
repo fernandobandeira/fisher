@@ -30,7 +30,7 @@ comment_prefix=${comment_prefix:-#}
 
 # The cleanup mode is unavailable here. Require a subject, a blank line and
 # a reason that survive comment stripping and truncation at the scissors line.
-if body=$(COMMENT_PREFIX="$comment_prefix" awk '
+if body=$(LC_ALL=C COMMENT_PREFIX="$comment_prefix" awk '
     BEGIN {
         prefix = ENVIRON["COMMENT_PREFIX"]
         auto_comment = tolower(prefix) == "auto"

@@ -18,25 +18,6 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
-      # TODO(fisher-j9c): Remove after guard-change is required and has been seen failing from main.
-      - name: Check Guard-Change lines
-        if: github.event_name != 'schedule'
-        env:
-          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
-          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
-        shell: bash
-        run: |
-          if ! git rev-parse --verify --end-of-options "$BASE^{commit}" >/dev/null 2>&1; then
-            printf 'Guard-Change check could not find commit revision %s.\n' "$BASE" >&2
-            exit 1
-          fi
-          script_revision=$BASE
-          base_entry=$(git ls-tree "$BASE" -- scripts/check-guard-change)
-          if [ -z "$base_entry" ]; then
-            script_revision=$HEAD
-          fi
-          git cat-file blob "$script_revision:scripts/check-guard-change" |
-            python3 -I - --event "$GITHUB_EVENT_NAME" "$BASE" "$HEAD"
       - uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2.90.8
         with:
           tool: cargo-deny@0.22.0

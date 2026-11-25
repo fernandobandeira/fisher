@@ -1,5 +1,8 @@
 name: Strength series
 on:
+  push:
+    branches: [fisher-op4-series-trials]
+    paths-ignore: ['**']
   workflow_dispatch:
     inputs:
       measured:

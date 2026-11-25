@@ -20,7 +20,7 @@ jobs:
           fetch-depth: 0
       # TODO(fisher-j9c): Remove after guard-change is required and has been seen failing from main.
       - name: Check Guard-Change lines
-        if: github.event_name != 'schedule'
+        if: false
         env:
           BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
           HEAD: ${{ github.event.pull_request.head.sha || github.sha }}

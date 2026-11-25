@@ -34,7 +34,7 @@ is never released.
 The two `readyok` timing cases differ only in when the delimiter
 arrives. In both, matching output continues to 4.8 seconds. The exit
 timing case closes stdout within five seconds and supplies the clean
-status after the read bound would have expired.
+status after the read timeout would have expired.
 
 The mandatory-depth case places the exact depth 1 reply before the
 repetition. In the greedy case, depth 4 matches the repetition and gets

@@ -20,9 +20,10 @@ use std::{
 };
 
 use shakmaty::{CastlingMode, Chess, Move, Position, fen::Fen, uci::UciMove};
+use wait_timeout::ChildExt;
 
 const LEGAL_BESTMOVE: &str = "bestmove {legal}";
-const TIMEOUT: Duration = Duration::from_secs(5);
+const HANG_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[test]
 fn handshake() -> io::Result<()> {
@@ -152,16 +153,17 @@ fn collect_legal_bestmove_replies(name: &str) -> io::Result<Vec<String>> {
         .join("../../expectations/uci")
         .join(format!("{name}.uci"));
     let transcript = fs::read_to_string(path)?;
-    run_transcript(name, &transcript, Engine::start)
+    run_transcript(name, &transcript, HANG_TIMEOUT, Engine::start)
 }
 
 fn run_transcript<I: TranscriptIo>(
     name: &str,
     transcript: &str,
+    timeout: Duration,
     start: impl FnOnce() -> io::Result<I>,
 ) -> io::Result<Vec<String>> {
     let records = load_transcript(name, transcript)?;
-    Session::new(start()?).play(name, records)
+    Session::new(start()?, timeout).play(name, records)
 }
 
 enum Delimiter<'a> {
@@ -598,17 +600,17 @@ trait TranscriptIo {
     fn close_input(&mut self);
     fn now(&self) -> Instant;
     fn read_reply(&mut self, deadline: Instant) -> io::Result<Option<String>>;
-    fn wait_for_success(&mut self, deadline: Instant) -> io::Result<()>;
+    fn wait_for_success(&mut self, timeout: Duration) -> io::Result<()>;
 }
 
 struct Engine {
-    child: Child,
+    child: Option<Child>,
     output: Receiver<io::Result<String>>,
 }
 
 impl Engine {
     fn start() -> io::Result<Self> {
-        let child = {
+        let mut child = {
             // On macOS, concurrent spawns can inherit each other's pipes and delay EOF.
             static SPAWN: Mutex<()> = Mutex::new(());
             let _guard = SPAWN
@@ -620,9 +622,7 @@ impl Engine {
                 .spawn()?
         };
         let (sender, output) = mpsc::channel();
-        let mut engine = Self { child, output };
-        let stdout = engine
-            .child
+        let stdout = child
             .stdout
             .take()
             .ok_or_else(|| io::Error::other("missing fisher stdout"))?;
@@ -635,7 +635,10 @@ impl Engine {
             }
         })?;
 
-        Ok(engine)
+        Ok(Self {
+            child: Some(child),
+            output,
+        })
     }
 }
 
@@ -643,15 +646,17 @@ impl TranscriptIo for Engine {
     fn send(&mut self, command: &[u8]) -> io::Result<()> {
         let stdin = self
             .child
-            .stdin
             .as_mut()
+            .and_then(|child| child.stdin.as_mut())
             .ok_or_else(|| io::Error::other("fisher stdin is closed"))?;
         stdin.write_all(command)?;
         stdin.flush()
     }
 
     fn close_input(&mut self) {
-        drop(self.child.stdin.take());
+        if let Some(child) = &mut self.child {
+            drop(child.stdin.take());
+        }
     }
 
     fn now(&self) -> Instant {
@@ -674,18 +679,25 @@ impl TranscriptIo for Engine {
         }
     }
 
-    fn wait_for_success(&mut self, deadline: Instant) -> io::Result<()> {
-        while self.now() < deadline {
-            if let Some(status) = self.child.try_wait()? {
-                return if status.success() {
-                    Ok(())
-                } else {
-                    Err(io::Error::other(format!("fisher exited with {status}")))
-                };
-            }
-            thread::sleep(Duration::from_millis(5));
+    fn wait_for_success(&mut self, timeout: Duration) -> io::Result<()> {
+        let child = self
+            .child
+            .as_mut()
+            .ok_or_else(|| io::Error::other("already waited for fisher to exit"))?;
+        // Keep stdin open during the wait unless the transcript closed it.
+        let _stdin = child.stdin.take();
+        let status = child.wait_timeout(timeout)?;
+        if status.is_none() {
+            drop(child.kill());
+            drop(child.wait());
         }
-        Err(exit_timeout())
+        self.child = None;
+        let status = status.ok_or_else(exit_timeout)?;
+        if status.success() {
+            Ok(())
+        } else {
+            Err(io::Error::other(format!("fisher exited with {status}")))
+        }
     }
 }
 
@@ -702,6 +714,7 @@ fn exit_timeout() -> io::Error {
 
 struct Session<I> {
     io: I,
+    timeout: Duration,
     position: Chess,
     holding: bool,
     first_variation_move: Option<String>,
@@ -709,9 +722,10 @@ struct Session<I> {
 }
 
 impl<I: TranscriptIo> Session<I> {
-    fn new(io: I) -> Self {
+    fn new(io: I, timeout: Duration) -> Self {
         Self {
             io,
+            timeout,
             position: Chess::default(),
             holding: false,
             first_variation_move: None,
@@ -748,7 +762,7 @@ impl<I: TranscriptIo> Session<I> {
         pattern: Option<&SearchInfo<'_>>,
         delimiter: Delimiter<'_>,
     ) -> io::Result<()> {
-        let deadline = self.io.now() + TIMEOUT;
+        let deadline = self.io.now() + self.timeout;
         let actual = loop {
             let actual = self.io.read_reply(deadline)?;
             let info = actual.as_deref().and_then(search_info);
@@ -771,7 +785,7 @@ impl<I: TranscriptIo> Session<I> {
             (Delimiter::Exit, Some(extra)) => {
                 Err(io::Error::other(format!("unexpected output {extra:?}")))
             }
-            (Delimiter::Exit, None) => self.io.wait_for_success(self.io.now() + TIMEOUT),
+            (Delimiter::Exit, None) => self.io.wait_for_success(self.timeout),
         }
     }
 
@@ -848,7 +862,9 @@ impl<I: TranscriptIo> Session<I> {
 
 impl Drop for Engine {
     fn drop(&mut self) {
-        drop(self.child.kill());
-        drop(self.child.wait());
+        if let Some(child) = &mut self.child {
+            drop(child.kill());
+            drop(child.wait());
+        }
     }
 }

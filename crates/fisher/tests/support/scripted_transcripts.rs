@@ -8,6 +8,9 @@ use std::{
 
 use super::{TranscriptIo, exit_timeout, read_timeout, run_transcript};
 
+// The reviewed fixtures use five seconds on the controlled clock.
+const SCRIPTED_TIMEOUT: Duration = Duration::from_secs(5);
+
 // Python is already required by scripts/check. Decode the JSON with its standard
 // library and send counted, NUL-separated fields to the Rust test.
 const DECODE_FIXTURES: &str = r#"
@@ -56,7 +59,7 @@ fn repeated_searched_info_fixtures() -> io::Result<()> {
         let transcript = field(&mut fields)?;
         let mut script = Script::new(&mut fields)?;
         let mut started = false;
-        let result = run_transcript(name, transcript, || {
+        let result = run_transcript(name, transcript, SCRIPTED_TIMEOUT, || {
             started = true;
             Ok(&mut script)
         });
@@ -84,8 +87,12 @@ fn timeout_failure(
     let timed_out = result.as_ref().err().map(io::Error::kind) == Some(io::ErrorKind::TimedOut);
     let elapsed = script.now.duration_since(script.start);
     (matches!(name, "delimiter-at-5100ms" | "flood-without-delimiter")
-        && !(timed_out && elapsed == Duration::from_secs(5)))
-    .then(|| format!("{name}: expected stdout timeout at 5s, got {result:?} at {elapsed:?}"))
+        && !(timed_out && elapsed == SCRIPTED_TIMEOUT))
+        .then(|| {
+            format!(
+                "{name}: expected stdout timeout at {SCRIPTED_TIMEOUT:?}, got {result:?} at {elapsed:?}"
+            )
+        })
 }
 
 fn field<'a>(fields: &mut impl Iterator<Item = &'a str>) -> io::Result<&'a str> {
@@ -210,7 +217,8 @@ impl TranscriptIo for &mut Script<'_> {
         Ok(None)
     }
 
-    fn wait_for_success(&mut self, deadline: Instant) -> io::Result<()> {
+    fn wait_for_success(&mut self, timeout: Duration) -> io::Result<()> {
+        let deadline = self.now + timeout;
         while self.exit.is_none() {
             if let Event::Exit(status) = self.next_event(deadline).ok_or_else(exit_timeout)? {
                 self.exit = Some(status);

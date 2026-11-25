@@ -43,6 +43,14 @@ A `TODO` and a ticket always come as a pair, so the code shows what is missing a
 
 The first line cannot be a check. The other two wait for one.
 
+### Flaky tests
+
+A flaky test is no test. When a check fails intermittently, fix its cause in the next change, even if that change did not cause it. Never rerun to green and move on.
+
+Every wait in a test is a hang timeout, never an expected duration. Use one shared hang timeout constant per test crate. Keep expected durations on a controlled clock. Order events with a signal or a controlled clock, never a sleep. Claim speed with measurements outside `scripts/check` (fisher-5sg.4, D30).
+
+A check could flag literal wait durations, sleeps in test code, and assertions on wall-clock elapsed time. Review still has to judge what orders events and whether an intermittent failure was fixed at its cause.
+
 ### Mutation testing and region coverage
 
 Run [`scripts/check-mutants`](scripts/check-mutants) for the whole workspace. Each mutant runs only the unit and integration tests of its own crate. Pull requests test the merge commit, pushes to `main` test the pushed commit, and the weekly run tests the scheduled revision. Every run rejects stale entries in the [reviewed registry](.cargo/mutation-gate.json) and runs the listed mutants. Add a test for a surviving mutant or propose a proof of equivalence. Each proof records a digest of its enclosing function and needs review when that function changes.

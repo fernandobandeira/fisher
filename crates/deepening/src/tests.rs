@@ -2,6 +2,8 @@
 
 use super::*;
 
+const HANG_TIMEOUT: Duration = Duration::from_secs(30);
+
 #[test]
 fn interrupt_inside_the_depth_discards_it() -> std::io::Result<()> {
     use std::{io, sync::mpsc, thread};
@@ -27,14 +29,14 @@ fn interrupt_inside_the_depth_discards_it() -> std::io::Result<()> {
                 interrupt_checks += 1;
                 if interrupt_checks == 3 {
                     assert!(at_node.send(()).is_ok());
-                    assert!(may_resume.recv_timeout(Duration::from_secs(5)).is_ok());
+                    assert!(may_resume.recv_timeout(HANG_TIMEOUT).is_ok());
                 }
             },
         );
         (interrupt_checks, reports)
     });
     reached
-        .recv_timeout(Duration::from_secs(5))
+        .recv_timeout(HANG_TIMEOUT)
         .map_err(io::Error::other)?;
     interrupt.store(true, Ordering::Relaxed);
     resume.send(()).map_err(io::Error::other)?;

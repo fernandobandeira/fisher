@@ -11,7 +11,7 @@ const STARTING_DEPTHS: [Depth; 2] = [Depth(1, 0, 20, 2, 10_000), Depth(2, 0, 440
 struct Depth(u8, i32, u64, u64, u64);
 
 enum Step {
-    Depth(Depth, Vec<Move>),
+    Depth(FinishedDepth),
     BestMove { after_interrupt: bool },
 }
 
@@ -31,15 +31,9 @@ impl TimedSearch {
             let mut best_move = first_move(request.position);
             while let Ok(step) = receive(&instructions) {
                 match step {
-                    Step::Depth(Depth(depth, cp, nodes, millis, _), principal_variation) => {
-                        best_move = principal_variation.first().copied();
-                        report(SearchReport::FinishedDepth(FinishedDepth {
-                            depth,
-                            score: Score::Centipawns(cp),
-                            nodes,
-                            elapsed: Duration::from_millis(millis),
-                            principal_variation,
-                        }));
+                    Step::Depth(depth) => {
+                        best_move = depth.principal_variation.first().copied();
+                        report(SearchReport::FinishedDepth(depth));
                         assert!(sent.send(()).is_ok());
                     }
                     Step::BestMove { after_interrupt } => {
@@ -97,14 +91,30 @@ impl TimedSearch {
     ) -> io::Result<()> {
         let Depth(depth, cp, nodes, millis, nps) = expected;
         let pv = variation.iter().copied().map(move_text).collect::<Vec<_>>();
-        self.send(Step::Depth(expected, variation))?;
-        assert_eq!(
-            session.reply()?,
-            format!(
+        self.report_depth(
+            session,
+            FinishedDepth {
+                depth,
+                score: Score::Centipawns(cp),
+                nodes,
+                elapsed: Duration::from_millis(millis),
+                principal_variation: variation,
+            },
+            &format!(
                 "info depth {depth} multipv 1 score cp {cp} nodes {nodes} nps {nps} time {millis} pv {}\n",
                 pv.join(" ")
-            )
-        );
+            ),
+        )
+    }
+
+    fn report_depth(
+        &self,
+        session: &Session,
+        depth: FinishedDepth,
+        expected: &str,
+    ) -> io::Result<()> {
+        self.send(Step::Depth(depth))?;
+        assert_eq!(session.reply()?, expected);
         Ok(())
     }
 }

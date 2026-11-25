@@ -72,7 +72,7 @@ The last recorded revision under conditions 1, `dbe9113`, is measured again unde
 
 ## How far to trust the numbers
 
-- **Between two revisions of fisher**, a match on the clock can vary from game to game on repetition. The depths each engine finishes depend on the machine and its load, so compare scores from similar machines and load. The score describes these 200 openings. Revisions before `71a4608` also choose legal moves at random.
+- **Between two revisions of fisher that search**, a match under conditions 1 repeats game for game because each revision searches to a fixed depth and plays the same move from the same position. Under conditions 2 the match no longer repeats game for game. The depths the engines finish and the resulting scores depend on the machine and its load. The score describes these 200 openings. Revisions before `71a4608` choose legal moves at random.
 - **Against Stockfish** the result varies from match to match, because Stockfish at limited strength chooses weaker moves on purpose and not always the same ones. The margin fastchess prints gives a rough idea of how much; it is not a promise about the next match.
 - **An Elo for fisher** is not something this record establishes. Adding the difference against Stockfish to 1320 gives a rough placement only: it leans on one opponent, and for a fisher far below 1320 it is an extrapolation. Stockfish's documentation says `UCI_Elo` was calibrated at 120 seconds plus 1 a move and anchored to the CCRL 40/4 list; here it gets 10 seconds plus 0.1.
 - **A score near 0% or 100%** says little about the size of the gap. Measure against a closer opponent instead.

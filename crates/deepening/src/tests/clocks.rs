@@ -164,6 +164,26 @@ fn time_for_the_move_uses_the_side_to_move_and_keeps_the_margin() -> Result<(), 
         white(1500, None, None, 50, 40),
         black([None, Some(1500)], [None, None], None, 50, 40),
         white(3300, None, None, 110, 100),
+        ClockCase {
+            clocks: [Some(1531), Some(2579)],
+            increments: [None, Some(47)],
+            ..white(1531, None, None, 51, 41)
+        },
+        black([Some(1531), Some(2579)], [Some(23), None], None, 85, 75),
+        ClockCase {
+            clocks: [Some(1531), Some(2579)],
+            increments: [Some(23), Some(47)],
+            ..white(1531, Some(23), None, 74, 64)
+        },
+        black(
+            [Some(1531), Some(2579)],
+            [Some(23), Some(47)],
+            None,
+            132,
+            122,
+        ),
+        white(2790, None, None, 93, 83),
+        white(2160, None, None, 72, 62),
     ];
     let black_to_move =
         Position::from_fen("rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1")?;
@@ -240,6 +260,59 @@ fn missing_clock_keeps_the_default_or_explicit_depth() {
 }
 
 #[test]
+fn the_other_colors_clock_does_not_limit_white() {
+    let position = Position::starting();
+    let request = request(
+        position,
+        Limits {
+            btime: Some(ms(60_000)),
+            ..Limits::default()
+        },
+    );
+    let (entered, reports) = scheduled_search(&request, Duration::ZERO, &[(1, ms(2000))], 5);
+    assert_eq!(entered, 216_365);
+    assert_reports(&reports, &[20, 440, 9762, 216_365], position);
+}
+
+#[test]
+fn the_other_colors_clock_does_not_limit_black() -> Result<(), rules::FenError> {
+    let position = Position::from_fen("7k/8/5K1Q/8/8/8/8/8 b - - 0 1")?;
+    let request = request(position, white_clock(60_000));
+    let (entered, reports) = scheduled_search(&request, Duration::ZERO, &[(1, ms(2000))], 5);
+    assert_eq!(entered, 857);
+    let Some((SearchReport::BestMove(best), depths)) = reports.split_last() else {
+        unreachable!("expected finished depths and a best move");
+    };
+    let mate = Score::Mate {
+        plies: 2,
+        winning: false,
+    };
+    let cp = Score::Centipawns(-900);
+    let expected = [(1, 1, cp), (2, 23, cp), (3, 75, mate), (4, 857, mate)];
+    assert_eq!(depths.len(), expected.len());
+    for (report, (depth, nodes, score)) in depths.iter().zip(expected) {
+        let SearchReport::FinishedDepth(report) = report else {
+            unreachable!("expected a finished depth");
+        };
+        assert_eq!(
+            (report.depth, report.nodes, report.score),
+            (depth, nodes, score)
+        );
+    }
+    assert_eq!(move_text(*best).as_deref(), Some("h8g8"));
+    Ok(())
+}
+
+#[test]
+fn a_request_without_any_limits_finishes_the_default_depth() {
+    // Each of the five unreadable signed UCI values produces this request.
+    let position = Position::starting();
+    let (entered, reports) = run_with_limits(position, Limits::default(), 5);
+    assert_eq!(entered, 216_365);
+    assert_reports(&reports, &[20, 440, 9762, 216_365], position);
+}
+
+#[test]
 fn a_healthy_clock_can_search_beyond_the_default_depth() -> Result<(), rules::FenError> {
     // The forced move from the infinite depth-cap test ends the game at ply 1.
     let position = Position::from_fen("6bk/5p1p/5P1P/8/8/p1p5/P7/K7 b - - 0 1")?;
@@ -308,7 +381,7 @@ fn starts_next_depth_at_equality_but_stops_one_microsecond_later() {
 }
 
 #[test]
-fn clock_expiry_inside_depth_one_keeps_the_fallback() {
+fn running_out_of_search_time_inside_depth_one_keeps_the_fallback() {
     check_starting_position(
         white_clock(1500),
         Duration::ZERO,
@@ -319,7 +392,8 @@ fn clock_expiry_inside_depth_one_keeps_the_fallback() {
 }
 
 #[test]
-fn clock_expiry_inside_depth_two_keeps_the_puzzle_move() -> Result<(), Box<dyn std::error::Error>> {
+fn running_out_of_search_time_inside_depth_two_keeps_the_puzzle_move()
+-> Result<(), Box<dyn std::error::Error>> {
     for infinite in [false, true] {
         let request = request(
             puzzle()?,
@@ -354,6 +428,28 @@ fn forecasts_with_the_duration_of_the_last_depth() {
         &[(20, ms(1)), (440, ms(4)), (442, ms(100))],
         441,
         &[(20, ms(1)), (440, ms(4))],
+    );
+}
+
+#[test]
+fn longer_second_depth_refuses_depth_three() {
+    check_starting_position(
+        white_clock(2790),
+        Duration::ZERO,
+        &[(20, ms(1)), (440, ms(5)), (442, ms(83))],
+        440,
+        &[(20, ms(1)), (440, ms(5))],
+    );
+}
+
+#[test]
+fn shorter_second_depth_admits_depth_three() {
+    check_starting_position(
+        white_clock(2160),
+        Duration::ZERO,
+        &[(20, ms(2)), (440, ms(3)), (442, ms(62))],
+        441,
+        &[(20, ms(2)), (440, ms(3))],
     );
 }
 

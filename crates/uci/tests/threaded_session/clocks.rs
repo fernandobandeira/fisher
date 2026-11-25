@@ -8,6 +8,12 @@ const AT_ONE_MS: Depth = Depth(1, 0, 20, 1, 20_000);
 const AT_TWO_MS: Depth = Depth(1, 0, 20, 2, 10_000);
 const AT_FOUR_MS: Depth = Depth(2, 0, 440, 4, 110_000);
 const CLOCK_PUZZLE_DEPTH: Depth = Depth(1, -600, 30, 1, 30_000);
+const DEFAULT_DEPTHS_AT_ONE_MS: [Depth; 4] = [
+    AT_ONE_MS,
+    Depth(2, 0, 440, 1, 440_000),
+    Depth(3, 0, 9762, 1, 9_762_000),
+    Depth(4, 0, 216_365, 1, 216_365_000),
+];
 
 fn white_clock(millis: u64) -> Limits {
     Limits {
@@ -95,6 +101,62 @@ fn only_negative_decimal_clocks_are_read_as_zero() -> io::Result<()> {
 }
 
 #[test]
+fn negative_values_leave_other_go_parameters_absent() -> io::Result<()> {
+    for command in [
+        "go binc -1",
+        "go movestogo -1",
+        "go depth -1",
+        "go nodes -1",
+        "go movetime -1",
+    ] {
+        check_starting_schedule(command, &Limits::default(), &DEFAULT_DEPTHS_AT_ONE_MS)?;
+    }
+    Ok(())
+}
+
+#[test]
+fn forwards_each_increment_only_when_sent() -> io::Result<()> {
+    for (position, command, winc, binc) in [
+        (
+            "position startpos",
+            "go wtime 1531 btime 2579 binc 47",
+            None,
+            Some(47),
+        ),
+        (A, "go wtime 1531 btime 2579 winc 23", Some(23), None),
+        (
+            "position startpos",
+            "go wtime 1531 btime 2579 winc 23 binc 47",
+            Some(23),
+            Some(47),
+        ),
+        (
+            A,
+            "go wtime 1531 btime 2579 winc 23 binc 47",
+            Some(23),
+            Some(47),
+        ),
+    ] {
+        let (session, search) = TimedSearch::start();
+        session.command(position)?;
+        session.command(command)?;
+        search.accepted_limits(&Limits {
+            btime: Some(Duration::from_millis(2579)),
+            winc: winc.map(Duration::from_millis),
+            binc: binc.map(Duration::from_millis),
+            ..white_clock(1531)
+        })?;
+        let best = if position == A {
+            "bestmove h8g8\n".to_owned()
+        } else {
+            best_move_line(Position::starting())
+        };
+        finish_finite_search(session, &search, &best)?;
+    }
+    Ok(())
+}
+
+#[test]
 fn forwards_a_healthy_clock_beside_an_exhausted_other_clock() -> io::Result<()> {
     for command in ["go wtime 1500 btime 0", "go wtime 1500 btime -500"] {
         check_starting_schedule(
@@ -151,13 +213,21 @@ fn clock_reports_only_the_finished_depths() -> io::Result<()> {
 }
 
 #[test]
+fn reports_depths_one_and_two_for_both_second_depth_durations() -> io::Result<()> {
+    check_starting_schedule(
+        "go wtime 2790",
+        &white_clock(2790),
+        &[AT_ONE_MS, Depth(2, 0, 440, 5, 88_000)],
+    )?;
+    check_starting_schedule(
+        "go wtime 2160",
+        &white_clock(2160),
+        &[AT_TWO_MS, Depth(2, 0, 440, 3, 146_666)],
+    )
+}
+
+#[test]
 fn missing_clock_preserves_the_other_limits_and_default() -> io::Result<()> {
-    let starting_depths = [
-        AT_ONE_MS,
-        Depth(2, 0, 440, 1, 440_000),
-        Depth(3, 0, 9762, 1, 9_762_000),
-        Depth(4, 0, 216_365, 1, 216_365_000),
-    ];
     let other_clock = Limits {
         btime: Some(Duration::from_millis(60_000)),
         ..Limits::default()
@@ -186,7 +256,7 @@ fn missing_clock_preserves_the_other_limits_and_default() -> io::Result<()> {
             },
         ),
     ] {
-        check_starting_schedule(command, &limits, &starting_depths)?;
+        check_starting_schedule(command, &limits, &DEFAULT_DEPTHS_AT_ONE_MS)?;
     }
     check_starting_schedule(
         "go btime 60000 depth 1",
@@ -196,6 +266,57 @@ fn missing_clock_preserves_the_other_limits_and_default() -> io::Result<()> {
         },
         &[AT_ONE_MS],
     )
+}
+
+#[test]
+fn forwards_only_blacks_clock_with_white_to_move() -> io::Result<()> {
+    check_starting_schedule(
+        "go btime 60000",
+        &Limits {
+            btime: Some(Duration::from_millis(60_000)),
+            ..Limits::default()
+        },
+        &[
+            Depth(1, 0, 20, 2000, 10),
+            Depth(2, 0, 440, 2000, 220),
+            Depth(3, 0, 9762, 2000, 4881),
+            Depth(4, 0, 216_365, 2000, 108_182),
+        ],
+    )
+}
+
+#[test]
+fn forwards_only_whites_clock_with_black_to_move() -> io::Result<()> {
+    let (session, search) = TimedSearch::start();
+    session.command(A)?;
+    session.command("go wtime 60000")?;
+    search.accepted_limits(&white_clock(60_000))?;
+    let root =
+        Position::from_fen(A.trim_start_matches("position fen ")).map_err(io::Error::other)?;
+    let forced = first_move(root).ok_or_else(|| io::Error::other("expected h8g8"))?;
+    let mate = forced
+        .play()
+        .legal_moves()
+        .into_iter()
+        .find(|&movement| move_text(movement) == "h6g7")
+        .ok_or_else(|| io::Error::other("expected h6g7"))?;
+
+    search.depth(&session, root, Depth(1, -900, 1, 2000, 0))?;
+    search.depth_with_variation(&session, Depth(2, -900, 23, 2000, 11), vec![forced, mate])?;
+    for (depth, nodes, nps) in [(3, 75, 37), (4, 857, 428)] {
+        search.report_depth(
+            &session,
+            FinishedDepth {
+                depth,
+                score: Score::Mate { plies: 2, winning: false },
+                nodes,
+                elapsed: Duration::from_millis(2000),
+                principal_variation: vec![forced, mate],
+            },
+            &format!("info depth {depth} multipv 1 score mate -1 nodes {nodes} nps {nps} time 2000 pv h8g8 h6g7\n"),
+        )?;
+    }
+    finish_finite_search(session, &search, "bestmove h8g8\n")
 }
 
 #[test]

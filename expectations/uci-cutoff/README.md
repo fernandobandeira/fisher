@@ -107,10 +107,13 @@ Every new number comes from six facts:
    finished. That boundary is guaranteed whatever the order of moves; it is
    not the latest one. Each root move also has a legal reply, and the first
    reply to every root move is played, so depth 2 enters at least 60 nodes
-   of its own and finishes at a total of at least 90. No root move gives
-   checkmate ([mate-in-two.tsv](../mate-in-two.tsv) excludes a mate in one
-   ply), and none stalemates White, whose rook on d1 can always move along
-   the first rank or capture on e1.
+   of its own and finishes at a total of at least 90. Every one of the 30
+   Black moves leaves White at least one legal reply. A move that gives
+   check is not checkmate, because [mate-in-two.tsv](../mate-in-two.tsv)
+   excludes a mate in one ply, so White has a reply to it: after `c5f2+`,
+   for example, `g2g3` is the only one. A move that does not give check
+   cannot stalemate White, whose rook on d1 is then free to move along the
+   first rank.
 6. Nodes per second follow D41: 1000 × 79 ÷ 5 = 15,800.
 
 Where no outside value exists, the staged file says "no outside value"
@@ -140,7 +143,7 @@ is the Nth call of the test's node hook, made before node N is entered.
 | uci-go-movetime | Puzzle, `go movetime 50`, expiry or interrupt at the first reading inside depth 2 | Production interval: check 1024; readings at checks 0, 30, 30, 1024 | `run_search::<60>`: the event at check 60; readings 0, 30, 30, 60 (or 0, 30, 30 when the interrupt comes first); 60 checks; 59 entered; depth 1 only; `g5g2` | `src/tests/movetime.rs` 78–123 |
 | uci-go-movetime | Starting position, `go movetime 50`, depths at 2 and 5 ms, expiry at the first reading in depth 3 | Production interval: check 1024; totals 20, 440 | `run_search::<81>`: expiry at check 81; 81 checks; totals 20, 79; 80 entered; depth-2 move | `src/tests/movetime.rs` 126–162 |
 | uci-go-movetime | Starting position, `go nodes 1308 movetime 50`, held at 39 ms | Expiry at check 1024; 1023 entered; totals 20, 440 | `run_search::<81>`: expiry at check 81; 80 entered; totals 20, 79; movetime wins before the node limit. The rows with `nodes 19` are unchanged | `src/tests/movetime.rs` 309–339 (no README row before this commit) |
-| uci-go-movetime | Production interval of 1,024 nodes | Starting position, cap 3, 40 ms from check 1025, expect 2048 checks | Starting position, `movetime 50`, cap at least 103, 39 ms until check 2048, then 40 ms: readings at checks 1024 and 2048, 2048 checks, 2047 entered. Record every clock reading with the node check at which it happens. A reading at check 0 or at a reported depth total belongs to the start or end of a depth; every other reading must be at check 1024 or 2048, and both must occur. Asserting only the final count of 2048 checks would also pass if the clock were read before every node | `src/tests/movetime.rs` 212–230 |
+| uci-go-movetime | Production interval of 1,024 nodes | Starting position, cap 3, 40 ms from check 1025, expect 2048 checks | Starting position, `movetime 50`, cap at least 103, 39 ms until check 2048, then 40 ms: 2048 checks, 2047 entered. Record every clock reading with the node check at which it happens, and require exactly this list in order of check: one reading at check 0, where depth 1 starts; two readings at the cumulative total of each finished depth as reported, where that depth ends and the next starts (20, 20, 79, 79, and so on); and one reading each at checks 1024 and 2048. No other reading is allowed, so an extra reading at check 20 or anywhere else fails. Asserting only the final count of 2048 checks would also pass if the clock were read before every node | `src/tests/movetime.rs` 212–230 |
 | uci-go-movetime | Starting-position totals through depth 4 | 20, 440, 9,762, 216,365 | 20, 79, then no outside value | None directly |
 | uci-go-movetime, uci-go-clocks | Puzzle 001om, the total at which depth 2 finishes, in the derivation | 1,308 | No outside value (at least 90, at most 1,308) | None directly |
 | uci-go-clocks | Search values for the three roots in the sessions | 20, 440, 9,762, 216,365; 1, 23, 75, 857; 1, 27, 98, 1,397 | 20, 79; 1, 23; 1, 27; then no outside value | `src/tests/clocks.rs` 225–261 (`btime`, `winc`, `binc`, `movestogo` alone) |
@@ -153,7 +156,40 @@ is the Nth call of the test's node hook, made before node N is entered.
 | uci-go-clocks | `go wtime 2160`, one depth-3 node | `(20, 2 ms), (440, 3 ms), (442, 62 ms)`; 441 entered | `(20, 2 ms), (79, 3 ms), (81, 62 ms)`; 80 entered | `src/tests/clocks.rs` 446–455 |
 | uci-go-clocks | `go wtime 1500 nodes …`, both orders, private | `nodes 440` | `nodes 79` | `src/tests/clocks.rs` 457–484 (line 468) |
 | uci-depth-and-nodes (session side) | Puzzle 001om, `stop`, `quit` or end of input on either side of the end of depth 2, through a real `deepening::search` worker | `go nodes 1308`; when the search ends first, depth 2 reports cp −700, exactly 1308 nodes, PV c5f2 g2g3, then `bestmove c5f2` | `go depth 2`, which keeps the search ending exactly after depth 2. When the search ends first: depth 2 reports cp −700 and PV c5f2 g2g3 with a total of at least 90 and at most 1308 (no outside value), then `bestmove c5f2`. When the command comes first: unchanged, depth 1 cp −600, 30 nodes, PV g5g2, then `bestmove g5g2`. Command order unchanged | `crates/uci/tests/threaded_session.rs` 737–810: `node_limit_with_command` sends `go nodes 1308` (line 749) and `expect_puzzle_depth` (797–810) requires an exact node total |
-| None (fisher-ssg) | Bench signature: depth-4 totals of the six perft positions | 206603, 4185552, 46255, 432070, 2167396, 3986609; sum 11024485 | No outside value for any position; each at most its total without cutoffs, and the sum at most 1,102,448 (fisher-4yn claim, D39) | `crates/bench/tests/signature.rs` 3–25 |
+| None (fisher-ssg) | Bench signature from the library: depth-4 totals of the six perft positions | Exactly `Position 1: 206603` to `Position 6: 3986609`, then `Nodes searched  : 11024485` | See [The bench signature](#the-bench-signature) | `crates/bench/tests/signature.rs` 3–25 |
+| None (fisher-ssg) | Bench signature from the executable: `fisher bench` | Last line exactly `Nodes searched  : 11024485` | See [The bench signature](#the-bench-signature) | `crates/fisher/tests/bench.rs` 3–17 |
+
+### The bench signature
+
+Both bench tests run the same depth-4 search over the six positions of
+[`perft.epd`](../perft.epd): `crates/bench/tests/signature.rs` through the
+library, and `crates/fisher/tests/bench.rs` through the `fisher bench`
+executable. Today both require the exhaustive totals, which are the sums
+of the published perft counts at plies 1 to 4. Two numbers replace them,
+and they are of different kinds.
+
+- **The D39 ceiling is an outside value.** fisher-4yn claims the bench
+  total with cutoffs is at most 1,102,448, a tenth of 11,024,485 (D39).
+  Each position's total is also at most its exhaustive total (fact 4):
+  206603, 4185552, 46255, 432070, 2167396 and 3986609. Both come from
+  published perft and the owner's decision, not from fisher.
+- **The new signature is a measurement.** The totals fisher-4yn.2 reports
+  are what that revision does with the order `Position::legal_moves`
+  returns moves in. fisher-4yn.2 records them in its claims table with
+  its revision, as the bench signature that later changes compare against
+  (docs/evidence.md, "This change does not alter behaviour"). They are not
+  an expected value for fisher-4yn.2, do not belong in `expectations/`,
+  and passing them proves nothing about pruning.
+
+After pruning, the bench tests should assert only the outside values:
+
+- `crates/bench/tests/signature.rs`: six lines `Position 1: N` to
+  `Position 6: N` in order, each N at least 1 and no greater than that
+  position's exhaustive total, then `Nodes searched  : T` where T is the
+  sum of the six and no greater than 1,102,448.
+- `crates/fisher/tests/bench.rs`: the executable exits with success and
+  empty standard error, and its last line is `Nodes searched  : T` with T
+  no greater than 1,102,448. The write-error test is unchanged.
 
 ### What stays exact
 
@@ -190,3 +226,10 @@ guaranteed boundary, and the latest is later (fact 5). It did not say that
 the production-interval test must check where the clock is read. All three
 are corrected above, and the sweep now covers `crates/uci` and
 `crates/bench` as well as `crates/deepening`.
+
+The third version (973a1f1) missed `crates/fisher/tests/bench.rs`, which
+requires the exhaustive bench total from the executable. It argued that
+no puzzle move stalemates White because the d1 rook can always move, which
+fails after `c5f2+`, where `g2g3` is White's only reply. Its rule for clock
+readings allowed any reading at a depth boundary, so an extra reading at
+check 20 would have passed. All three are corrected above.

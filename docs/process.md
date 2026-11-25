@@ -19,7 +19,7 @@ The human is in the loop at the start (what to build, which claims matter) and a
 
 A slice is thin and goes end to end. "The engine answers `go` with a legal move from the starting position" is a slice: it touches the position, move generation, search and the protocol, and it can be run. "All of move generation" is a layer, not a slice.
 
-Merge each slice into `main` after `scripts/check`, the pull-request mutation and coverage jobs, and the review required by its tier pass. See [guardrails](guardrails.md). Do not build a tall stack of dependent branches and review it at the end.
+Merge each slice into `main` after `scripts/check`, the pull-request mutation and coverage jobs, and the review required by its tier pass. See [guardrails](guardrails/README.md). Do not build a tall stack of dependent branches and review it at the end.
 
 ### Pull requests
 

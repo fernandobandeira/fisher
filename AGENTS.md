@@ -57,7 +57,7 @@ Use the terms in `GLOSSARY.md` in code, tickets, commit messages and reports. If
 
 The human reads every change to the things that do the checking. Two mechanisms make those changes findable:
 
-- A commit that touches a path listed in `.githooks/protected-paths` needs a `Guard-Change: <why>` line in its message. Find them with `git log --grep '^Guard-Change:'`. CI enforces the rule on pull requests and pushes to `main`.
+- A commit that touches a path listed in `.githooks/protected-paths` needs a `Guard-Change: <why>` line on its own in the commit body. Find them with `git log --grep '^Guard-Change:'`. CI enforces the rule on pull requests and pushes to `main`.
 - A lint is suppressed only with `#[expect(<lint>, reason = "...")]`, never `#[allow]`. Each one is a request for the human to agree.
 
 Never edit a file in `expectations/` to make a test pass. If an expected value looks wrong, stop and say why.

@@ -24,13 +24,22 @@ uses the measured revision from the last record under those conditions.
 Each of `range-01` through `range-20` plays a contiguous range in opening
 order, with four games at a time. The ranges have 100 openings under
 conditions 3 and 25 under conditions 4. `repeat-01` plays the first range
-on a separate runner. The last job checks the expected games and
+on a separate hosted runner. The last job checks the expected games and
 compares the repeat. It prints a tab-separated record and saves the
 record and joined games in the `strength-record` artifact. Add the
 printed line to `records.tsv` in a pull request.
 
+Artifacts expire after 90 days. A new dispatch reproduces the games. “Re-run failed jobs” joins ranges from different attempts and keeps the first attempt's date.
+
+The repository has 20 concurrent job slots. After planning, a series has
+22 jobs, including 21 playing jobs, so at least one range waits for a slot.
+Allow about twice the slowest range for a series run alone. That is roughly
+30 minutes for conditions 3 and 1 to 2 hours for conditions 4. Two series dispatched together
+run mostly one after the other, with some overlap as slots free up.
+Pull request checks also wait when the series fills the available slots.
+
 Before building, each playing job installs the two revisions' pinned Rust
-channels with the minimal profile in a fresh runner-local Rustup directory.
+channels with the minimal profile in a fresh Rustup directory on the hosted runner.
 The release builds explicitly use those installations.
 
 For a clocked match by hand, check out the revision to measure and run
@@ -54,9 +63,9 @@ Each line of `records.tsv` describes one match, from the measured revision's poi
 | `score` | The share of the points it took, in percent. A draw is half a point. |
 | `queen_ahead_won`, `queen_ahead_drawn`, `queen_ahead_lost` | Results of the games in which it was a queen ahead. |
 | `abnormal_endings` | Games whose PGN `Termination` tag is not `normal`: an engine crashed, played an illegal move or lost on time. Either engine may be at fault; the PGN says which. |
-| `elo_difference`, `elo_interval` | The Elo difference and its 95% margin. Historical records use the values printed by fastchess. The series computes them from the opening pairs. |
+| `elo_difference`, `elo_interval` | The Elo difference and its 95% interval. A positive difference means the measured revision scored above 50%. Historical records use the values printed by fastchess. The series computes them from the opening pairs and can print `inf` or `nan` for a one-sided score. |
 | `runner` | The version of fastchess that ran the games. |
-| `speed_ratio` | The median over the 20 playing ranges of measured to opponent bench speed on the same runner. Empty for conditions 1 and 2. |
+| `speed_ratio` | The median over the 20 playing ranges of measured to opponent bench speed on the same machine. Empty for conditions 1 and 2. |
 
 A revision was a queen ahead in a game if its material minus the opponent's was at least 900 in two positions in a row, so that the lead outlasted a reply. Material is counted as fisher's evaluation counts it: pawn 100, knight 300, bishop 300, rook 500, queen 900. The queen-ahead games it drew or lost are the games it failed to finish. The count does not say why: it may have been unable to give checkmate, or it may have blundered later.
 
@@ -68,7 +77,7 @@ A revision was a queen ahead in a game if its material minus the opponent's was 
 
 - 400 games: each of the 200 positions in `openings.epd` once with each color, in the order of the document.
 - A game ends by checkmate, stalemate, threefold repetition, the fifty-move rule or insufficient material, or abnormally when an engine crashes, plays an illegal move or runs out of time. No game is adjudicated on its score, and no engine resigns.
-- fisher gets a clock of 600 seconds plus 10 a move and no other limit. Revisions before `fisher-5sg.10` ignore the clock and search to their own fixed depth. The clock lets the runner end a game if fisher hangs.
+- fisher gets a clock of 600 seconds plus 10 a move and no other limit. Revisions before `fisher-5sg.10` ignore the clock and search to their own fixed depth. The clock lets fastchess end a game if fisher hangs.
 - Stockfish runs with `UCI_LimitStrength` on and `UCI_Elo` 1320, the lowest it allows, on one thread with a 16 MB hash and a clock of 10 seconds plus 0.1 a move.
 - Eight games run at a time. Stockfish is on a clock, so a busy machine weakens it; run nothing else heavy during a match against it.
 
@@ -129,7 +138,8 @@ position produces no digest.
 Pass `--bench` to time both builds before playing. The workflow always does
 this. It runs `fisher bench` on each build once to warm up, then measures
 five samples per build, alternating which build goes first in each pair.
-Each sample divides the reported node count by elapsed time. The job
+Fishtest uses engine-reported milliseconds. Fisher’s bench reports only
+nodes, so each sample divides the node count by wall time. The job
 divides the measured median nodes per second by the opponent median.
 The final record uses the median of the 20 range ratios. The repeated
 range does not contribute. [Fishtest worker bench](https://github.com/official-stockfish/fishtest/blob/ea59d0c793613882480198bf5402401054046ad7/worker/games.py#L521-L538)
@@ -137,17 +147,23 @@ range does not contribute. [Fishtest worker bench](https://github.com/official-s
 ## How far to trust the numbers
 
 Under a node limit, repeating the series gives the same games. The Elo
-margin estimates how far the result might move with other openings.
+interval estimates how far the result might move with other openings.
 Each opening contributes the mean score of its two games. The series
 uses the mean of these pair scores and the 95% normal interval from their
-variance, then converts the score and both bounds to Elo. The margin is
+variance, then converts the score and both bounds to Elo. The `elo_interval` field stores
 half the width between the converted bounds. A mirror match scores
 exactly half on every pair, so its observed pair variance is zero.
 [fastchess paired Elo](https://github.com/Disservin/fastchess/blob/d7b47e8dec6b564aaf4cbb2922ab37e6c6761e75/app/src/matchmaking/elo/elo_pentanomial.cpp)
 
-A node limit gives no credit for speed. A speed ratio above 1 means the
-measured revision searched more nodes per second in the fixed bench.
-The ratio uses both builds on each runner before combining runners.
+A node limit gives no credit for speed. The ratio compares the two builds
+on each machine to catch large slowdowns. Treat values within about 1%
+of 1 as noise. The first series had per-range ratios of 0.9813–1.0175 under
+conditions 3 and 0.9557–1.0826 under conditions 4.
+
+For the historical Stockfish records under conditions 1 and 2, scores
+vary from match to match. These matches do not establish an Elo rating
+for fisher. A score near 0% or 100% says little about how large the
+strength difference is.
 
 ## Where the openings come from
 

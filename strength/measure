@@ -1,7 +1,6 @@
 #!/bin/sh
 # Play the commit this checkout is on against one opponent, under the
-# conditions in strength/README.md, summarise the games, and print the line
-# that records the match in strength/records.tsv.
+# historical conditions in strength/README.md and print a match summary.
 #
 #   strength/measure stockfish <new directory>
 #   strength/measure <revision of fisher> <new directory>
@@ -118,5 +117,5 @@ printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
     "$(date +%Y-%m-%d)" "$revision" "$opponent_record" "$conditions" \
     "$summary" "${elo% *}" "${elo#* }" "$runner" >record.tsv
 echo
-echo "The games are in $out/games.pgn. To record the match, add this line to strength/records.tsv:"
+echo "The games are in $out/games.pgn. Match summary in the historical 16-field format:"
 cat record.tsv

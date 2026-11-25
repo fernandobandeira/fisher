@@ -20,15 +20,21 @@
 # 1 to 7. An independent reviewer reproduced cp 0 and per-ply counts
 # 20/400/8902/197281 with their own minimax. See expectations/perft.epd.
 # Searched transcript written 2026-11-23.
+# fisher-4yn.1, 2026-11-25: every node total at depth 2 or more reads
+# {nodes}. Once the search makes cutoffs, such a total depends on the order
+# Position::legal_moves returns moves in, which nobody chose (fisher-4yn,
+# D36 and D38). Scores, depths, principal variations, bestmove and the
+# depth-1 totals (the number of legal moves at the root) stay exact. A node
+# count in these comments describes the search without cutoffs before it.
 > isready
 # UCI isready/readyok.
 < readyok
 > go
 # Rules 1 to 7 and 10. See the header for the published perft counts.
 < info depth 1 multipv 1 score cp 0 nodes 20 nps {nps} time {time} pv {pv}
-< info depth 2 multipv 1 score cp 0 nodes 440 nps {nps} time {time} pv {pv}
-< info depth 3 multipv 1 score cp 0 nodes 9762 nps {nps} time {time} pv {pv}
-< info depth 4 multipv 1 score cp 0 nodes 216365 nps {nps} time {time} pv {pv}
+< info depth 2 multipv 1 score cp 0 nodes {nodes} nps {nps} time {time} pv {pv}
+< info depth 3 multipv 1 score cp 0 nodes {nodes} nps {nps} time {time} pv {pv}
+< info depth 4 multipv 1 score cp 0 nodes {nodes} nps {nps} time {time} pv {pv}
 # The owner uses the starting position before any position command.
 < bestmove {legal}
 # UCI position/go and bestmove. The reply carries a legal move.
@@ -36,9 +42,9 @@
 > go
 # Rules 1 to 7 and 10. See the header for the published perft counts.
 < info depth 1 multipv 1 score cp 0 nodes 20 nps {nps} time {time} pv {pv}
-< info depth 2 multipv 1 score cp 0 nodes 440 nps {nps} time {time} pv {pv}
-< info depth 3 multipv 1 score cp 0 nodes 9762 nps {nps} time {time} pv {pv}
-< info depth 4 multipv 1 score cp 0 nodes 216365 nps {nps} time {time} pv {pv}
+< info depth 2 multipv 1 score cp 0 nodes {nodes} nps {nps} time {time} pv {pv}
+< info depth 3 multipv 1 score cp 0 nodes {nodes} nps {nps} time {time} pv {pv}
+< info depth 4 multipv 1 score cp 0 nodes {nodes} nps {nps} time {time} pv {pv}
 < bestmove {legal}
 # UCI quit.
 > quit

@@ -17,14 +17,20 @@
 # were checked by exhaustive enumeration with python-chess 1.11.2.
 # Searched transcript written 2026-11-23.
 # UCI position and go.
+# fisher-4yn.1, 2026-11-25: every node total at depth 2 or more reads
+# {nodes}. Once the search makes cutoffs, such a total depends on the order
+# Position::legal_moves returns moves in, which nobody chose (fisher-4yn,
+# D36 and D38). Scores, depths, principal variations, bestmove and the
+# depth-1 totals (the number of legal moves at the root) stay exact. A node
+# count in these comments describes the search without cutoffs before it.
 > position fen 7k/8/8/8/8/8/8/K7 w - - 0 1
 > go
 # Rules 2, 5, 7 and 10. There is no capture within four plies.
 # Python-chess counts 3, 9, 54 and 324 nodes at plies 1 to 4.
 < info depth 1 multipv 1 score cp 0 nodes 3 nps {nps} time {time} pv {pv}
-< info depth 2 multipv 1 score cp 0 nodes 15 nps {nps} time {time} pv {pv}
-< info depth 3 multipv 1 score cp 0 nodes 81 nps {nps} time {time} pv {pv}
-< info depth 4 multipv 1 score cp 0 nodes 471 nps {nps} time {time} pv {pv}
+< info depth 2 multipv 1 score cp 0 nodes {nodes} nps {nps} time {time} pv {pv}
+< info depth 3 multipv 1 score cp 0 nodes {nodes} nps {nps} time {time} pv {pv}
+< info depth 4 multipv 1 score cp 0 nodes {nodes} nps {nps} time {time} pv {pv}
 # UCI bestmove. The reply carries a legal move.
 < bestmove {legal}
 # UCI quit.

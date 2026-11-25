@@ -9,11 +9,17 @@
 # the horizon sees a queen deficit (cp -900). At depths 3 and 4 both
 # searches see mate -1. The only legal moves are h8g8 and h8h7.
 # Totals add work from all finished depths of this go (fisher-5sg decision 10).
+# fisher-4yn.1, 2026-11-25: every node total at depth 2 or more reads
+# {nodes}. Once the search makes cutoffs, such a total depends on the order
+# Position::legal_moves returns moves in, which nobody chose (fisher-4yn,
+# D36 and D38). Scores, depths, principal variations, bestmove and the
+# depth-1 totals (the number of legal moves at the root) stay exact. A node
+# count in these comments describes the search without cutoffs before it.
 > position fen 7k/8/5K1Q/8/8/8/8/8 b - - 0 1
 # The nonnumeric depth leaves infinite in force (fisher-5sg).
 > go depth infinite
 < info depth 1 multipv 1 score cp -900 nodes 1 nps {nps} time {time} pv {pv}
-< info depth 2 multipv 1 score cp -900 nodes 23 nps {nps} time {time} pv {pv}
+< info depth 2 multipv 1 score cp -900 nodes {nodes} nps {nps} time {time} pv {pv}
 > isready
 <* info depth {depth} multipv 1 score {score} nodes {nodes} nps {nps} time {time} pv {pv}
 < readyok
@@ -27,7 +33,7 @@
 # Unknown words before a command are skipped under UCI.
 > unknown go infinite
 < info depth 1 multipv 1 score cp -900 nodes 1 nps {nps} time {time} pv {pv}
-< info depth 2 multipv 1 score cp -900 nodes 23 nps {nps} time {time} pv {pv}
+< info depth 2 multipv 1 score cp -900 nodes {nodes} nps {nps} time {time} pv {pv}
 > isready
 <* info depth {depth} multipv 1 score {score} nodes {nodes} nps {nps} time {time} pv {pv}
 < readyok
@@ -51,18 +57,18 @@
 # Rules 4, 5, 7 and 10. See the header for the per-ply counts.
 # Rules 2 and 3 score the horizon by material, so depths before the mate show material.
 < info depth 1 multipv 1 score cp -900 nodes 1 nps {nps} time {time} pv {pv}
-< info depth 2 multipv 1 score cp -900 nodes 23 nps {nps} time {time} pv {pv}
-< info depth 3 multipv 1 score mate -1 nodes 75 nps {nps} time {time} pv {pv}
-< info depth 4 multipv 1 score mate -1 nodes 857 nps {nps} time {time} pv {pv}
+< info depth 2 multipv 1 score cp -900 nodes {nodes} nps {nps} time {time} pv {pv}
+< info depth 3 multipv 1 score mate -1 nodes {nodes} nps {nps} time {time} pv {pv}
+< info depth 4 multipv 1 score mate -1 nodes {nodes} nps {nps} time {time} pv {pv}
 # The owner keeps the original position, whose only legal move is h8g8.
 < bestmove h8g8
 > go
 # Rules 4, 5, 7 and 10. See the header for the per-ply counts.
 # Rules 2 and 3 score the horizon by material, so depths before the mate show material.
 < info depth 1 multipv 1 score cp -900 nodes 1 nps {nps} time {time} pv {pv}
-< info depth 2 multipv 1 score cp -900 nodes 23 nps {nps} time {time} pv {pv}
-< info depth 3 multipv 1 score mate -1 nodes 75 nps {nps} time {time} pv {pv}
-< info depth 4 multipv 1 score mate -1 nodes 857 nps {nps} time {time} pv {pv}
+< info depth 2 multipv 1 score cp -900 nodes {nodes} nps {nps} time {time} pv {pv}
+< info depth 3 multipv 1 score mate -1 nodes {nodes} nps {nps} time {time} pv {pv}
+< info depth 4 multipv 1 score mate -1 nodes {nodes} nps {nps} time {time} pv {pv}
 # The reference also kept the original position.
 < bestmove {legal}
 # The prefixed stop allows the engine and reference to follow the next position.
@@ -71,18 +77,18 @@
 # Rules 4, 5, 7 and 10. See the header for the per-ply counts.
 # Rules 2 and 3 score the horizon by material, so depths before the mate show material.
 < info depth 1 multipv 1 score cp -900 nodes 1 nps {nps} time {time} pv {pv}
-< info depth 2 multipv 1 score cp -900 nodes 27 nps {nps} time {time} pv {pv}
-< info depth 3 multipv 1 score mate -1 nodes 98 nps {nps} time {time} pv {pv}
-< info depth 4 multipv 1 score mate -1 nodes 1397 nps {nps} time {time} pv {pv}
+< info depth 2 multipv 1 score cp -900 nodes {nodes} nps {nps} time {time} pv {pv}
+< info depth 3 multipv 1 score mate -1 nodes {nodes} nps {nps} time {time} pv {pv}
+< info depth 4 multipv 1 score mate -1 nodes {nodes} nps {nps} time {time} pv {pv}
 # Black's only legal move in the replacement position is h8h7.
 < bestmove h8h7
 > go
 # Rules 4, 5, 7 and 10. See the header for the per-ply counts.
 # Rules 2 and 3 score the horizon by material, so depths before the mate show material.
 < info depth 1 multipv 1 score cp -900 nodes 1 nps {nps} time {time} pv {pv}
-< info depth 2 multipv 1 score cp -900 nodes 27 nps {nps} time {time} pv {pv}
-< info depth 3 multipv 1 score mate -1 nodes 98 nps {nps} time {time} pv {pv}
-< info depth 4 multipv 1 score mate -1 nodes 1397 nps {nps} time {time} pv {pv}
+< info depth 2 multipv 1 score cp -900 nodes {nodes} nps {nps} time {time} pv {pv}
+< info depth 3 multipv 1 score mate -1 nodes {nodes} nps {nps} time {time} pv {pv}
+< info depth 4 multipv 1 score mate -1 nodes {nodes} nps {nps} time {time} pv {pv}
 < bestmove {legal}
 > stop
 > isready

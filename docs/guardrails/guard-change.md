@@ -55,16 +55,24 @@ branch edits `docs/x` while it is unprotected, Git can land that edit
 at `scripts/x` without a new reason. The net-change check catches it
 only when the range has no marked ordinary commit.
 
-The `guard-change` job becomes required once the event policy permits
-it, GitHub reports the result on the pull request head, and throwaway
-pull requests prove that removing the guard or adding a passing job
-with the same name cannot satisfy the requirement. Squash must also be
-the only enabled merge method. The pull request check relies on the
-ruleset continuing to require branches to be up to date before merging.
-An already-open pull request needs a push or an edit to get a run. The existing step in the
-[Check workflow](../../.github/workflows/check.yml) stays until the
-`guard-change` job is required and has been seen failing from `main`.
-The weekly run of the Check workflow skips the commit-message check.
+The `main gates` ruleset requires `guard-change` to pass on the pull
+request head and requires the branch to be up to date with `main`.
+A pull request cannot remove the check or satisfy it with its own
+passing job of the same name. An ordinary pull request was mergeable
+([#71](https://github.com/fernandobandeira/fisher/pull/71)). GitHub blocked
+an unmarked protected change ([#72](https://github.com/fernandobandeira/fisher/pull/72)),
+including when the pull request deleted the workflow, checker and path
+list ([#73](https://github.com/fernandobandeira/fisher/pull/73)). GitHub
+also blocked the pull request when a passing job of the same name
+finished after the required job failed, with the old step disabled
+([#75](https://github.com/fernandobandeira/fisher/pull/75)).
+
+Repository Actions policy 17732 allows `pull_request_target` and `push`
+for `.github/workflows/guard-change.yml`. GitHub enforces its default
+block of `pull_request_target` for affected public repositories from
+2 December 2026. Deleting the policy would stop the required check from
+reporting and block every pull request once enforcement starts.
+[GitHub's default policy](https://docs.github.com/en/actions/reference/security/securely-using-pull_request_target#default-policy-for-pull_request_target)
 
 - GitHub may skip this trigger for a head branch whose name looks like a commit SHA. If the required check never reports, rename the branch. [GitHub trigger reference](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#pull_request_target)
 - Deleting `.githooks/protected-paths` at the head makes the check fail even with a reason. Restore the list to pass the check.

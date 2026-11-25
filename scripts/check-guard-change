@@ -533,25 +533,30 @@ def check_markerless_conflict_fixtures(repo, base, checker, reason):
                            f"Commit {resolved} changes protected paths".encode(),
                            repr(protected).encode())
 
-    git(repo, "switch", "-q", "--detach", base)
-    original = "scripts/rename-source"
-    common = commit_file(repo, original, f"Add rename source\n\n{reason}")
-    left_path, right_path = "scripts/rename-left", "scripts/rename-right"
-    git(repo, "mv", "--", original, left_path)
-    left = commit_staged(repo, f"Rename left\n\n{reason}")
-    git(repo, "switch", "-q", "--detach", common)
-    git(repo, "mv", "--", original, right_path)
-    right = commit_staged(repo, f"Rename right\n\n{reason}")
-    tree, conflicted, _ = merge_tree(repo, left, right)
-    if not conflicted:
-        sys.exit("Guard-Change fixture did not create a rename conflict.")
-    # Keep the automatic tree exactly so only the stage entries identify paths.
-    resolved = git(repo, "commit-tree", tree, "-p", left, "-p", right,
-                   "-m", "Keep both rename destinations").decode().strip()
-    for event in ("pull_request", "push"):
-        expect_cli(checker, repo, right, resolved, event, 1,
-                   f"Commit {resolved} changes protected paths".encode(),
-                   left_path.encode(), right_path.encode())
+    for left_path, right_path, protected_paths in (
+        ("scripts/rename-left", "scripts/rename-right",
+         ("scripts/rename-left", "scripts/rename-right")),
+        ("rename-left", "rename-right", ("scripts/rename-source",)),
+    ):
+        # With both destinations unprotected, only stage 1 names the protected source.
+        git(repo, "switch", "-q", "--detach", base)
+        original = "scripts/rename-source"
+        common = commit_file(repo, original, f"Add rename source\n\n{reason}")
+        git(repo, "mv", "--", original, left_path)
+        left = commit_staged(repo, f"Rename left\n\n{reason}")
+        git(repo, "switch", "-q", "--detach", common)
+        git(repo, "mv", "--", original, right_path)
+        right = commit_staged(repo, f"Rename right\n\n{reason}")
+        tree, conflicted, _ = merge_tree(repo, left, right)
+        if not conflicted:
+            sys.exit("Guard-Change fixture did not create a rename conflict.")
+        # Keep the automatic tree exactly so only the stage entries identify paths.
+        resolved = git(repo, "commit-tree", tree, "-p", left, "-p", right,
+                       "-m", "Keep both rename destinations").decode().strip()
+        for event in ("pull_request", "push"):
+            expect_cli(checker, repo, right, resolved, event, 1,
+                       f"Commit {resolved} changes protected paths".encode(),
+                       *(path.encode() for path in protected_paths))
 
 
 def check_merge_tree_error_fixtures(repo, base, checker, reason):
@@ -614,10 +619,13 @@ def check_hook_fixtures(repo, base, hook, reason):
             ("Auto", f"Update check\n\n@{scissors}\n{reason}", above_scissors),
             ("#", "Update check\n\nGuard-Change: \u3000", None),
             ("#", "Update check\n\nGuard-Change: \v", None),
+            ("#", b"Update check\n\nGuard-Change: \xe9", None),
             ("#", "Update check\n\nGuard-Change:  \t\r", b"Guard-Change:"),
         ):
             git(repo, "config", "core.commentChar", prefix)
-            Path(message.name).write_text(contents + "\n")
+            if isinstance(contents, str):
+                contents = contents.encode()
+            Path(message.name).write_bytes(contents + b"\n")
             result = subprocess.run(("bash", str(hook), message.name), cwd=repo,
                                     capture_output=True)
             expected_status = int(expected_error is not None)

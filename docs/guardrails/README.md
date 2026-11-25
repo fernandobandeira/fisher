@@ -17,7 +17,7 @@ A guardrail catches a failure or makes it visible to the owner. Before merging, 
 
 Catch failures before work is committed, handed back or merged.
 
-The `main gates` ruleset requires the Actions `check`, `mutation`, and `coverage` jobs to pass and the pull request to be up to date with `main`.
+The `main gates` ruleset requires the Actions `check`, `mutation`, `coverage`, and `guard-change` jobs to pass and the pull request to be up to date with `main`.
 
 | Guardrail | What it stops | Where enforced | When |
 |---|---|---|---|
@@ -108,7 +108,7 @@ Make changes to what passes easy for the owner to find and review.
 
 | Guardrail | What it stops | Where enforced | When |
 |---|---|---|---|
-| Protected paths and `Guard-Change:` | Changes to checking policy without a stated reason | [Protected paths](../../.githooks/protected-paths), [commit-message hook](../../.githooks/commit-msg), [Check workflow step](../../.github/workflows/check.yml), [Guard-Change workflow](../../.github/workflows/guard-change.yml) | Commits with the hooks installed, pull requests into `main` (including retargeting), and pushes to `main` |
+| Protected paths and `Guard-Change:` | Changes to checking policy without a stated reason | [Protected paths](../../.githooks/protected-paths), [commit-message hook](../../.githooks/commit-msg), [Guard-Change workflow](../../.github/workflows/guard-change.yml) | Commits with the hooks installed, pull requests into `main` (including retargeting), and pushes to `main` |
 
 See [the `Guard-Change:` line](guard-change.md) for how the hook works and where it stops.
 

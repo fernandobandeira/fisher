@@ -70,6 +70,20 @@ jobs:
           lscpu | sed -n '/^Model name:/p'
           scripts/install-fastchess "$RUNNER_TEMP/fastchess"
           printf '%s\n' "$RUNNER_TEMP" >> "$GITHUB_PATH"
+      - name: Reproduce the conflicting Rustup component
+        if: matrix.name == 'range-01'
+        run: |
+          broken=$(mktemp -d "$RUNNER_TEMP/broken-rustup.XXXXXX")
+          component="$broken/toolchains/1.99.1-x86_64-unknown-linux-gnu/bin/cargo-clippy"
+          mkdir -p "$(dirname "$component")"
+          touch "$component"
+          if env -u RUSTUP_TOOLCHAIN RUSTUP_HOME="$broken" cargo --version > "$RUNNER_TEMP/broken-rustup.log" 2>&1; then
+            cat "$RUNNER_TEMP/broken-rustup.log"
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/broken-rustup.log"
+          grep -F "detected conflict: 'bin/cargo-clippy'" "$RUNNER_TEMP/broken-rustup.log"
+          printf 'RUSTUP_HOME=%s\n' "$broken" >> "$GITHUB_ENV"
       - name: Install the release Rust toolchains
         timeout-minutes: 5
         env:

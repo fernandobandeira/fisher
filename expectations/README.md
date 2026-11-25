@@ -275,5 +275,6 @@ fisher-5sg.9 stages the [clock sessions and controlled schedules](uci-go-clocks/
 from the owner's answers on fisher-5sg.10, 2026-11-25. The runner selects
 the active sessions in `uci/`. fisher-5sg.10 adopts the four new sessions
 and replaces `uci/go-parameters.uci` with its full successor. The
-controlled schedules fix the time for the move, the decision to start
-another depth and the order of responses when several limits apply.
+controlled schedules fix the time for the move and the time the search may
+use after the margin, the decision to start another depth and the order
+of responses when several limits apply.

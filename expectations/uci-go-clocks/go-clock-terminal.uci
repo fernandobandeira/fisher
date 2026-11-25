@@ -5,6 +5,7 @@
 # Terminal score and precedence follow D41 and the zero-limit case in
 # fisher-5sg.5 (bcd717c), corroborated by Stockfish sf_19 (edb0d9d).
 # python-chess 1.11.2 confirms the root is checkmate.
+# The old process already gives these responses. Use a deliberately broken copy to witness failure.
 > position fen 7k/6Q1/5K2/8/8/8/8/8 b - - 0 1
 > go btime 0
 # D41 and fisher-5sg.5 give the terminal score. D42 and UCI Move format give 0000.

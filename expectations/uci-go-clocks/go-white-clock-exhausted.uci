@@ -4,13 +4,23 @@
 # on fisher-5sg.10, recorded as fisher-r6y D49–D52 and D56.
 > position startpos
 > go wtime 0
-# D51 and D20 give zero time for the move and no info. UCI bestmove
-# requires one move for the accepted go.
+# D51 floors the clock at zero. The search may use 0 ms after the margin
+# (D50). D20 gives no info and UCI bestmove requires one move.
 < bestmove {legal}
 
 > go wtime -500
-# D51 and D20 give zero time for the move and no info. UCI bestmove
-# requires one move for the accepted go.
+# D51 floors the clock at zero. The search may use 0 ms after the margin
+# (D50). D20 gives no info and UCI bestmove requires one move.
+< bestmove {legal}
+
+> go wtime 0 btime 60000
+# D50 uses White's clock. D51 and D20 give 0 ms of usable time and
+# no info. UCI bestmove requires one move for the accepted go.
+< bestmove {legal}
+
+> go wtime -500 btime 60000
+# D50 uses White's clock. D51 and D20 give 0 ms of usable time and
+# no info. UCI bestmove requires one move for the accepted go.
 < bestmove {legal}
 
 # UCI quit and D25 require clean exit with no further output.

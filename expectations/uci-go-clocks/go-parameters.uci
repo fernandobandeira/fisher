@@ -22,14 +22,15 @@
 < bestmove {legal}
 
 > go movetime 50
-# UCI go movetime and fisher-5sg.7: D22/D31 give 40 ms after the margin.
+# UCI go movetime and fisher-5sg.7: the time for the move is 50 ms.
+# D22/D31 leave 40 ms for the search after the margin.
 # D41 spells each finished-depth report. UCI bestmove and D5 give the move.
 <* info depth {depth} multipv 1 score {score} nodes {nodes} nps {nps} time {time} pv {pv}
 < bestmove {legal}
 
 > go wtime 60000
 # D49 and D56 allow any finished depths in order. D41 spells info.
-# UCI bestmove requires one legal move. See README.md for the time for the move.
+# UCI bestmove requires one legal move. See README.md for D50 and the margin.
 <* info depth {depth} multipv 1 score {score} nodes {nodes} nps {nps} time {time} pv {pv}
 < bestmove {legal}
 

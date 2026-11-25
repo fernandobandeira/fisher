@@ -5,13 +5,23 @@
 # python-chess 1.11.2 independently enumerated h8g8 as the sole legal move.
 > position fen 7k/8/5K1Q/8/8/8/8/8 b - - 0 1
 > go btime 0
-# D51 and D20 give zero time for the move and no info. UCI bestmove
-# requires one move for the accepted go.
+# D51 floors the clock at zero. The search may use 0 ms after the margin
+# (D50). D20 gives no info and UCI bestmove requires one move.
 < bestmove h8g8
 
 > go btime -500
-# D51 and D20 give zero time for the move and no info. UCI bestmove
-# requires one move for the accepted go.
+# D51 floors the clock at zero. The search may use 0 ms after the margin
+# (D50). D20 gives no info and UCI bestmove requires one move.
+< bestmove h8g8
+
+> go wtime 60000 btime 0
+# D50 uses Black's clock. D51 and D20 give 0 ms of usable time and
+# no info. UCI bestmove requires one move for the accepted go.
+< bestmove h8g8
+
+> go wtime 60000 btime -500
+# D50 uses Black's clock. D51 and D20 give 0 ms of usable time and
+# no info. UCI bestmove requires one move for the accepted go.
 < bestmove h8g8
 
 # UCI quit and D25 require clean exit with no further output.

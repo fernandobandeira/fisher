@@ -66,10 +66,10 @@ def merge_tree(repo, left, right):
         stdout=subprocess.PIPE,
         check=False,
     )
-    if result.returncode == 1:
-        return None
-    result.check_returncode()
-    return result.stdout.decode().strip()
+    tree, _, _ = result.stdout.partition(b"\n")
+    if result.returncode not in (0, 1) or not tree:
+        raise subprocess.CalledProcessError(result.returncode, result.args)
+    return tree.decode(), result.returncode == 1
 
 
 def paths_between(repo, before, after):
@@ -79,12 +79,12 @@ def paths_between(repo, before, after):
 
 def commit_paths(repo, commit, parents):
     if len(parents) == 2:
-        automatic_tree = merge_tree(repo, *parents)
-        if automatic_tree is not None:
-            return paths_between(repo, automatic_tree, commit)
+        # A conflicted merge still writes a tree with Git's conflict output.
+        automatic_tree, _ = merge_tree(repo, *parents)
+        return paths_between(repo, automatic_tree, commit)
 
-    # For conflicts and merges with more than two parents, retain the combined
-    # diff. For ordinary commits this also handles the root commit.
+    # Retain the combined diff for octopus merges. For ordinary commits this
+    # also handles the root commit.
     return git(repo, "diff-tree", "--root", "-c", "--no-commit-id",
                "--name-only", "--no-renames", "-r", "-z", commit)
 
@@ -109,11 +109,13 @@ def check_range(repo, base, head, protected_paths, event):
 
     # Compare the tree that a pull request would land with the base tip.
     # A push has already landed, so compare its actual endpoints.
-    landed_tree = merge_tree(repo, base, head) if event == "pull_request" else head
-    if landed_tree is None:
-        print("Skipping the Guard-Change net-change check because the merge has conflicts.",
-              file=sys.stderr)
-        return problems
+    landed_tree = head
+    if event == "pull_request":
+        landed_tree, conflicted = merge_tree(repo, base, head)
+        if conflicted:
+            print("Skipping the Guard-Change net-change check because the merge has conflicts.",
+                  file=sys.stderr)
+            return problems
     if marked_range:
         return problems
 
@@ -303,6 +305,7 @@ def self_test(script):
         check_net_change_fixtures(repo, base, checker, reason)
         check_merge_tree_fixtures(repo, base, checker, reason)
         check_merge_commit_fixtures(repo, base, checker, reason)
+        check_merge_tree_error_fixtures(repo, base, checker, reason)
         check_hook_fixtures(repo, base, script.parent.parent / ".githooks/commit-msg", reason)
         for event, advice in (
             ("pull_request", b"git push --force-with-lease"),
@@ -453,32 +456,98 @@ def check_merge_commit_fixtures(repo, base, checker, reason):
                            capture_output=True)
     if merge.returncode != 1 or not git(repo, "ls-files", "-u", "--", protected):
         sys.exit("Guard-Change fixture did not create a conflict in the protected path.")
-    policy_path.write_text("Resolved\n1\n2\n3\nEnd\n")
-    resolved = commit_file(repo, protected, "Resolve protected conflict", "")
+    git(repo, "checkout", "--ours", "--", protected)
+    resolved = commit_file(repo, protected, "Take our side of the protected conflict", "")
     for event in ("pull_request", "push"):
-        expect_cli(checker, repo, left, resolved, event, 1,
+        expect_cli(checker, repo, conflict, resolved, event, 1,
                    resolved.encode(), protected.encode())
+
+    git(repo, "switch", "-q", "--detach", common)
+    readme_base = commit_file(repo, "README.md", "Add description")
+    readme_left = commit_file(repo, "README.md", "Edit description", "Left\n")
+    git(repo, "switch", "-q", "--detach", readme_base)
+    readme_right = commit_file(repo, "README.md", f"Edit description\n\n{reason}", "Right\n")
+    git(repo, "switch", "-q", "--detach", readme_left)
+    merge = subprocess.run(("git", "-C", str(repo), "merge", "--no-commit", readme_right),
+                           capture_output=True)
+    if merge.returncode != 1 or not git(repo, "ls-files", "-u", "--", "README.md"):
+        sys.exit("Guard-Change fixture did not create a conflict in the description.")
+    git(repo, "checkout", "--ours", "--", "README.md")
+    resolved = commit_file(repo, "README.md", "Resolve only the unprotected conflict", "")
+    for event in ("pull_request", "push"):
+        expect_cli(checker, repo, readme_left, resolved, event, 0)
+
+    policy_path.write_text("Add a protected hand edit\n")
+    git(repo, "add", "--", protected)
+    git(repo, "commit", "-q", "--amend", "--no-edit")
+    hand_edited = git(repo, "rev-parse", "HEAD").decode().strip()
+    for event in ("pull_request", "push"):
+        expect_cli(checker, repo, readme_left, hand_edited, event, 1,
+                   hand_edited.encode(), protected.encode())
+
+
+def check_merge_tree_error_fixtures(repo, base, checker, reason):
+    base_tree = git(repo, "rev-parse", f"{base}^{{tree}}").decode().strip()
+    unrelated = git(repo, "commit-tree", base_tree, "-m",
+                    f"Unrelated root\n\n{reason}").decode().strip()
+    expect_cli(checker, repo, base, unrelated, "pull_request", 1,
+               b"Guard-Change check could not read commit history or protected paths")
+
+    parents = []
+    for path in ("left", "middle", "expectations/right"):
+        git(repo, "switch", "-q", "--detach", base)
+        parents.append(commit_file(repo, path, f"Add {path}\n\n{reason}"))
+    git(repo, "switch", "-q", "--detach", parents[0])
+    git(repo, "merge", "-q", "--no-edit", *parents[1:])
+    git(repo, "rev-parse", "HEAD^3")
+    clean = git(repo, "rev-parse", "HEAD").decode().strip()
+    for event in ("pull_request", "push"):
+        expect_cli(checker, repo, parents[0], clean, event, 0)
+    protected = "expectations/perft.epd"
+    (repo / protected).parent.mkdir(exist_ok=True)
+    (repo / protected).write_text("Add a protected hand edit\n")
+    git(repo, "add", "--", protected)
+    git(repo, "commit", "-q", "--amend", "--no-edit")
+    octopus = git(repo, "rev-parse", "HEAD").decode().strip()
+    for event in ("pull_request", "push"):
+        expect_cli(checker, repo, parents[0], octopus, event, 1,
+                   f"Commit {octopus} changes protected paths".encode(), protected.encode())
 
 
 def check_hook_fixtures(repo, base, hook, reason):
     git(repo, "switch", "-q", "--detach", base)
     (repo / "scripts/check").write_text("Change the check\n")
     git(repo, "add", "--", "scripts/check")
+    scissors = " ------------------------ >8 ------------------------"
+    leading_comment = b"Git's default editor cleanup"
+    above_scissors = b"above the scissors line"
     with tempfile.NamedTemporaryFile() as message:
-        for contents, status in (
-            (reason, 1),
-            (f"Update check\n{reason}", 1),
-            (f"# Editor comment\n\n{reason}", 1),
-            (f"Update check\n\v\n{reason}", 1),
-            (f"Update check\n\f\n{reason}", 1),
-            (f"Update check\n\u00a0\n{reason}", 1),
-            (f"Update check\n \t\r\n{reason}", 0),
-            (f"# Editor comment\n\nUpdate check\n\n{reason}", 0),
+        for prefix, contents, expected_error in (
+            ("#", reason, b"Guard-Change:"),
+            ("#", f"Update check\n{reason}", b"Guard-Change:"),
+            ("#", f"#42 fix\n\n{reason}", leading_comment),
+            ("#", f"Update check\n\v\n{reason}", b"Guard-Change:"),
+            ("#", f"Update check\n\f\n{reason}", b"Guard-Change:"),
+            ("#", f"Update check\n\u00a0\n{reason}", b"Guard-Change:"),
+            ("#", f"Update check\n \t\r\n{reason}", None),
+            ("#", f"Update check\n# Comment\n\n{reason}", None),
+            ("#", f"Update check\n\n#{scissors}\n{reason}", above_scissors),
+            ("#", f"Update check\n\n{reason}\n\n#{scissors}", None),
+            (";", f"; Editor comment\n\n{reason}", leading_comment),
+            (";", f"Update check\n\n;{scissors}\n{reason}", above_scissors),
+            (";", f"#42 fix\n\n{reason}", None),
+            ("G", f"Update check\n\n{reason}", b"Guard-Change:"),
+            ("auto", f"@42 fix\n\n{reason}", leading_comment),
+            ("auto", f"Update check\n\n!{scissors}\n{reason}", above_scissors),
+            ("auto", f"Update check\n\n{reason}", None),
         ):
+            git(repo, "config", "core.commentChar", prefix)
             Path(message.name).write_text(contents + "\n")
             result = subprocess.run(("bash", str(hook), message.name), cwd=repo,
                                     capture_output=True)
-            if result.returncode != status or (status and b"Guard-Change:" not in result.stderr):
+            expected_status = int(expected_error is not None)
+            if (result.returncode != expected_status
+                    or (expected_error is not None and expected_error not in result.stderr)):
                 sys.exit(f"Guard-Change hook fixture failed: {result!r}")
 
 

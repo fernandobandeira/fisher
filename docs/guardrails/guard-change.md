@@ -26,13 +26,13 @@ On a push to `main` the workflow checks the new commits with the
 previous revision's checker, using the pushed revision's checker
 during bootstrap if the previous revision has none.
 
-CI checks each commit. For a two-parent merge with no conflicts, it
-checks paths where the recorded tree differs from Git's automatic
-merge of the parents. This covers hand edits and lets clean merges
-carry forward changes the parents already marked. If merging the
-parents has conflicts, or the commit has more than two parents, CI
-checks paths whose result differs from every parent. The checker
-also requires at least one
+CI checks each commit. For a two-parent merge, it checks paths where
+the recorded tree differs from Git's automatic merge of the parents.
+That includes Git's conflict output, so resolving a protected path
+by taking either parent's version still needs a reason. Clean merges
+can carry forward changes the parents already marked. For a commit
+with more than two parents, CI checks paths whose result differs from
+every parent. The checker also requires at least one
 `Guard-Change:` line in the body of an ordinary commit in the range
 if the net change touches a protected path. An ordinary commit has
 one parent. For a pull request the checker compares the base tip
@@ -47,6 +47,11 @@ A reason on one ordinary commit satisfies the net-change rule for
 the whole range. The owner accepts that a reason for one protected
 path can also cover another protected path restored by a merge. The
 squash still appears in the log search and its diff shows the reset.
+A clean merge can also carry an unmarked edit into a protected path.
+If `main` moves `docs/x` to `scripts/x` in a marked commit and a
+branch edits `docs/x` while it is unprotected, Git can land that edit
+at `scripts/x` without a new reason. The net-change check catches it
+only when the range has no marked ordinary commit.
 
 The `guard-change` job becomes required once the event policy permits
 it, GitHub reports the result on the pull request head, and throwaway
@@ -63,10 +68,13 @@ The weekly run of the Check workflow skips the commit-message check.
 - Deleting `.githooks/protected-paths` at the head makes the check fail even with a reason. Restore the list to pass the check.
 
 The local hook reads the working-tree list. `git commit --no-verify`
-skips it, and it exempts merge commits. The hook skips editor comment
-lines beginning with `#` and uses space, tab and carriage return to
-recognize blank lines. The hook can accept a reason below Git's
-scissors line even if Git then strips it. CI reads the recorded message.
+skips it, and it exempts merge commits. The hook cannot see the cleanup
+mode, so it requires a subject and a body reason that survive Git's
+cleanup modes. It honors `core.commentChar` and treats any of Git's
+possible comment characters as a comment when the setting is `auto`.
+Start the subject with a character that Git will keep during editor
+cleanup, put a blank line after it, and put the reason above the scissors
+line. CI reads the recorded message.
 
 The pull request check cannot see an edit made to the squash message at
 merge. Keep the default squash message so the original

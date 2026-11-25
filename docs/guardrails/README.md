@@ -106,7 +106,7 @@ Make changes to what passes easy for the owner to find and review.
 
 | Guardrail | What it stops | Where enforced | When |
 |---|---|---|---|
-| Protected paths and `Guard-Change:` | Changes to checking policy without a stated reason | [Protected paths](../../.githooks/protected-paths), [commit-message hook](../../.githooks/commit-msg) | Every commit with the hooks installed |
+| Protected paths and `Guard-Change:` | Changes to checking policy without a stated reason | [Protected paths](../../.githooks/protected-paths), [commit-message hook](../../.githooks/commit-msg), [CI check](../../.github/workflows/check.yml) | Commits with the hooks installed, pull requests, and pushes to `main` |
 
 See [the `Guard-Change:` line](guard-change.md) for how the hook works and where it stops.
 

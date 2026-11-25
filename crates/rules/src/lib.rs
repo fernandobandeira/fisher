@@ -267,3 +267,5 @@ impl CastlingRights {
         self.0 & Self::mask(color, castle) != 0
     }
 }
+
+// Temporary ordinary-change CI fixture.

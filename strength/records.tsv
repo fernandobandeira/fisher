@@ -3,3 +3,5 @@ date	revision	opponent	conditions	games	won	drawn	lost	score	queen_ahead_won	que
 2026-11-23	dbe9113ec19f58db8478a0394993cea2416e59dc	Stockfish 19, UCI_Elo 1320	1	400	54	28	318	17.0	47	14	12	0	-275.45	42.22	fastchess alpha 1.8.3 compiled for macos-latest 20261107-d7b47e8 (CI)
 2026-11-25	dbe9113ec19f58db8478a0394993cea2416e59dc	6831e46cf89d255502420b2bbfb25e40b03ba6d7	2	400	388	12	0	98.5	360	12	0	0	726.94	120.69	fastchess alpha 1.8.3 compiled for macos-latest 20261107-d7b47e8 (CI)
 2026-11-25	dbe9113ec19f58db8478a0394993cea2416e59dc	Stockfish 19, UCI_Elo 1320	2	400	52	19	329	15.4	43	11	11	0	-296.27	44.39	fastchess alpha 1.8.3 compiled for macos-latest 20261107-d7b47e8 (CI)
+2026-11-25	a5dac711b6fae86886d54f04158f3f0a33109c72	Stockfish 19, UCI_Elo 1320	2	400	61	36	303	19.8	53	20	15	1	-243.55	37.23	fastchess alpha 1.8.3 compiled for macos-latest 20261107-d7b47e8 (CI)
+2026-11-25	a5dac711b6fae86886d54f04158f3f0a33109c72	dbe9113ec19f58db8478a0394993cea2416e59dc	2	400	27	353	20	50.9	14	12	0	0	6.08	8.47	fastchess alpha 1.8.3 compiled for macos-latest 20261107-d7b47e8 (CI)

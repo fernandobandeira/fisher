@@ -109,10 +109,19 @@ The movetime case runs within the stated time for the move.
 Each finished depth has its own required reply with a literal depth.
 For depth D, the node total adds the counts of every search from depth 1
 through D. Each individual search counts the nodes at plies 1 through its
-depth. For example, the starting position reports 20, 440, 9762 and 216365
-nodes. The three score allowances in `position-moves.uci` retain `{score}`
-at every depth and use independently enumerated node totals. The derivation
+depth. For example, a search without cutoffs reports 20, 440, 9762 and
+216365 nodes from the starting position. The three score allowances in
+`position-moves.uci` retain `{score}` at every depth. The derivation
 script and its results are on fisher-5sg.13.
+
+fisher-4yn.1 replaced every node total at depth 2 or more in `uci/` with
+`{nodes}` on 2026-11-25. Once the search makes cutoffs, such a total depends
+on the order of legal moves, which nobody chose (fisher-4yn). Scores,
+depths, principal variations and `bestmove` stay exact, and so does every
+total at depth 1, which is the number of legal moves at the root. So does
+a depth-2 total below a root with one legal move, where depth 2 plays
+every reply (owner decision on PR #74, 2026-11-25). See
+[Search with cutoffs](#search-with-cutoffs).
 
 The runner compares moves from two fresh processes for `equal-scores.uci`.
 The `terminal-positions.uci` session requires one depth-zero line for each
@@ -224,6 +233,17 @@ timeout for the process exit-status wait at stdout EOF.
 To check silence after a command, synchronize with a search or held move
 and use a strict exit. A repetition before exit alone cannot establish
 when buffered output was written.
+
+### Search with cutoffs
+
+fisher-4yn.1 staged the [sessions for a search that makes cutoffs](uci-cutoff/README.md)
+on 2026-11-25. The runner does not select them until fisher-4yn.2 makes
+cutoffs. They pin the one node total at depth 2 with an outside value, 79
+from the starting position, and move the node limits that sat on a total of
+the search without cutoffs. They need no new allowance. The same directory
+stages successors of the four READMEs of controlled schedules, with every
+total at depth 2 or more either derived by hand or marked as having no
+outside value.
 
 ## Published perft
 

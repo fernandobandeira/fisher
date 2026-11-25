@@ -22,6 +22,15 @@
 # then h6g7 is checkmate. Python-chess counts 1, 21, 30 and 730 nodes at
 # plies 1 to 4.
 # Searched transcript written 2026-11-23.
+# fisher-4yn.1, 2026-11-25: a node total at depth 2 or more reads {nodes},
+# except below a root with one legal move. Once the search makes cutoffs,
+# such a total depends on the order Position::legal_moves returns moves in,
+# which nobody chose (fisher-4yn, D36 and D38). A root with one legal move
+# puts no bound on the replies, so depth 2 there plays every one and its
+# total stays exact (owner decision on PR #74). Scores, depths, principal
+# variations, bestmove and the depth-1 totals (the number of legal moves at
+# the root) stay exact. A node count in these comments describes the search
+# without cutoffs before it.
 > position fen 7k/8/5K1Q/8/8/8/8/8 b - - 0 1
 > position fen 7k/8/5K1Q/8/8/8/8/7 b - - 0 1
 # Owner decision for rejected position: one diagnostic for malformed FEN.
@@ -34,8 +43,8 @@
 # Rules 2 and 3 score the horizon by material, so depths before the mate show material.
 < info depth 1 multipv 1 score cp -900 nodes 1 nps {nps} time {time} pv {pv}
 < info depth 2 multipv 1 score cp -900 nodes 23 nps {nps} time {time} pv {pv}
-< info depth 3 multipv 1 score mate -1 nodes 75 nps {nps} time {time} pv {pv}
-< info depth 4 multipv 1 score mate -1 nodes 857 nps {nps} time {time} pv {pv}
+< info depth 3 multipv 1 score mate -1 nodes {nodes} nps {nps} time {time} pv {pv}
+< info depth 4 multipv 1 score mate -1 nodes {nodes} nps {nps} time {time} pv {pv}
 # Owner-approved example: the original position still has its sole legal move.
 < bestmove h8g8
 > position startpos moves e2e4 e7e5 e4e6
@@ -49,8 +58,8 @@
 # Rules 2 and 3 score the horizon by material, so depths before the mate show material.
 < info depth 1 multipv 1 score cp -900 nodes 1 nps {nps} time {time} pv {pv}
 < info depth 2 multipv 1 score cp -900 nodes 23 nps {nps} time {time} pv {pv}
-< info depth 3 multipv 1 score mate -1 nodes 75 nps {nps} time {time} pv {pv}
-< info depth 4 multipv 1 score mate -1 nodes 857 nps {nps} time {time} pv {pv}
+< info depth 3 multipv 1 score mate -1 nodes {nodes} nps {nps} time {time} pv {pv}
+< info depth 4 multipv 1 score mate -1 nodes {nodes} nps {nps} time {time} pv {pv}
 # Owner-approved example: the original position still has its sole legal move.
 < bestmove h8g8
 > position startpos moves e2e4 e7e9
@@ -64,8 +73,8 @@
 # Rules 2 and 3 score the horizon by material, so depths before the mate show material.
 < info depth 1 multipv 1 score cp -900 nodes 1 nps {nps} time {time} pv {pv}
 < info depth 2 multipv 1 score cp -900 nodes 23 nps {nps} time {time} pv {pv}
-< info depth 3 multipv 1 score mate -1 nodes 75 nps {nps} time {time} pv {pv}
-< info depth 4 multipv 1 score mate -1 nodes 857 nps {nps} time {time} pv {pv}
+< info depth 3 multipv 1 score mate -1 nodes {nodes} nps {nps} time {time} pv {pv}
+< info depth 4 multipv 1 score mate -1 nodes {nodes} nps {nps} time {time} pv {pv}
 # Owner-approved example: the original position still has its sole legal move.
 < bestmove h8g8
 > position fen
@@ -79,8 +88,8 @@
 # Rules 2 and 3 score the horizon by material, so depths before the mate show material.
 < info depth 1 multipv 1 score cp -900 nodes 1 nps {nps} time {time} pv {pv}
 < info depth 2 multipv 1 score cp -900 nodes 23 nps {nps} time {time} pv {pv}
-< info depth 3 multipv 1 score mate -1 nodes 75 nps {nps} time {time} pv {pv}
-< info depth 4 multipv 1 score mate -1 nodes 857 nps {nps} time {time} pv {pv}
+< info depth 3 multipv 1 score mate -1 nodes {nodes} nps {nps} time {time} pv {pv}
+< info depth 4 multipv 1 score mate -1 nodes {nodes} nps {nps} time {time} pv {pv}
 # Owner-approved example: the original position still has its sole legal move.
 < bestmove h8g8
 > position
@@ -92,8 +101,8 @@
 # Rules 2 and 3 score the horizon by material, so depths before the mate show material.
 < info depth 1 multipv 1 score cp -900 nodes 1 nps {nps} time {time} pv {pv}
 < info depth 2 multipv 1 score cp -900 nodes 23 nps {nps} time {time} pv {pv}
-< info depth 3 multipv 1 score mate -1 nodes 75 nps {nps} time {time} pv {pv}
-< info depth 4 multipv 1 score mate -1 nodes 857 nps {nps} time {time} pv {pv}
+< info depth 3 multipv 1 score mate -1 nodes {nodes} nps {nps} time {time} pv {pv}
+< info depth 4 multipv 1 score mate -1 nodes {nodes} nps {nps} time {time} pv {pv}
 < bestmove h8g8
 > position startpos e2e4
 < info string {message:expected moves}
@@ -104,8 +113,8 @@
 # Rules 2 and 3 score the horizon by material, so depths before the mate show material.
 < info depth 1 multipv 1 score cp -900 nodes 1 nps {nps} time {time} pv {pv}
 < info depth 2 multipv 1 score cp -900 nodes 23 nps {nps} time {time} pv {pv}
-< info depth 3 multipv 1 score mate -1 nodes 75 nps {nps} time {time} pv {pv}
-< info depth 4 multipv 1 score mate -1 nodes 857 nps {nps} time {time} pv {pv}
+< info depth 3 multipv 1 score mate -1 nodes {nodes} nps {nps} time {time} pv {pv}
+< info depth 4 multipv 1 score mate -1 nodes {nodes} nps {nps} time {time} pv {pv}
 < bestmove h8g8
 > position startpos moves e2e4 0000
 < info string {message:null move}
@@ -116,8 +125,8 @@
 # Rules 2 and 3 score the horizon by material, so depths before the mate show material.
 < info depth 1 multipv 1 score cp -900 nodes 1 nps {nps} time {time} pv {pv}
 < info depth 2 multipv 1 score cp -900 nodes 23 nps {nps} time {time} pv {pv}
-< info depth 3 multipv 1 score mate -1 nodes 75 nps {nps} time {time} pv {pv}
-< info depth 4 multipv 1 score mate -1 nodes 857 nps {nps} time {time} pv {pv}
+< info depth 3 multipv 1 score mate -1 nodes {nodes} nps {nps} time {time} pv {pv}
+< info depth 4 multipv 1 score mate -1 nodes {nodes} nps {nps} time {time} pv {pv}
 < bestmove h8g8
 # UCI quit.
 > quit

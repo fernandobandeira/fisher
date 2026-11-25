@@ -3,6 +3,15 @@
 # fisher-8ie, fisher-r6y D20, D24, D28 and D41, fisher-5sg decisions 2–6 and 10.
 # Perft: expectations/perft.epd. Independent minimax: python-chess 1.11.2.
 # Full info spelling: Stockfish sf_19 (edb0d9d), as cited in expectations/README.md.
+# fisher-4yn.1, 2026-11-25: a node total at depth 2 or more reads {nodes},
+# except below a root with one legal move. Once the search makes cutoffs,
+# such a total depends on the order Position::legal_moves returns moves in,
+# which nobody chose (fisher-4yn, D36 and D38). A root with one legal move
+# puts no bound on the replies, so depth 2 there plays every one and its
+# total stays exact (owner decision on PR #74). Scores, depths, principal
+# variations, bestmove and the depth-1 totals (the number of legal moves at
+# the root) stay exact. A node count in these comments describes the search
+# without cutoffs before it.
 > position startpos
 > go nodes 0
 < bestmove {legal}
@@ -24,7 +33,7 @@
 
 > go nodes 440
 < info depth 1 multipv 1 score cp 0 nodes 20 nps {nps} time {time} pv {pv}
-< info depth 2 multipv 1 score cp 0 nodes 440 nps {nps} time {time} pv {pv}
+< info depth 2 multipv 1 score cp 0 nodes {nodes} nps {nps} time {time} pv {pv}
 < bestmove {legal}
 
 > position fen 7k/8/5K1Q/8/8/8/8/8 b - - 0 1
@@ -36,16 +45,16 @@
 > go nodes 3137
 < info depth 1 multipv 1 score cp -900 nodes 1 nps {nps} time {time} pv h8g8
 < info depth 2 multipv 1 score cp -900 nodes 23 nps {nps} time {time} pv {pv}
-< info depth 3 multipv 1 score mate -1 nodes 75 nps {nps} time {time} pv h8g8 h6g7
-< info depth 4 multipv 1 score mate -1 nodes 857 nps {nps} time {time} pv h8g8 h6g7
+< info depth 3 multipv 1 score mate -1 nodes {nodes} nps {nps} time {time} pv h8g8 h6g7
+< info depth 4 multipv 1 score mate -1 nodes {nodes} nps {nps} time {time} pv h8g8 h6g7
 < bestmove h8g8
 
 > go nodes 3138
 < info depth 1 multipv 1 score cp -900 nodes 1 nps {nps} time {time} pv h8g8
 < info depth 2 multipv 1 score cp -900 nodes 23 nps {nps} time {time} pv {pv}
-< info depth 3 multipv 1 score mate -1 nodes 75 nps {nps} time {time} pv h8g8 h6g7
-< info depth 4 multipv 1 score mate -1 nodes 857 nps {nps} time {time} pv h8g8 h6g7
-< info depth 5 multipv 1 score mate -1 nodes 3138 nps {nps} time {time} pv h8g8 h6g7
+< info depth 3 multipv 1 score mate -1 nodes {nodes} nps {nps} time {time} pv h8g8 h6g7
+< info depth 4 multipv 1 score mate -1 nodes {nodes} nps {nps} time {time} pv h8g8 h6g7
+< info depth 5 multipv 1 score mate -1 nodes {nodes} nps {nps} time {time} pv h8g8 h6g7
 < bestmove h8g8
 
 # The sole node of depth 1 uses the entire limit. Hold the move (decision 5).

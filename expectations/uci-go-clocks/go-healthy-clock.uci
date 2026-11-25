@@ -1,0 +1,22 @@
+# Staged by fisher-5sg.9 on 2026-11-25. See README.md for derivation.
+# Sources: April 2006 UCI specification https://backscattering.de/chess/uci/
+# (go, info, bestmove and quit), and the owner's 2026-11-25 D17 answers
+# on fisher-5sg.10, recorded as fisher-r6y D49–D52 and D56.
+# UCI position sets the side to move. Both commands have positive time.
+> position startpos
+> go wtime 10100 winc 100
+# D49 and D56 allow any finished depths in order. D41 spells info.
+# UCI bestmove requires one legal move. See README.md for D50 and the margin.
+<* info depth {depth} multipv 1 score {score} nodes {nodes} nps {nps} time {time} pv {pv}
+< bestmove {legal}
+
+> position startpos moves e2e4
+> go btime 510 movestogo 1
+# D49 and D56 allow any finished depths in order. D41 spells info.
+# UCI bestmove requires one legal move. See README.md for D50 and the margin.
+<* info depth {depth} multipv 1 score {score} nodes {nodes} nps {nps} time {time} pv {pv}
+< bestmove {legal}
+
+# UCI quit and D25 require clean exit with no further output.
+> quit
+! exit

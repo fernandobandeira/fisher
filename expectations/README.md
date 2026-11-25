@@ -268,3 +268,13 @@ number of reports, a clock reading or which event wins a race. The
 controlled schedules fix the relevant clock and command order and
 specify their exact reports. Release measurements cover elapsed
 wall-clock time outside `scripts/check`.
+
+## Searches on the clock
+
+fisher-5sg.9 stages the [clock sessions and controlled schedules](uci-go-clocks/README.md)
+from the owner's answers on fisher-5sg.10, 2026-11-25. The runner selects
+the active sessions in `uci/`. fisher-5sg.10 adopts the four new sessions
+and replaces `uci/go-parameters.uci` with its full successor. The
+controlled schedules fix the time for the move and the time the search may
+use after the margin, the decision to start another depth and the order
+of responses when several limits apply.

@@ -7,6 +7,24 @@
 # Depth 0 reaches the limit before any node is entered (D20).
 > go depth 0
 < bestmove h8g8
+
+# An explicit limit can exceed the default depth of 4 (D28).
+> go depth 5
+< info depth 1 multipv 1 score cp -900 nodes 1 nps {nps} time {time} pv h8g8
+< info depth 2 multipv 1 score cp -900 nodes 23 nps {nps} time {time} pv {pv}
+< info depth 3 multipv 1 score mate -1 nodes 75 nps {nps} time {time} pv h8g8 h6g7
+< info depth 4 multipv 1 score mate -1 nodes 857 nps {nps} time {time} pv h8g8 h6g7
+< info depth 5 multipv 1 score mate -1 nodes 3138 nps {nps} time {time} pv h8g8 h6g7
+< bestmove h8g8
+
+# The finished depth is reported before stop releases the held move.
+> go infinite depth 1
+< info depth 1 multipv 1 score cp -900 nodes 1 nps {nps} time {time} pv h8g8
+> isready
+< readyok
+> stop
+< bestmove h8g8
+
 > position startpos
 > go depth 1
 < info depth 1 multipv 1 score cp 0 nodes 20 nps {nps} time {time} pv {pv}
@@ -35,6 +53,11 @@
 # Terminal root (fisher-2aj.2 owner approval, 2026-11-23).
 > position fen 7k/6Q1/5K2/8/8/8/8/8 b - - 0 1
 > go depth 2
+< info depth 0 score mate 0
+< bestmove 0000
+
+# The terminal response precedes the zero limit.
+> go depth 0
 < info depth 0 score mate 0
 < bestmove 0000
 

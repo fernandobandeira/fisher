@@ -32,6 +32,22 @@
 > go nodes 0
 < bestmove h8g8
 
+# One node short of depth 5, then the exact cumulative limit.
+> go nodes 3137
+< info depth 1 multipv 1 score cp -900 nodes 1 nps {nps} time {time} pv h8g8
+< info depth 2 multipv 1 score cp -900 nodes 23 nps {nps} time {time} pv {pv}
+< info depth 3 multipv 1 score mate -1 nodes 75 nps {nps} time {time} pv h8g8 h6g7
+< info depth 4 multipv 1 score mate -1 nodes 857 nps {nps} time {time} pv h8g8 h6g7
+< bestmove h8g8
+
+> go nodes 3138
+< info depth 1 multipv 1 score cp -900 nodes 1 nps {nps} time {time} pv h8g8
+< info depth 2 multipv 1 score cp -900 nodes 23 nps {nps} time {time} pv {pv}
+< info depth 3 multipv 1 score mate -1 nodes 75 nps {nps} time {time} pv h8g8 h6g7
+< info depth 4 multipv 1 score mate -1 nodes 857 nps {nps} time {time} pv h8g8 h6g7
+< info depth 5 multipv 1 score mate -1 nodes 3138 nps {nps} time {time} pv h8g8 h6g7
+< bestmove h8g8
+
 # The sole node of depth 1 uses the entire limit. Hold the move (decision 5).
 > go infinite nodes 1
 < info depth 1 multipv 1 score cp -900 nodes 1 nps {nps} time {time} pv {pv}
@@ -50,6 +66,12 @@
 > position fen 7k/8/5K2/6Q1/8/8/8/8 b - - 0 1
 > go nodes 0
 < bestmove h8h7
+
+# The terminal response precedes the zero limit.
+> position fen 7k/6Q1/5K2/8/8/8/8/8 b - - 0 1
+> go nodes 0
+< info depth 0 score mate 0
+< bestmove 0000
 
 > quit
 ! exit

@@ -1,11 +1,9 @@
 # Triage Labels
 
-The skills speak in terms of five canonical triage roles. Use the matching Beads label with `bd label add <id> <label>`.
+Apply a Beads label with `bd label add <id> <label>`.
 
-| Label in mattpocock/skills | Label in our tracker | Meaning                                  |
-| -------------------------- | -------------------- | ---------------------------------------- |
-| `needs-triage`             | `needs-triage`       | Maintainer needs to evaluate this issue  |
-| `needs-info`               | `needs-info`         | Waiting on reporter for more information |
-| `ready-for-agent`          | `ready-for-agent`    | Fully specified, ready for an AFK agent  |
-| `ready-for-human`          | `ready-for-human`    | Requires human implementation            |
-| `wontfix`                  | `wontfix`            | Will not be actioned                     |
+| Label | Meaning |
+| --- | --- |
+| `needs-triage` | Maintainer needs to evaluate this issue |
+| `ready-for-agent` | Fully specified, ready for an agent to implement unattended |
+| `ready-for-human` | Requires human implementation |

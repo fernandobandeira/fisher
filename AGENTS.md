@@ -62,13 +62,11 @@ The human reads every change to the things that do the checking. Two mechanisms 
 
 Never edit a file in `expectations/` to make a test pass. If an expected value looks wrong, stop and say why.
 
-## Agent skills
-
-Matt Pocock's skills live in `.agents/skills/`. They are not committed: `skills-lock.json` pins them and `npx skills@latest experimental_install -a claude-code codex` restores them. [docs/process.md](docs/process.md) says which one to use when.
+## Project references
 
 ### Issue tracker
 
-Use Beads for specs and tickets. Read [tracker commands](docs/agents/issue-tracker.md) when publishing, finding, claiming, or closing work, or using `/wayfinder`.
+Use Beads for specs and tickets. Read [tracker commands](docs/agents/issue-tracker.md) when publishing, finding, claiming, or closing work.
 
 ### Triage labels
 
@@ -76,4 +74,4 @@ Use the [triage label reference](docs/agents/triage-labels.md) when applying or 
 
 ### Domain docs
 
-Single-context: one `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+Fisher has one glossary and one ADR directory at the repo root. See [domain docs](docs/agents/domain.md).

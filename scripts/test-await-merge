@@ -1,0 +1,126 @@
+#!/usr/bin/env python3
+"""Exercise await-merge with a stand-in gh and no network."""
+
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+import textwrap
+import unittest
+
+
+SCRIPT = Path(__file__).resolve().with_name("await-merge")
+VIEW = ["pr", "view", "42", "--json",
+        "state,mergeStateStatus,mergeable,baseRefName,headRefOid,statusCheckRollup"]
+BASE = ["api", "repos/{owner}/{repo}/git/ref/heads/main", "--jq", ".object.sha"]
+UPDATE = ["pr", "update-branch", "42"]
+
+STAND_IN = """\
+    import json
+    from pathlib import Path
+    import sys
+
+    args = sys.argv[1:]
+    log = Path("calls")
+    count = len(log.read_text().splitlines()) if log.exists() else 0
+    with log.open("a") as stream:
+        stream.write(json.dumps(args) + "\\n")
+    steps = json.loads(Path("steps").read_text())
+    expected, output = steps[min(count, len(steps) - 1)]
+    if args != expected:
+        sys.exit(f"Unexpected gh call: {args!r}, expected {expected!r}")
+    print(output if isinstance(output, str) else json.dumps(output))
+"""
+
+
+def pull(state="OPEN", merge_state="BLOCKED", mergeable="MERGEABLE",
+         head="first-head", checks=(), base="main"):
+    return VIEW, {
+        "state": state, "mergeStateStatus": merge_state, "mergeable": mergeable,
+        "baseRefName": base, "headRefOid": head, "statusCheckRollup": checks,
+    }
+
+
+def check(name, status, conclusion=""):
+    return {"__typename": "CheckRun", "name": name, "status": status, "conclusion": conclusion}
+
+
+class AwaitMergeTest(unittest.TestCase):
+    def run_script(self, steps, timeout="4"):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fake = root / "gh"
+            fake.write_text(f"#!{sys.executable}\n" + textwrap.dedent(STAND_IN))
+            fake.chmod(0o755)
+            (root / "steps").write_text(json.dumps(steps))
+            result = subprocess.run(
+                (sys.executable, str(SCRIPT), "42", "--timeout", timeout, "--interval", "0.01"),
+                cwd=root, env={**os.environ, "PATH": f"{root}{os.pathsep}{os.environ['PATH']}"},
+                capture_output=True, text=True, timeout=float(timeout) + 1.5,
+            )
+            calls = [json.loads(line) for line in (root / "calls").read_text().splitlines()]
+            return result, calls
+
+    def assert_steps(self, steps, status, message):
+        result, calls = self.run_script(steps)
+        self.assertEqual(result.returncode, status, result)
+        self.assertIn(message, result.stdout + result.stderr)
+        self.assertEqual(calls, [args for args, _ in steps])
+
+    def test_updates_once_for_each_main_commit_and_ignores_old_head_failure(self):
+        behind = pull(merge_state="BEHIND")
+        stale = pull(merge_state="BEHIND", checks=[check("mutation", "COMPLETED", "CANCELLED")])
+        next_head = pull(merge_state="BEHIND", head="second-head")
+        self.assert_steps([
+            behind, (BASE, "first-base"), (UPDATE, ""),
+            stale, (BASE, "first-base"),
+            next_head, (BASE, "second-base"), (UPDATE, ""),
+            pull(state="MERGED", merge_state="UNKNOWN", head="third-head"),
+        ], 0, "merged")
+
+    def test_already_merged(self):
+        self.assert_steps([pull(state="MERGED", merge_state="UNKNOWN")], 0, "merged")
+
+    def test_closed(self):
+        self.assert_steps([pull(state="CLOSED")], 1, "closed without merging")
+
+    def test_required_check_failure_after_head_changes(self):
+        for conclusion in ("FAILURE", "CANCELLED", "TIMED_OUT"):
+            with self.subTest(conclusion=conclusion):
+                self.assert_steps([
+                    pull(merge_state="BEHIND"), (BASE, "first-base"), (UPDATE, ""),
+                    pull(head="second-head", checks=[check("coverage", "COMPLETED", conclusion)]),
+                ], 1, f"required check coverage finished with {conclusion} at second-head")
+
+    def test_waits_for_pending_checks_and_ignores_other_results(self):
+        checks = [
+            check("mutation", "QUEUED"), check("coverage", "IN_PROGRESS"),
+            check("mutation-part (0)", "COMPLETED", "FAILURE"),
+            {"__typename": "StatusContext", "context": "check", "state": "FAILURE"},
+        ]
+        self.assert_steps([
+            pull(checks=checks), pull(state="MERGED", merge_state="UNKNOWN"),
+        ], 0, "merged")
+
+    def test_conflict(self):
+        self.assert_steps([
+            pull(merge_state="BEHIND"), (BASE, "first-base"), (UPDATE, ""),
+            pull(merge_state="DIRTY", mergeable="CONFLICTING"),
+        ], 1, "conflicts with main. Rebase is needed")
+
+    def test_other_base(self):
+        self.assert_steps([pull(base="another-branch")], 1, "must target main")
+
+    def test_timeout(self):
+        result, calls = self.run_script([pull()], timeout="0.6")
+        self.assertEqual(result.returncode, 1, result)
+        self.assertIn("Timed out waiting for pull request #42", result.stderr)
+        self.assertIn("OPEN/BLOCKED at first-head", result.stderr)
+        self.assertTrue(calls)
+        self.assertTrue(all(args == VIEW for args in calls))
+
+
+if __name__ == "__main__":
+    unittest.main()

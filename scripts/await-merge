@@ -1,0 +1,98 @@
+#!/usr/bin/env python3
+"""Wait for a pull request into main and update its branch when it falls behind."""
+
+import argparse
+import json
+import math
+import subprocess
+import sys
+import time
+
+
+# The Actions jobs named in the main gates ruleset.
+REQUIRED_CHECKS = {"check", "mutation", "coverage", "guard-change"}
+FAILED_CONCLUSIONS = {"FAILURE", "CANCELLED", "TIMED_OUT"}
+
+
+def gh(deadline, *args):
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise subprocess.TimeoutExpired(args, 0)
+    return subprocess.check_output(("gh", *args), timeout=remaining, text=True).strip()
+
+
+def await_merge(number, timeout, interval):
+    deadline = time.monotonic() + timeout
+    updated_bases = set()
+    updated_head = None
+    last_state = "no pull request state received"
+    try:
+        while time.monotonic() < deadline:
+            pull = json.loads(gh(
+                deadline, "pr", "view", number, "--json",
+                "state,mergeStateStatus,mergeable,baseRefName,headRefOid,statusCheckRollup",
+            ))
+            state, merge_state = pull["state"], pull["mergeStateStatus"]
+            head = pull["headRefOid"]
+            last_state = f"{state}/{merge_state} at {head}"
+            if state == "MERGED":
+                print(f"Pull request #{number} merged.")
+                return
+            if state == "CLOSED":
+                sys.exit(f"Pull request #{number} closed without merging.")
+            if pull["baseRefName"] != "main":
+                sys.exit(f"Pull request #{number} must target main.")
+            if pull["mergeable"] == "CONFLICTING":
+                sys.exit(f"Pull request #{number} conflicts with main. Rebase is needed.")
+
+            # GitHub may still show the old head while an update is being applied.
+            if head != updated_head:
+                for check in pull["statusCheckRollup"] or []:
+                    if (check["__typename"] == "CheckRun"
+                            and check["name"] in REQUIRED_CHECKS
+                            and check["status"] == "COMPLETED"
+                            and check["conclusion"] in FAILED_CONCLUSIONS):
+                        sys.exit(
+                            f"Pull request #{number} required check {check['name']} "
+                            f"finished with {check['conclusion']} at {head}."
+                        )
+            if merge_state == "BEHIND":
+                base = gh(deadline, "api", "repos/{owner}/{repo}/git/ref/heads/main",
+                          "--jq", ".object.sha")
+                if base not in updated_bases:
+                    print(f"Updating pull request #{number} against main at {base}.", flush=True)
+                    gh(deadline, "pr", "update-branch", number)
+                    updated_bases.add(base)
+                    updated_head = head
+
+            time.sleep(max(0, min(interval, deadline - time.monotonic())))
+    except subprocess.TimeoutExpired:
+        pass
+    except (OSError, subprocess.CalledProcessError) as error:
+        sys.exit(f"Could not wait for pull request #{number}: {error}")
+
+    sys.exit(f"Timed out waiting for pull request #{number}. Last state: {last_state}.")
+
+
+def positive_seconds(value):
+    seconds = float(value)
+    if not math.isfinite(seconds) or seconds <= 0:
+        raise argparse.ArgumentTypeError("expected a positive number of seconds")
+    return seconds
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("number", type=int, help="pull request number in this repository")
+    parser.add_argument("--timeout", type=positive_seconds, default=3600,
+                        help="time limit in seconds (default: 3600)")
+    parser.add_argument("--interval", type=positive_seconds, default=15,
+                        help="seconds between polls (default: 15)")
+    args = parser.parse_args()
+    if args.number <= 0:
+        parser.error("pull request number must be positive")
+    await_merge(str(args.number), args.timeout, args.interval)
+
+
+if __name__ == "__main__":
+    main()

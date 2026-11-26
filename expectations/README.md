@@ -107,20 +107,32 @@ split instead (fisher-4yn.4):
 - The tests of `uci` check that the `info` line carries the score the
   search returned.
 
-To know which position a line belongs to, the runner follows its input as
-`uci` does. It splits each record into commands where `uci` ends a line:
-at CR, and at LF unless LF follows CR. It sets a position up as `uci`
-does: `startpos`, or a FEN of four, five or six fields with a halfmove
-clock of 0 and a fullmove number of 1 filled in, then the moves. It
-accepts exactly the FENs `rules::Position::from_fen` accepts. Each `go`
-searches the position set at that point, and the search's `info` lines and
-`bestmove` are checked against that position, even when a later
-`position` has been sent after `stop`. A command fisher must reject (a
-position or a FEN it cannot set up, or a `position` or `go` sent while a
-search runs without `stop`) fails unless the next record expects fisher's
-`info string` rejection; then fisher keeps its previous position, and so
-does the runner. An expected rejection of a position the runner did set up
-fails too.
+The runner checks a `{score}` only against a position it is sure of, and
+fails loudly when it is not sure. It may fail a valid transcript; it must
+never check against the wrong position.
+
+- It splits each record into commands where `uci` ends a line: at CR, and
+  at LF unless LF follows CR. It reads nothing after `quit`.
+- It sets a position up as `uci` does: `startpos`, or a FEN of four, five
+  or six fields with a halfmove clock of 0 and a fullmove number of 1
+  filled in, then the moves. It accepts exactly the FENs
+  `rules::Position::from_fen` accepts, and keeps the move counters as
+  fisher does, in 64 bits. A position fisher rejects leaves the position in
+  place.
+- A search's position is known only when its `go` was sent while fisher
+  was known to be idle: at the start, after the previous search's
+  `bestmove` was read, or after `stop`, since fisher finishes a stopped
+  search before it reads on. The search's `info` lines and `bestmove` are
+  checked against that position.
+- A `position`, `ucinewgame` or `go` sent while a search might still be
+  running makes the position unknown until a `position` sent while fisher
+  is known to be idle. A `{score}` at depths 1 to 4, a principal variation
+  or a `bestmove {legal}` from a search with an unknown position fails,
+  and the message asks the session to read `bestmove` first or to use a
+  literal value. Such a `go` also leaves every later search's position
+  unknown, because the runner cannot tell whether fisher started it. During
+  `go infinite` before `stop`, fisher always rejects `position` and `go`,
+  so those leave the position known.
 
 A searched line at depth 5 or deeper gets the spelling, length and
 node-rate checks only, `{score}` included, as the `full-spelling` case in

@@ -1,15 +1,3 @@
 {
-  "equivalent": [
-    {
-      "file": "crates/search/src/lib.rs",
-      "function": "mate_within_depth_or_centipawns",
-      "replacement": ">=",
-      "site": [
-        "-winning: score > 0,",
-        "+winning: score >= /* ~ changed by cargo-mutants ~ */ 0,"
-      ],
-      "proof": "The mate branch requires 100000 - abs(score) to fit in u8 and be no greater than depth. At score zero this difference is 100000, so the conversion fails and neither comparison is evaluated.",
-      "function_sha256": "be9091c732c42e104302cd8aeb504f034d04018b6fa5d22a22b246d7c7f2dab5"
-    }
-  ]
+  "equivalent": []
 }

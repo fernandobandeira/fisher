@@ -1,0 +1,32 @@
+# Staged by fisher-4yn.1 on 2026-11-25 for a search that makes cutoffs.
+# Sources: April 2006 UCI specification https://backscattering.de/chess/uci/
+# (go depth, info, bestmove and quit); fisher-4yn, "Nodes", grilled with the
+# owner on 2026-11-24 (fisher-r6y D36 and D38, rule 7 of fisher-2aj);
+# published perft in expectations/perft.epd (20 at depth 1, 400 at depth 2).
+# Full info spelling: fisher-r6y D41 and Stockfish sf_19 (edb0d9d), as cited
+# in expectations/README.md. D28 makes nodes a total since the go.
+#
+# Derivation. A node is counted each time a move is played, including the
+# reply that causes a cutoff; the root counts nothing (D38).
+# Depth 1 plays the 20 root moves: 20 nodes, each scored cp 0 by material.
+# Depth 2: every root move has 20 replies, and no capture is possible within
+# two plies, so every position two plies in has material 0. The first root
+# move costs 1 + 20 nodes and gives the root a score of cp 0. Each of the
+# other 19 root moves costs 1 + 1, because its first reply already scores
+# cp 0 for the side to move, which proves the root move no better than the
+# first: a cutoff, and the remaining 19 replies are left unplayed. Depth 2
+# enters 21 + 19 * 2 = 59 nodes. The count does not depend on the order of
+# moves. The total since the go is 20 + 59 = 79.
+# The score is cp 0 at both depths, as minimax gives (expectations/README.md).
+#
+# A search without cutoffs reports 440 (20 + 20 + 400) at depth 2, and so
+# does one that cuts only on a reply strictly better than the bound, so
+# neither passes this session.
+> position startpos
+> go depth 2
+< info depth 1 multipv 1 score cp 0 nodes 20 nps {nps} time {time} pv {pv}
+< info depth 2 multipv 1 score cp 0 nodes 79 nps {nps} time {time} pv {pv}
+< bestmove {legal}
+
+> quit
+! exit

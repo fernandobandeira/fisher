@@ -104,7 +104,7 @@ fn reports_totals_from_the_start_of_go() -> std::io::Result<()> {
             "unexpected reports: {reports:?}"
         )));
     };
-    // The frozen schedule in expectations/uci-cutoff/uci-deepen-until-stop.md.
+    // The frozen schedule in expectations/uci-deepen-until-stop/README.md.
     assert_eq!(node_checks, 79);
     for (report, depth, nodes, millis) in [(first, 1, 20, 2), (second, 2, 79, 5)] {
         assert_eq!(report.depth, depth);
@@ -167,6 +167,7 @@ fn assert_puzzle_depths(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let expected = [
         (1, 30..=30, -600, &["g5g2"][..]),
+        // The lower bound of 90 comes from fact 5 in expectations/uci-cutoff/README.md.
         (2, 90..=1308, -700, &["c5f2", "g2g3"][..]),
     ];
     assert_eq!(depths.len(), count);
@@ -226,7 +227,7 @@ fn infinite_search_reaches_the_production_depth_cap() -> Result<(), Box<dyn std:
 
 #[test]
 fn node_limit_counts_entries_even_when_a_depth_is_interrupted() {
-    // Independent counts from expectations/uci-cutoff/uci-depth-and-nodes.md.
+    // Independent counts from expectations/uci-depth-and-nodes/README.md.
     for (limit, totals) in [
         (0, &[][..]),
         (19, &[][..]),

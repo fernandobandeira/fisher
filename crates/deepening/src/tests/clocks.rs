@@ -112,7 +112,7 @@ fn black(
 
 #[test]
 fn time_for_the_move_uses_the_side_to_move_and_keeps_the_margin() -> Result<(), rules::FenError> {
-    // D49–D51 and the worked values in expectations/uci-go-clocks/README.md.
+    // D49–D51 and the time-for-the-move derivation in expectations/uci-go-clocks/README.md.
     // UCI represents a negative clock as zero before making the request.
     let cases = [
         white(60_000, None, None, 2000, 1990),
@@ -273,7 +273,7 @@ fn the_other_colors_clock_does_not_limit_white() {
 }
 
 // Exact depth-1 and depth-2 counts, then the exhaustive upper bounds from
-// expectations/uci-cutoff/uci-go-clocks.md.
+// expectations/uci-go-clocks/README.md.
 fn assert_default_starting_depths(entered: u64, reports: &[SearchReport]) {
     let [
         SearchReport::FinishedDepth(_),

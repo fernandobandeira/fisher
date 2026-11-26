@@ -749,6 +749,7 @@ fn depth_limit_with_command(command: Option<&'static str>, command_first: bool) 
     session.command("go depth 2")?;
     expect_puzzle_depth(&session, 1, -600, 30..=30, "g5g2")?;
     if !command_first {
+        // The lower bound of 90 comes from fact 5 in expectations/uci-cutoff/README.md.
         expect_puzzle_depth(&session, 2, -700, 90..=1308, "c5f2 g2g3")?;
         assert_eq!(session.reply()?, "bestmove c5f2\n");
     }

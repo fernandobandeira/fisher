@@ -1,6 +1,6 @@
 // The UCI observations in expectations/uci-go-clocks/README.md.
-// Deepening tests control time and count entries. This seam delivers the
-// corresponding reports and observes how the session handles them.
+// The scripted reports retain the totals from the search without cutoffs.
+// The private deepening tests check the counts from the real search.
 
 use super::*;
 

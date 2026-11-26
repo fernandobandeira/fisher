@@ -1,5 +1,13 @@
 # Searches on the clock
 
+Staged by fisher-4yn.1 on 2026-11-25 for a search that makes cutoffs: the
+successor of [the active file](../uci-go-clocks/README.md). fisher-4yn.2 moves it
+into place. [The staged sessions' README](../uci-cutoff/README.md#controlled-schedules)
+lists every value this file changes and derives each new number by hand
+from fisher-4yn. No value came from running fisher. Values that a search
+with cutoffs reaches by an order of moves nobody chose are marked as
+having no outside value.
+
 Derived on 2026-11-25 from the owner's answers to the clocks interview on
 fisher-5sg.10 (D17, recorded as fisher-r6y D49–D56), the [April 2006 UCI
 specification](https://backscattering.de/chess/uci/#gui-go),
@@ -60,6 +68,23 @@ maximum of the negated child scores (fisher-2aj rules 1–7). Repeat
 from the root for each depth and add each search's count to the total
 from the preceding depth (fisher-5sg decision 10).
 
+The first table below gives a search with cutoffs, and the second the
+search without cutoffs. A search with cutoffs plays a subset of the
+moves counted in the second table at each depth (Knuth and Moore, "An
+analysis of alpha-beta pruning", *Artificial Intelligence* 6, 1975), so
+its totals are at most those. Depth 1 keeps its count, because nothing bounds the
+root from above, and so does depth 2 in the two forced positions, whose
+root has one legal move. From the starting position depth 2 enters
+20 + 39 = 59 nodes (fisher-4yn): the first root move costs 1 + 20, and
+each of the other 19 costs 1 + 1, because no capture is possible within
+two plies. Every other total has no outside value with cutoffs.
+
+| Root in the sessions | Nodes in each search with cutoffs | Totals at depths 1–4 with cutoffs |
+|---|---|---|
+| Starting position | 20, 59, then no outside value | 20, 79, then no outside value (at most 9,762 and 216,365) |
+| Sole legal move `h8g8` | 1, 22, then no outside value; every search plays 1 node at ply 1 and 21 at ply 2 | 1, 23, then no outside value (at most 75 and 857) |
+| Sole legal move `h8h7` | 1, 26, then no outside value; every search plays 1 node at ply 1 and 25 at ply 2 | 1, 27, then no outside value (at most 98 and 1,397) |
+
 | Root in the sessions | Nodes by ply | Nodes in each search | Totals at depths 1–4 | Scores at depths 1–4 |
 |---|---|---|---|---|
 | Starting position | 20, 400, 8,902, 197,281 | 20, 420, 9,322, 206,603 | 20, 440, 9,762, 216,365 | cp 0 at each |
@@ -77,8 +102,10 @@ later-depth interruption schedules. Its FEN is
 `5r1k/pp4pp/5p2/1BbQp1r1/7K/7P/1PP3P1/3R3R b - - 3 26`.
 Independent enumeration gives 30 root moves and 1,248 replies.
 The sole best move at depth 1 is `g5g2`, scoring cp −600.
-Depth 2 would finish at 30 + 30 + 1,248 = 1,308 cumulative nodes with
-`c5f2`, scoring cp −700.
+Without cutoffs depth 2 would finish at 30 + 30 + 1,248 = 1,308
+cumulative nodes with `c5f2`, scoring cp −700. With cutoffs it finishes
+at no more than that, at a total with no outside value. It still plays
+all 30 root moves, so it has not finished after 29 of its nodes.
 
 ## Time for the move
 
@@ -150,11 +177,12 @@ reports and exactly one best-move response.
 
 | Root and command | Private deepening observations | Scripted uci observations |
 |---|---|---|
-| Starting position, White to move, `go btime 60000` ([active session](../uci/go-parameters.uci), D51/D28). | No White clock. Finish depths 1–4, with cumulative nodes 20, 440, 9,762, and 216,365, then return the depth-4 move. | Only `btime` is present. Emit depths 1–4, all cp 0, with those node totals and nps 10, 220, 4881, and 108182 at 2,000 ms. Emit a legal `bestmove` matching the depth-4 principal variation. |
-| `7k/8/5K1Q/8/8/8/8/8 b - - 0 1`, Black to move, `go wtime 60000` (D51/D28). | No Black clock. Finish depths 1–4, with cumulative nodes 1, 23, 75, and 857, then return `h8g8`. | Only `wtime` is present. Emit depths 1–4 with scores cp −900, cp −900, mate −1, and mate −1, with those node totals and nps 0, 11, 37, and 428 at 2,000 ms. Emit `bestmove h8g8`. |
+| Starting position, White to move, `go btime 60000` ([active session](../uci/go-parameters.uci), D51/D28). | No White clock. Finish depths 1–4, with cumulative nodes 20 and 79, then totals at depths 3 and 4 that have no outside value, then return the depth-4 move. | Only `btime` is present. Emit depths 1–4, all cp 0, with the totals 20, 440, 9,762 and 216,365 of the search without cutoffs and nps 10, 220, 4881, and 108182 at 2,000 ms. Emit a legal `bestmove` matching the depth-4 principal variation. |
+| `7k/8/5K1Q/8/8/8/8/8 b - - 0 1`, Black to move, `go wtime 60000` (D51/D28). | No Black clock. Finish depths 1–4, with cumulative nodes 1 and 23, then totals at depths 3 and 4 that have no outside value, then return `h8g8`. | Only `wtime` is present. Emit depths 1–4 with scores cp −900, cp −900, mate −1, and mate −1, with the totals 1, 23, 75 and 857 of the search without cutoffs and nps 0, 11, 37, and 428 at 2,000 ms. Emit `bestmove h8g8`. |
 
 The scores and node totals come from the independent search values
-above. D41 gives the displayed nps as the cumulative node count
+above. A scripted search emits the scripted reports, so cutoffs cannot
+change them: they keep the totals of the search without cutoffs. D41 gives the displayed nps as the cumulative node count
 divided by two here (floor of 1,000 × nodes ÷ 2,000 ms).
 
 ## Controlled schedules
@@ -185,13 +213,16 @@ search schedules.
 | Starting position, `go wtime 1230`. Start depth 1 at acceptance and finish it at 1 ms. Keep elapsed at 1 ms until depth 2 enters one node, then read 31 ms before its next node. | D49 starts depth 2 because 30 × 1 ms = 31 − 1 ms. Enter 21 nodes overall. D11 discards depth 2 and returns the depth-1 move. | Exactly depth 1, cp 0, 20 nodes at 1 ms and nps 20000, followed by one matching `bestmove`. |
 | Same command. Start depth 1 after a dispatch delay of 1 µs. Finish it at 1 ms + 1 µs, preserving the 1 ms depth duration. | Under D49 the forecast exceeds the remaining time by 1 µs (30 ms > 29.999 ms). Enter only 20 nodes and return the depth-1 move at that decision. | Same sole finished-depth response and best-move order as the equality case. The displayed time is 1 ms. |
 | Starting position, `go wtime 1500`. Enter one depth-1 node at elapsed 0. Hold elapsed at 39 ms for a reading before the second node, enter it, then read 40 ms before the third. | The D17 interruption rule permits the second node with 1 ms still available. At the deadline, enter no third node, report no finished depth and return the first legal move (D20, D11). | One matching `bestmove` with no `info`. |
-| Puzzle `001om`, `go btime 1500`. Finish depth 1 at 1 ms. Let depth 2 enter 1,277 of its 1,278 nodes before reading 40 ms at its last node boundary. | 30 ms fits in the remaining 39 ms (D49). Enter 1,307 nodes overall, discard depth 2 (D11), and return `g5g2`. | Exactly depth 1, cp −600, 30 nodes at 1 ms and nps 30000, PV `g5g2`, then `bestmove g5g2`. |
-| Starting position, `go wtime 3300`. Finish depths 1 and 2 at 1 and 4 ms. Start depth 3 at 4 ms, then read 100 ms after one node of depth 3. | Depth 2 took 3 ms. Its forecast is 90 ms, which fits in the remaining 96 ms (D49). Enter 441 nodes overall, discard depth 3, and return the depth-2 move (D11). | Exactly depths 1 and 2 with cp 0, cumulative nodes 20 and 440, and nps 20000 and 110000 at 1 and 4 ms. Then one `bestmove` matching depth 2. |
-| Starting position, `go wtime 2790`. Start depth 1 at acceptance and finish depths 1 and 2 at 1 and 5 ms. | With T = 83 ms, depth 1 took 1 ms, so 30 ms fits in 82 ms and depth 2 starts. Depth 2 took 4 ms, so 120 ms exceeds the remaining 78 ms (D49). Reusing depth 1's 30 ms forecast would admit depth 3. End at 5 ms with 440 cumulative nodes, zero depth-3 nodes, and the move of depth 2 (D5/D11). | Exactly depths 1 and 2, cp 0, 20 and 440 cumulative nodes, and nps 20000 and 88000 at 1 and 5 ms, then one `bestmove` matching depth 2. |
-| Starting position, `go wtime 2160`. Start depth 1 at acceptance and finish depths 1 and 2 at 2 and 3 ms. Admit one depth-3 node at 3 ms and read 62 ms before the next. | With T = 62 ms, depth 1 took 2 ms, so 60 ms fits the remaining 60 ms exactly. Depth 2 took 1 ms, so 30 ms fits in the remaining 59 ms (D49). Retaining the longest duration would forecast 60 ms and refuse depth 3. Enter 441 nodes overall, discard depth 3 at the deadline and return the depth-2 move (D11). | Exactly depths 1 and 2, cp 0, 20 and 440 cumulative nodes, and nps 10000 and 146666 at 2 and 3 ms, then one `bestmove` matching depth 2. |
+| Puzzle `001om`, `go btime 1500`. Finish depth 1 at 1 ms. Let depth 2 enter 29 nodes before reading 40 ms at the next node boundary. With cutoffs the last node boundary of depth 2 has no outside value. | 30 ms fits in the remaining 39 ms (D49). Enter 59 nodes overall, discard depth 2 (D11), and return `g5g2`. | Exactly depth 1, cp −600, 30 nodes at 1 ms and nps 30000, PV `g5g2`, then `bestmove g5g2`. |
+| Starting position, `go wtime 3300`. Finish depths 1 and 2 at 1 and 4 ms. Start depth 3 at 4 ms, then read 100 ms after one node of depth 3. | Depth 2 took 3 ms. Its forecast is 90 ms, which fits in the remaining 96 ms (D49). Enter 80 nodes overall, discard depth 3, and return the depth-2 move (D11). | Exactly depths 1 and 2 with cp 0, cumulative nodes 20 and 440, and nps 20000 and 110000 at 1 and 4 ms. Then one `bestmove` matching depth 2. |
+| Starting position, `go wtime 2790`. Start depth 1 at acceptance and finish depths 1 and 2 at 1 and 5 ms. | With T = 83 ms, depth 1 took 1 ms, so 30 ms fits in 82 ms and depth 2 starts. Depth 2 took 4 ms, so 120 ms exceeds the remaining 78 ms (D49). Reusing depth 1's 30 ms forecast would admit depth 3. End at 5 ms with 79 cumulative nodes, zero depth-3 nodes, and the move of depth 2 (D5/D11). | Exactly depths 1 and 2, cp 0, 20 and 440 cumulative nodes, and nps 20000 and 88000 at 1 and 5 ms, then one `bestmove` matching depth 2. |
+| Starting position, `go wtime 2160`. Start depth 1 at acceptance and finish depths 1 and 2 at 2 and 3 ms. Admit one depth-3 node at 3 ms and read 62 ms before the next. | With T = 62 ms, depth 1 took 2 ms, so 60 ms fits the remaining 60 ms exactly. Depth 2 took 1 ms, so 30 ms fits in the remaining 59 ms (D49). Retaining the longest duration would forecast 60 ms and refuse depth 3. Enter 80 nodes overall, discard depth 3 at the deadline and return the depth-2 move (D11). | Exactly depths 1 and 2, cp 0, 20 and 440 cumulative nodes, and nps 10000 and 146666 at 2 and 3 ms, then one `bestmove` matching depth 2. |
 
-For both rows the starting-position counts give 20 + (20 + 400) = 440
-nodes through depth 2, and the scripted nps uses D41. In the 83 ms case,
+Without cutoffs the starting-position counts give 20 + (20 + 400) = 440
+nodes through depth 2. With cutoffs the private search enters
+20 + (20 + 39) = 79 (fisher-4yn), and one depth-3 node makes 80. The
+scripted reports keep 440, because a scripted search emits them, and
+the scripted nps uses D41. In the 83 ms case,
 if depth 3 enters its first node, advance elapsed time to 83 ms before
 its next node so the unexpected entry fails the check without
 depending on a hang timeout.
@@ -209,14 +240,14 @@ The last case exercises the distinction in D50 between a time given by
 |---|---|---|
 | Starting position, `go wtime 1500 movetime 80` and `go movetime 80 wtime 1500`. Finish depth 1 at 2 ms. | The clock's time for the move is 50 ms and T is 40 ms (D50). The forecast is 30 × 2 = 60 ms, exceeding the clock's remaining 38 ms. D49 and the D52 clarification end the search before the 70 ms movetime deadline. Enter 20 nodes, all at depth 1, and return its move at 2 ms. | Exactly depth 1, cp 0, 20 nodes at 2 ms and nps 10000, then one matching `bestmove`. |
 | Starting position, `go wtime 1500 depth 2` and `go depth 2 wtime 1500`. Finish depth 1 at 2 ms. | The same 50 ms and 40 ms give a remaining 38 ms. A forecast of 60 ms ends the search under D49/D52 before the depth limit. Enter 20 nodes, all at depth 1, and return its move at 2 ms. | Exactly depth 1, cp 0, 20 nodes at 2 ms and nps 10000, then one matching `bestmove`. |
-| Starting position, `go wtime 1500 nodes 440` and `go nodes 440 wtime 1500`. Finish depth 1 at 2 ms. | The same 60 ms forecast exceeds the remaining 38 ms (D49/D52). End at 2 ms with 20 nodes of the 440 allowed. Enter no depth-2 node and return the depth-1 move. | Exactly depth 1, cp 0, 20 nodes at 2 ms and nps 10000, then one matching `bestmove`. |
+| Starting position, `go wtime 1500 nodes 79` and `go nodes 79 wtime 1500` in private `deepening`. The scripted `uci` case keeps `nodes 440` in both orders, because its reports are fixed inputs and it checks only that the request carries both limits. Finish depth 1 at 2 ms. | The same 60 ms forecast exceeds the remaining 38 ms (D49/D52). End at 2 ms with 20 nodes of the 79 allowed, the total at which depth 2 would finish. Enter no depth-2 node and return the depth-1 move. | Exactly depth 1, cp 0, 20 nodes at 2 ms and nps 10000, then one matching `bestmove`. |
 | Starting position, `go wtime 1500 depth 1`. Finish depth 1 at 1 ms. | Depth wins with 39 ms left. The forecast of 30 ms would permit depth 2. Enter exactly 20 nodes and return the depth-1 move. | Exactly depth 1, cp 0, 20 nodes at 1 ms and nps 20000, then one matching `bestmove`. |
 | Same command. After one node at 0, read 40 ms before entering the next node. | Clock wins before the depth limit. Enter one node, discard depth 1 and return the first legal move (D20). | One matching `bestmove` with no `info`. |
 | Starting position, `go wtime 1500 nodes 19`. Hold elapsed at 1 ms. | Nodes win. Exactly 19 of the 20 nodes needed for depth 1 are entered. Return the first legal move (D20). | One matching `bestmove` with no `info`. |
 | Same command. After one node at 0, read 40 ms before entering the next node. | Clock wins before node 19. Enter one node, discard depth 1 and return the first legal move (D20). | One matching `bestmove` with no `info`. |
 | Starting position, `go wtime 3300 movetime 50`. Finish depth 1 at 2 ms. After one depth-2 node, read 39 ms before the next, enter it, then read 40 ms before the third. | D49 admits depth 2 against the clock's remaining 98 ms (60 ≤ 98). D52 applies movetime independently. It wins at 40 ms, ahead of the clock's 100 ms deadline. Enter 22 nodes overall and return the depth-1 move. | Exactly depth 1, cp 0, 20 nodes at 2 ms and nps 10000, then one matching `bestmove`. |
 | Starting position, `go wtime 1230 movetime 50`. Finish depth 1 at 1 ms. After one depth-2 node, read 30 ms before the next, enter it, then read 31 ms before the third. | The forecast permits depth 2 at equality. Clock wins at 31 ms, ahead of the 40 ms movetime deadline. Enter 22 nodes overall and return the depth-1 move. | Exactly depth 1, cp 0, 20 nodes at 1 ms and nps 20000, then one matching `bestmove`. |
-| Puzzle `001om`, `go infinite btime 1500`. Use the same controlled expiry inside depth 2 as above. | The clock ends the work at 40 ms with 1,307 nodes entered. Only depth 1 finishes and the result is `g5g2`. | Send the same depth-1 report and deliver the best-move report. Require `readyok` for `isready` before sending `stop`. Under D52 and UCI go infinite, only then require one `bestmove g5g2`. |
+| Puzzle `001om`, `go infinite btime 1500`. Use the same controlled expiry inside depth 2 as above. | The clock ends the work at 40 ms with 59 nodes entered. Only depth 1 finishes and the result is `g5g2`. | Send the same depth-1 report and deliver the best-move report. Require `readyok` for `isready` before sending `stop`. Under D52 and UCI go infinite, only then require one `bestmove g5g2`. |
 | Starting position, `go movetime 50` alone. Finish depth 1 at 2 ms. Enter one node of depth 2, read 39 ms before the next node, enter it, then read 40 ms before the third. | Movetime permits depth 2 even though 30 × 2 ms exceeds the remaining 38 ms. At 39 ms there is still work and no final report. At 40 ms enter no further node, discard depth 2 and return the depth-1 move (D11, D31, D50 and UCI go movetime). | Exactly depth 1, cp 0, 20 nodes at 2 ms and nps 10000. Hold the scripted final report through `isready` and `readyok`, then release it and require one matching `bestmove`. |
 
 ## Negative values on other go parameters
@@ -237,9 +268,10 @@ absent and no diagnostic, then the responses for the default search.
 Assert absence directly at this seam, since a value of zero could
 have the same effect as absence for an increment or moves to go.
 With the expected request, private `deepening` observes the D28 default
-depth of 4 and cumulative nodes 20, 440, 9,762, and 216,365. Script
-the same four cp 0 reports and one legal `bestmove` matching depth 4,
-using the independent starting-position values above.
+depth of 4 and cumulative nodes 20 and 79, then totals at depths 3 and 4
+that have no outside value. Script four cp 0 reports with the totals
+20, 440, 9,762 and 216,365 of the search without cutoffs and one legal
+`bestmove` matching depth 4.
 
 | Command | Expected parameter handling | Source |
 |---|---|---|

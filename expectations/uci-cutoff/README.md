@@ -11,22 +11,20 @@ for the fact that a search with cutoffs plays a subset of the moves the
 search without cutoffs plays at each depth. No value here came from running
 fisher.
 
-The runner does not select these sessions, and no test reads the staged
-schedules. fisher-4yn.2 moves them into place when the search makes
-cutoffs. The two successor sessions replace the sessions of the same name
-in [`uci/`](../uci/), and `startpos-depth-2.uci` gets a test of its own.
-Each staged schedule file replaces the README of the directory it is named
-after (see [Controlled schedules](#controlled-schedules)).
+fisher-4yn.2 moved the three sessions into [`uci/`](../uci/). The two
+successor sessions replaced the ones of the same name, and
+`startpos-depth-2.uci` has a test of its own. The four staged schedule
+files replaced the READMEs linked below.
 
-| Staged session | Replaces | What changes |
-|---|---|---|
-| [`startpos-depth-2.uci`](startpos-depth-2.uci) | Nothing | New. From the starting position, `go depth 2` reports depth 1 with cp 0 and 20 nodes, then depth 2 with cp 0 and 79 nodes. |
-| [`go-nodes.uci`](go-nodes.uci) | [`uci/go-nodes.uci`](../uci/go-nodes.uci) | From the starting position, the limits 439 and 440 become 78 and 79, and depth 2 reports exactly 79 nodes. For the forced position, the 3137 case is dropped and the 3138 case accepts depths beyond 5. |
-| [`go-depth.uci`](go-depth.uci) | [`uci/go-depth.uci`](../uci/go-depth.uci) | The node limit beside depth 1 becomes 79 instead of 440. |
-| [`uci-depth-and-nodes.md`](uci-depth-and-nodes.md) | [`uci-depth-and-nodes/README.md`](../uci-depth-and-nodes/README.md) | See [Controlled schedules](#controlled-schedules). |
-| [`uci-deepen-until-stop.md`](uci-deepen-until-stop.md) | [`uci-deepen-until-stop/README.md`](../uci-deepen-until-stop/README.md) | See [Controlled schedules](#controlled-schedules). |
-| [`uci-go-movetime.md`](uci-go-movetime.md) | [`uci-go-movetime/README.md`](../uci-go-movetime/README.md) | See [Controlled schedules](#controlled-schedules). |
-| [`uci-go-clocks.md`](uci-go-clocks.md) | [`uci-go-clocks/README.md`](../uci-go-clocks/README.md) | See [Controlled schedules](#controlled-schedules). |
+| Active path | What changed |
+|---|---|
+| [`startpos-depth-2.uci`](../uci/startpos-depth-2.uci) | New. From the starting position, `go depth 2` reports depth 1 with cp 0 and 20 nodes, then depth 2 with cp 0 and 79 nodes. |
+| [`uci/go-nodes.uci`](../uci/go-nodes.uci) | From the starting position, the limits 439 and 440 become 78 and 79, and depth 2 reports exactly 79 nodes. For the forced position, the 3137 case is dropped and the 3138 case accepts depths beyond 5. |
+| [`uci/go-depth.uci`](../uci/go-depth.uci) | The node limit beside depth 1 becomes 79 instead of 440. |
+| [`uci-depth-and-nodes/README.md`](../uci-depth-and-nodes/README.md) | See [Controlled schedules](#controlled-schedules). |
+| [`uci-deepen-until-stop/README.md`](../uci-deepen-until-stop/README.md) | See [Controlled schedules](#controlled-schedules). |
+| [`uci-go-movetime/README.md`](../uci-go-movetime/README.md) | See [Controlled schedules](#controlled-schedules). |
+| [`uci-go-clocks/README.md`](../uci-go-clocks/README.md) | See [Controlled schedules](#controlled-schedules). |
 
 ## The node totals
 
@@ -55,7 +53,7 @@ legal move in `position-moves.uci`. They keep the values they had before
 fisher-4yn.1.
 
 The starting position at depth 2 has an exact total of 79, derived in the
-header of [`startpos-depth-2.uci`](startpos-depth-2.uci) and in fisher-4yn:
+header of [`startpos-depth-2.uci`](../uci/startpos-depth-2.uci) and in fisher-4yn:
 20 nodes at depth 1, then 1 + 20 for the first root move and 1 + 1 for each
 of the other 19, because no capture is possible within two plies and the
 first reply to each later root move already reaches the bound. The count

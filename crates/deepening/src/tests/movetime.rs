@@ -356,7 +356,7 @@ fn counts_entries_until_nodes_or_movetime_refuses_entry() {
 
 #[test]
 fn explicit_depth_ends_search_before_movetime() {
-    // First "Several limits" row in expectations/uci-go-movetime/README.md.
+    // "Several limits" depth-1 case in expectations/uci-go-movetime/README.md.
     // Either UCI command order produces these same limits.
     let mut request = timed_request(Position::starting(), 50, false);
     request.limits.depth = Some(1);

@@ -75,7 +75,7 @@ Below the table, list anything still undecided: a claim nobody could test, a fin
 - **Always:** perft against published counts, comparison with a reference engine on random positions, invariants as property tests.
 - **For every change to search, evaluation or time management:** the [bench signature](process.md#recording-the-bench-signature), and an SPRT result when the claim is strength.
 - **Pull requests:** mutation-test the whole workspace on the merge commit. Require per-crate region coverage at or above the [reviewed floors](../.cargo/coverage-floors.json).
-- **Weekly:** mutation-test the whole workspace. Recheck every reviewed equivalent mutant and require a current proof for each survivor. Run the [published suite](../scripts/check-published-suite) in release mode at the approved deep perft depths, with all 100 published mates and both four-ply node tests. Run the [real-clock match](../scripts/check-clock-match) at `10/1`.
+- **Weekly:** mutation-test the whole workspace. Recheck every reviewed equivalent mutant and require a current proof for each survivor. Run the [published suite](../scripts/check-published-suite) in release mode at the approved deep perft depths, with all 100 published mates, the four-ply node test for plain minimax, and the comparisons against plain minimax on the six perft positions, three seeded walk endpoints and all 100 published mates. Run the [real-clock match](../scripts/check-clock-match) at `10/1`.
 
 Mutation and coverage judge each crate using only its unit and integration tests.
 

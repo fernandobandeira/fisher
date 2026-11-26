@@ -65,7 +65,7 @@ fn reports_terminal_positions_without_searching_a_depth() -> Result<(), Box<dyn 
 
 #[test]
 fn reports_the_finished_depth_before_the_best_move() -> Result<(), Box<dyn Error>> {
-    // The node bounds are from expectations/uci-cutoff/uci-depth-and-nodes.md.
+    // The node bounds are from expectations/uci-depth-and-nodes/README.md.
     let reports = reports_for("7k/8/5K1Q/8/8/8/8/8 b - - 0 1")?;
     let (depths, best_move) = forced_move_reports(&reports)?;
     assert_eq!(depths.len(), 4);
@@ -161,7 +161,7 @@ fn forced_move_reports(
     };
     assert_eq!(format!("{}{}", best_move.from(), best_move.to()), "h8g8");
 
-    // Node totals from expectations/uci-cutoff/uci-depth-and-nodes.md.
+    // Node totals from expectations/uci-depth-and-nodes/README.md.
     let bounds = [1..=1, 23..=23, 24..=75, 25..=857, 26..=3138];
     let mut previous_nodes = 0;
     let mut finished = Vec::new();

@@ -1,4 +1,4 @@
-use std::convert::Infallible;
+use std::{convert::Infallible, ops::ControlFlow};
 
 use rules::{Move, PieceKind, Position, Square};
 
@@ -22,7 +22,7 @@ pub struct SearchResult {
     pub principal_variation: Vec<Move>,
 }
 
-/// Searches every legal move to the given depth in plies.
+/// Searches to the given depth in plies with alpha-beta pruning.
 /// At depth zero the result has no best move, even if legal moves exist.
 /// The score is from the root's side to move, and nodes exclude the root.
 #[must_use]
@@ -53,7 +53,15 @@ fn search_depth<E>(
     let mut nodes = 0;
     // Reuse one buffer per ply across sibling searches.
     let mut variations: Vec<_> = (0..depth).map(|_| Vec::new()).collect();
-    search(position, 0, &mut nodes, &mut variations, before_node).map(|score| {
+    search(
+        position,
+        0,
+        (-i32::MAX, i32::MAX),
+        &mut nodes,
+        &mut variations,
+        before_node,
+    )
+    .map(|score| {
         let principal_variation = variations.into_iter().next().unwrap_or_default();
         SearchResult {
             best_move: principal_variation.first().copied(),
@@ -82,6 +90,7 @@ fn mate_within_depth_or_centipawns(score: i32, depth: u8) -> Score {
 fn search<E>(
     position: &Position,
     ply: u8,
+    (mut alpha, beta): (i32, i32),
     nodes: &mut u64,
     variations: &mut [Vec<Move>],
     before_node: &mut impl FnMut() -> Result<(), E>,
@@ -90,37 +99,53 @@ fn search<E>(
         return Ok(material(position));
     };
     best_variation.clear();
-    let mut best_score = i32::MIN;
-    position
-        .legal_moves()
-        .into_iter()
-        .try_for_each(|movement| {
-            before_node().and_then(|()| {
-                *nodes += 1;
-                search(&movement.play(), ply + 1, nodes, replies, before_node).map(|score| {
-                    let score = -score;
-                    if score > best_score {
-                        best_score = score;
-                        best_variation.clear();
-                        best_variation.push(movement);
-                        if let Some(reply) = replies.first() {
-                            best_variation.extend_from_slice(reply);
-                        }
-                    }
-                })
-            })
-        })
-        .map(|()| {
-            if best_variation.is_empty() {
-                if position.is_in_check() {
-                    i32::from(ply) - CHECKMATE
-                } else {
-                    0
+    let moves = position.legal_moves();
+    if moves.is_empty() {
+        return Ok(if position.is_in_check() {
+            i32::from(ply) - CHECKMATE
+        } else {
+            0
+        });
+    }
+
+    let mut best_score = -i32::MAX;
+    let stopped = moves.into_iter().try_for_each(|movement| {
+        let reply = before_node().and_then(|()| {
+            *nodes += 1;
+            search(
+                &movement.play(),
+                ply + 1,
+                (-beta, -alpha),
+                nodes,
+                replies,
+                before_node,
+            )
+        });
+        reply.map_or_else(
+            |error| ControlFlow::Break(Err(error)),
+            |reply_score| {
+                let score = -reply_score;
+                if score >= beta {
+                    // This score suffices for the cutoff. Its variation is not used.
+                    return ControlFlow::Break(Ok(score));
                 }
-            } else {
-                best_score
-            }
-        })
+                if score > best_score {
+                    best_score = score;
+                    best_variation.clear();
+                    best_variation.push(movement);
+                    if let Some(reply) = replies.first() {
+                        best_variation.extend_from_slice(reply);
+                    }
+                }
+                alpha = alpha.max(score);
+                ControlFlow::Continue(())
+            },
+        )
+    });
+    match stopped {
+        ControlFlow::Break(result) => result,
+        ControlFlow::Continue(()) => Ok(best_score),
+    }
 }
 
 fn material(position: &Position) -> i32 {

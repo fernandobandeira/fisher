@@ -87,6 +87,11 @@ fn go_depth() -> io::Result<()> {
 }
 
 #[test]
+fn startpos_depth_two() -> io::Result<()> {
+    play_transcript("startpos-depth-2")
+}
+
+#[test]
 fn go_nodes() -> io::Result<()> {
     play_transcript("go-nodes")
 }

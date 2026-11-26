@@ -195,7 +195,7 @@ fn movetime_reports_no_more_depths_after_the_scripted_expiry() -> io::Result<()>
     finish(session)
 }
 
-// The "Several limits" schedules in expectations/uci-go-movetime/README.md.
+// The scripted depth-1 case under "Several limits" in expectations/uci-go-movetime/README.md.
 #[test]
 fn depth_and_movetime_pass_through_in_both_orders() -> io::Result<()> {
     for command in ["go depth 1 movetime 50", "go movetime 50 depth 1"] {

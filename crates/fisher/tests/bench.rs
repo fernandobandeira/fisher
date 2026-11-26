@@ -1,18 +1,19 @@
-use std::{error::Error, process::Command};
+use std::{ffi::OsStr, io, process::Command};
 
 #[test]
-fn bench_argument_reports_the_published_signature_and_exits() -> Result<(), Box<dyn Error>> {
+fn bench_argument_reports_the_library_signature_and_exits() -> io::Result<()> {
     let output = Command::new(env!("CARGO_BIN_EXE_fisher"))
         .arg("bench")
         .stdin(std::process::Stdio::null())
         .output()?;
     assert!(output.status.success(), "{output:?}");
     assert_eq!(output.stderr, [], "{output:?}");
-    // Sum of the published counts at plies 1 through 4 in expectations/perft.epd.
-    assert_eq!(
-        String::from_utf8(output.stdout)?.lines().last(),
-        Some("Nodes searched  : 11024485"),
-    );
+    let mut expected = Vec::new();
+    assert!(bench::run_if_requested(
+        Some(OsStr::new("bench")),
+        &mut expected
+    )?);
+    assert_eq!(output.stdout, expected);
     Ok(())
 }
 

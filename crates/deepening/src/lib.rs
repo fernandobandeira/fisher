@@ -83,7 +83,7 @@ struct SearchLimits<'a> {
 impl<'a> SearchLimits<'a> {
     const MARGIN: Duration = Duration::from_millis(10);
     const NODES_BETWEEN_READINGS: u64 = 1024;
-    const DEPTH_GROWTH_FACTOR: u32 = 30;
+    const DEPTH_GROWTH_FACTOR: u32 = 15;
 
     fn new(request: &'a SearchRequest, depth_cap: u8) -> Self {
         let limits = &request.limits;

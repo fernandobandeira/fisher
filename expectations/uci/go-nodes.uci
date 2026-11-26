@@ -1,17 +1,38 @@
-# fisher-5sg.5, 2026-11-25. See README.md for derivation.
-# Sources: April 2006 UCI specification https://backscattering.de/chess/uci/,
+# Staged by fisher-4yn.1 on 2026-11-25 for a search that makes cutoffs.
+# Successor of uci/go-nodes.uci (fisher-5sg.5, 2026-11-25), whose sources stand:
+# April 2006 UCI specification https://backscattering.de/chess/uci/,
 # fisher-8ie, fisher-r6y D20, D24, D28 and D41, fisher-5sg decisions 2–6 and 10.
-# Perft: expectations/perft.epd. Independent minimax: python-chess 1.11.2.
-# Full info spelling: Stockfish sf_19 (edb0d9d), as cited in expectations/README.md.
-# fisher-4yn.1, 2026-11-25: a node total at depth 2 or more reads {nodes},
-# except below a root with one legal move. Once the search makes cutoffs,
-# such a total depends on the order Position::legal_moves returns moves in,
-# which nobody chose (fisher-4yn, D36 and D38). A root with one legal move
-# puts no bound on the replies, so depth 2 there plays every one and its
-# total stays exact (owner decision on PR #74). Scores, depths, principal
-# variations, bestmove and the depth-1 totals (the number of legal moves at
-# the root) stay exact. A node count in these comments describes the search
-# without cutoffs before it.
+# Perft: expectations/perft.epd. Full info spelling: Stockfish sf_19 (edb0d9d),
+# as cited in expectations/README.md. See README.md beside this session.
+#
+# Every node total at depth 2 or more reads {nodes}, as in uci/, except the
+# starting position at depth 2 (79) and the depth-2 total below the forced
+# position's sole legal move (23: no bound on the replies, so every one is
+# played; owner decision on PR #74). The startpos limits 439 and 440 change, the
+# 3137 case is dropped and the 3138 case accepts further depths.
+#
+# 439 and 440 become 78 and 79 (fisher-4yn, "Nodes" and "Expected sessions").
+# From the starting position, depth 1 enters the 20 root moves. Depth 2
+# enters 59 nodes: every root move has 20 replies and no capture is possible
+# within two plies, so every position two plies in has material 0. The
+# first root move costs 1 + 20 nodes and sets the root's score to cp 0.
+# Each of the other 19 costs 1 + 1, because its first reply already scores
+# cp 0, which proves the root move no better than the first: a cutoff. The
+# count does not depend on the order of moves. Total 20 + 59 = 79. A limit
+# of 78 interrupts depth 2 before its last node; 79 lets it finish. A search
+# without cutoffs enters 440 and fails the 79 case.
+#
+# The depth-5 boundary of the forced position (3137 and 3138) has no
+# total a search with cutoffs must reach: at depths 3 to 5 its count depends
+# on the order of moves. The 3137 case is dropped. The 3138 case stays, because
+# a search with cutoffs plays a subset of the moves the search without
+# cutoffs plays at each depth (Knuth and Moore, "An analysis of alpha-beta
+# pruning", Artificial Intelligence 6, 1975), so its total through depth 5 is
+# at most 3138 and depth 5 must finish. Deeper depths may also finish; the
+# repeated record accepts them. bestmove stays h8g8, the only legal move.
+# The owner decided this on 2026-11-25 (PR #74): drop 3137, keep 3138 and
+# accept depth 5 or deeper. Whether the score at each depth is correct is
+# left to the comparison with plain minimax in fisher-4yn.4.
 > position startpos
 > go nodes 0
 < bestmove {legal}
@@ -27,13 +48,15 @@
 < info depth 1 multipv 1 score cp 0 nodes 20 nps {nps} time {time} pv {pv}
 < bestmove {legal}
 
-> go nodes 439
+# One node short of depth 2 (fisher-4yn: 439 becomes 78).
+> go nodes 78
 < info depth 1 multipv 1 score cp 0 nodes 20 nps {nps} time {time} pv {pv}
 < bestmove {legal}
 
-> go nodes 440
+# The exact cumulative limit (fisher-4yn: 440 becomes 79).
+> go nodes 79
 < info depth 1 multipv 1 score cp 0 nodes 20 nps {nps} time {time} pv {pv}
-< info depth 2 multipv 1 score cp 0 nodes {nodes} nps {nps} time {time} pv {pv}
+< info depth 2 multipv 1 score cp 0 nodes 79 nps {nps} time {time} pv {pv}
 < bestmove {legal}
 
 > position fen 7k/8/5K1Q/8/8/8/8/8 b - - 0 1
@@ -41,20 +64,14 @@
 > go nodes 0
 < bestmove h8g8
 
-# One node short of depth 5, then the exact cumulative limit.
-> go nodes 3137
-< info depth 1 multipv 1 score cp -900 nodes 1 nps {nps} time {time} pv h8g8
-< info depth 2 multipv 1 score cp -900 nodes 23 nps {nps} time {time} pv {pv}
-< info depth 3 multipv 1 score mate -1 nodes {nodes} nps {nps} time {time} pv h8g8 h6g7
-< info depth 4 multipv 1 score mate -1 nodes {nodes} nps {nps} time {time} pv h8g8 h6g7
-< bestmove h8g8
-
+# A limit of 3138 finishes at least depth 5 (Knuth and Moore 1975, above).
 > go nodes 3138
 < info depth 1 multipv 1 score cp -900 nodes 1 nps {nps} time {time} pv h8g8
 < info depth 2 multipv 1 score cp -900 nodes 23 nps {nps} time {time} pv {pv}
 < info depth 3 multipv 1 score mate -1 nodes {nodes} nps {nps} time {time} pv h8g8 h6g7
 < info depth 4 multipv 1 score mate -1 nodes {nodes} nps {nps} time {time} pv h8g8 h6g7
 < info depth 5 multipv 1 score mate -1 nodes {nodes} nps {nps} time {time} pv h8g8 h6g7
+<* info depth {depth} multipv 1 score {score} nodes {nodes} nps {nps} time {time} pv {pv}
 < bestmove h8g8
 
 # The sole node of depth 1 uses the entire limit. Hold the move (decision 5).

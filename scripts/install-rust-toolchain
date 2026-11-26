@@ -1,0 +1,40 @@
+#!/usr/bin/env python3
+"""Install the Rust toolchain used by a GitHub Actions job."""
+
+import os
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+import tomllib
+
+
+def install(toolchain, environment):
+    channel = toolchain["channel"]
+    command = ["rustup", "toolchain", "install", channel, "--profile", "minimal", "--no-self-update"]
+    for component in toolchain.get("components", []):
+        command.extend(["--component", component])
+    for target in toolchain.get("targets", []):
+        command.extend(["--target", target])
+    print(f"Installing Rust toolchain {channel}", flush=True)
+    try:
+        subprocess.run(command, env=environment, check=True)
+    except (OSError, subprocess.CalledProcessError) as error:
+        raise ValueError(f"Rust toolchain {channel} installation failed: {error}") from error
+
+
+def main():
+    manifest = Path("rust-toolchain.toml").read_text(encoding="utf-8")
+    toolchain = tomllib.loads(manifest)["toolchain"]
+    rustup_home = tempfile.mkdtemp(prefix="fisher-rustup.", dir=os.environ["RUNNER_TEMP"])
+    environment = dict(os.environ, RUSTUP_HOME=rustup_home)
+    install(toolchain, environment)
+    with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as github_env:
+        print(f"RUSTUP_HOME={rustup_home}", file=github_env)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (KeyError, OSError, ValueError, subprocess.CalledProcessError) as error:
+        sys.exit(f"::error::Could not install the CI Rust toolchain. {error}")

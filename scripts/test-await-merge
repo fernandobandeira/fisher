@@ -1,0 +1,235 @@
+#!/usr/bin/env python3
+"""Exercise await-merge with a stand-in gh and no network."""
+
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+import textwrap
+import unittest
+
+
+SCRIPT = Path(__file__).resolve().with_name("await-merge")
+VIEW = ["pr", "view", "42", "--json",
+        "state,mergeStateStatus,mergeable,baseRefName,headRefOid,statusCheckRollup,isDraft"]
+BASE = ["api", "repos/{owner}/{repo}/git/ref/heads/main", "--jq", ".object.sha"]
+UPDATE = ["pr", "update-branch", "42"]
+FIRST_BASE = "a" * 40
+SECOND_BASE = "b" * 40
+
+STAND_IN = """\
+    import json
+    from pathlib import Path
+    import sys
+
+    args = sys.argv[1:]
+    log = Path("calls")
+    count = len(log.read_text().splitlines()) if log.exists() else 0
+    with log.open("a") as stream:
+        stream.write(json.dumps(args) + "\\n")
+    steps = json.loads(Path("steps").read_text())
+    expected, output = steps[min(count, len(steps) - 1)]
+    if args != expected:
+        sys.exit(f"Unexpected gh call: {args!r}, expected {expected!r}")
+    if isinstance(output, dict) and "error" in output:
+        sys.exit(output["error"])
+    print(output if isinstance(output, str) else json.dumps(output))
+"""
+
+
+def pull(state="OPEN", merge_state="BLOCKED", mergeable="MERGEABLE",
+         head="first-head", checks=(), base="main", draft=False):
+    return VIEW, {
+        "state": state, "mergeStateStatus": merge_state, "mergeable": mergeable,
+        "baseRefName": base, "headRefOid": head, "statusCheckRollup": checks, "isDraft": draft,
+    }
+
+
+def check(name, status, conclusion="", started="2026-11-26T01:00:00Z", job=100):
+    return {
+        "__typename": "CheckRun", "name": name, "status": status,
+        "conclusion": conclusion, "startedAt": started,
+        "detailsUrl": f"https://github.com/fernandobandeira/fisher/actions/runs/42/job/{job}",
+    }
+
+
+class AwaitMergeTest(unittest.TestCase):
+    def run_script(self, steps, timeout="4"):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fake = root / "gh"
+            fake.write_text(f"#!{sys.executable}\n" + textwrap.dedent(STAND_IN))
+            fake.chmod(0o755)
+            (root / "steps").write_text(json.dumps(steps))
+            result = subprocess.run(
+                (sys.executable, str(SCRIPT), "42", "--timeout", timeout, "--interval", "0.01"),
+                cwd=root, env={**os.environ, "PATH": f"{root}{os.pathsep}{os.environ['PATH']}"},
+                capture_output=True, text=True, timeout=float(timeout) + 1.5,
+            )
+            calls = [json.loads(line) for line in (root / "calls").read_text().splitlines()]
+            return result, calls
+
+    def assert_steps(self, steps, status, message):
+        result, calls = self.run_script(steps)
+        self.assertEqual(result.returncode, status, result)
+        self.assertIn(message, result.stdout + result.stderr)
+        self.assertEqual(calls, [args for args, _ in steps])
+
+    def test_updates_once_for_each_main_commit_and_ignores_old_head_failure(self):
+        behind = pull(merge_state="BEHIND")
+        stale = pull(merge_state="BEHIND", checks=[check("mutation", "COMPLETED", "CANCELLED")])
+        next_head = pull(merge_state="BEHIND", head="second-head")
+        self.assert_steps([
+            behind, (BASE, FIRST_BASE), (UPDATE, ""),
+            stale, (BASE, FIRST_BASE),
+            next_head, (BASE, SECOND_BASE), (UPDATE, ""),
+            pull(state="MERGED", merge_state="UNKNOWN", head="third-head"),
+        ], 0, "merged")
+
+    def test_already_merged(self):
+        self.assert_steps([pull(state="MERGED", merge_state="UNKNOWN")], 0, "merged")
+
+    def test_closed(self):
+        self.assert_steps([pull(state="CLOSED")], 1, "closed without merging")
+
+    def test_required_check_failure_after_head_changes(self):
+        for conclusion in ("FAILURE", "CANCELLED", "TIMED_OUT"):
+            with self.subTest(conclusion=conclusion):
+                self.assert_steps([
+                    pull(merge_state="BEHIND"), (BASE, FIRST_BASE), (UPDATE, ""),
+                    pull(head="second-head", checks=[check("coverage", "COMPLETED", conclusion)]),
+                ], 1, f"required check coverage finished with {conclusion} at second-head")
+
+    def test_waits_for_pending_checks_and_ignores_other_results(self):
+        checks = [
+            check("mutation", "QUEUED"), check("coverage", "IN_PROGRESS"),
+            check("mutation-part (0)", "COMPLETED", "FAILURE"),
+            {"__typename": "StatusContext", "context": "check", "state": "FAILURE"},
+        ]
+        self.assert_steps([
+            pull(checks=checks), pull(state="MERGED", merge_state="UNKNOWN"),
+        ], 0, "merged")
+
+    def test_newest_required_check_supersedes_older_failure(self):
+        older = check("guard-change", "COMPLETED", "FAILURE")
+        for status, conclusion in (("COMPLETED", "SUCCESS"), ("IN_PROGRESS", "")):
+            newer = check("guard-change", status, conclusion, "2026-11-26T01:01:00Z")
+            for checks in ([older, newer], [newer, older]):
+                with self.subTest(status=status, checks=checks):
+                    self.assert_steps([
+                        pull(checks=checks), pull(state="MERGED", merge_state="UNKNOWN"),
+                    ], 0, "merged")
+
+    def test_unstarted_queued_run_supersedes_failure(self):
+        older = check("guard-change", "COMPLETED", "FAILURE", job=99)
+        queued = check("guard-change", "QUEUED", started="0001-01-01T00:00:00Z", job=100)
+        self.assert_steps([
+            pull(checks=[older, queued]), pull(state="MERGED", merge_state="UNKNOWN"),
+        ], 0, "merged")
+
+    def test_required_runs_started_at_same_time_use_numeric_job_id(self):
+        for newer_conclusion in ("SUCCESS", "FAILURE"):
+            older_conclusion = "FAILURE" if newer_conclusion == "SUCCESS" else "SUCCESS"
+            older = check("guard-change", "COMPLETED", older_conclusion, job=99)
+            newer = check("guard-change", "COMPLETED", newer_conclusion, job=100)
+            for checks in ([older, newer], [newer, older]):
+                with self.subTest(newer_conclusion=newer_conclusion, checks=checks):
+                    if newer_conclusion == "SUCCESS":
+                        self.assert_steps([
+                            pull(checks=checks), pull(state="MERGED", merge_state="UNKNOWN"),
+                        ], 0, "merged")
+                    else:
+                        self.assert_steps([
+                            pull(checks=checks),
+                        ], 1, "required check guard-change finished with FAILURE")
+
+    def test_newer_required_failure_ends_wait(self):
+        older = check("guard-change", "COMPLETED", "SUCCESS")
+        newer = check("guard-change", "COMPLETED", "FAILURE", "2026-11-26T01:01:00Z")
+        self.assert_steps([
+            pull(checks=[older, newer]),
+        ], 1, "required check guard-change finished with FAILURE")
+
+    def test_first_failed_read_reports_github_error_and_stops(self):
+        result, calls = self.run_script([
+            (VIEW, {"error": "Could not resolve pull request #42"}),
+            pull(state="MERGED", merge_state="UNKNOWN"),
+        ])
+        self.assertEqual(result.returncode, 1, result)
+        self.assertIn("Could not resolve pull request #42", result.stderr)
+        self.assertEqual(calls, [VIEW])
+
+    def test_later_failed_read_warns_with_github_error_and_keeps_waiting(self):
+        result, calls = self.run_script([
+            pull(), (VIEW, {"error": "temporary GitHub error\ntry again"}),
+            pull(state="MERGED", merge_state="UNKNOWN"),
+        ])
+        self.assertEqual(result.returncode, 0, result)
+        self.assertIn("merged", result.stdout)
+        self.assertEqual(len(result.stderr.splitlines()), 1, result)
+        self.assertIn("Warning:", result.stderr)
+        self.assertIn("temporary GitHub error try again", result.stderr)
+        self.assertEqual(calls, [VIEW, VIEW, VIEW])
+
+    def test_retries_failed_or_unreadable_pull_request_reads(self):
+        for output in ({"error": "temporary GitHub error"}, "{", "{}"):
+            with self.subTest(output=output):
+                result, calls = self.run_script([
+                    pull(), (VIEW, output), pull(state="MERGED", merge_state="UNKNOWN"),
+                ])
+                self.assertEqual(result.returncode, 0, result)
+                self.assertEqual(len(result.stderr.splitlines()), 1, result)
+                self.assertIn("Warning:", result.stderr)
+                self.assertEqual(len(calls), 3)
+
+    def test_retries_failed_or_unreadable_main_reads(self):
+        behind = pull(merge_state="BEHIND")
+        for output in ({"error": "temporary GitHub error"}, "not a commit"):
+            with self.subTest(output=output):
+                result, calls = self.run_script([
+                    behind, (BASE, output), behind, (BASE, FIRST_BASE), (UPDATE, ""),
+                    pull(state="MERGED", merge_state="UNKNOWN"),
+                ])
+                self.assertEqual(result.returncode, 0, result)
+                self.assertEqual(len(result.stderr.splitlines()), 1, result)
+                self.assertIn("Warning:", result.stderr)
+                self.assertEqual(calls, [VIEW, BASE, VIEW, BASE, UPDATE, VIEW])
+
+    def test_persistent_read_error_reaches_time_limit(self):
+        result, calls = self.run_script([pull(), (VIEW, {"error": "temporary GitHub error"})], timeout="0.6")
+        self.assertEqual(result.returncode, 1, result)
+        self.assertIn("Warning:", result.stderr)
+        self.assertIn("Timed out waiting for pull request #42", result.stderr)
+        self.assertIn("OPEN/BLOCKED at first-head", result.stderr)
+        self.assertGreater(len(calls), 2)
+
+    def test_failed_update_ends_wait(self):
+        self.assert_steps([
+            pull(merge_state="BEHIND"), (BASE, FIRST_BASE), (UPDATE, {"error": "temporary GitHub error"}),
+        ], 1, "Could not wait for pull request #42")
+
+    def test_draft_ends_wait(self):
+        self.assert_steps([pull(draft=True)], 1, "Pull request #42 is a draft")
+
+    def test_conflict(self):
+        self.assert_steps([
+            pull(merge_state="BEHIND"), (BASE, FIRST_BASE), (UPDATE, ""),
+            pull(merge_state="DIRTY", mergeable="CONFLICTING"),
+        ], 1, "conflicts with main. Rebase is needed")
+
+    def test_other_base(self):
+        self.assert_steps([pull(base="another-branch")], 1, "must target main")
+
+    def test_timeout(self):
+        result, calls = self.run_script([pull()], timeout="0.6")
+        self.assertEqual(result.returncode, 1, result)
+        self.assertIn("Timed out waiting for pull request #42", result.stderr)
+        self.assertIn("OPEN/BLOCKED at first-head", result.stderr)
+        self.assertTrue(calls)
+        self.assertTrue(all(args == VIEW for args in calls))
+
+
+if __name__ == "__main__":
+    unittest.main()

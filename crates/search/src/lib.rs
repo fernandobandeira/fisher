@@ -143,3 +143,6 @@ fn material(position: &Position) -> i32 {
         })
         .sum()
 }
+
+#[cfg(test)]
+mod tests;

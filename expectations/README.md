@@ -89,10 +89,56 @@ is the depth. Each move contains two squares
 and an optional lowercase promotion suffix. The move pattern excludes
 `0000`. Digits in every allowance are ASCII. The runner checks the nodes
 per second from the reported nodes and time. At depths 1 to 4 it also
-checks the principal variation under D5 and compares any `{score}` with
-the reference minimax. At depths 1 and 2 it also compares literal scores.
-Deeper lines get the spelling and length checks only, because the reference
-minimax prunes nothing.
+checks the principal variation under D5. A literal score is itself the
+expected value.
+
+The runner cannot tell whether a `{score}` is the right score: it does not
+compare the score end to end with the search, which would need a
+dependency from `fisher` on `search` or a table of literal scores that
+every change to the evaluation would rewrite (D35, D47). The check is
+split instead (fisher-4yn.4):
+
+- The tests of `search` compare the search with plain minimax at every
+  position in [`test-data/open-scores.txt`](../test-data/open-scores.txt),
+  at depths 1 to 4.
+- The runner fails on a `{score}` at depths 1 to 4, in any searched `info`
+  line with or without a principal variation, from a position that file
+  does not list.
+- The tests of `uci` check that the `info` line carries the score the
+  search returned.
+
+The runner checks a `{score}` only against a position it is sure of, and
+fails loudly when it is not sure. It may fail a valid transcript; it must
+never check against the wrong position.
+
+- It splits each record into commands where `uci` ends a line: at CR, and
+  at LF unless LF follows CR. It reads nothing after `quit`.
+- It sets a position up as `uci` does: `startpos`, or a FEN of four, five
+  or six fields with a halfmove clock of 0 and a fullmove number of 1
+  filled in, then the moves. It accepts exactly the FENs
+  `rules::Position::from_fen` accepts, and keeps the move counters as
+  fisher does, in 64 bits. A position fisher rejects leaves the position in
+  place.
+- A search's position is known only when its `go` was sent while fisher
+  was known to be idle: at the start, after the previous search's
+  `bestmove` was read, or after `stop`, since fisher finishes a stopped
+  search before it reads on. The search's `info` lines and `bestmove` are
+  checked against that position.
+- A `position`, `ucinewgame` or `go` sent while a search might still be
+  running makes the position unknown until a `position` sent while fisher
+  is known to be idle. A `{score}` at depths 1 to 4, a principal variation
+  or a `bestmove {legal}` from a search with an unknown position fails,
+  and the message asks the session to read `bestmove` first or to use a
+  literal value. Such a `go` also leaves every later search's position
+  unknown, because the runner cannot tell whether fisher started it. During
+  `go infinite` before `stop`, fisher always rejects `position` and `go`,
+  so those leave the position known.
+
+A searched line at depth 5 or deeper gets the spelling, length and
+node-rate checks only, `{score}` included, as the `full-spelling` case in
+[`uci-runner/`](uci-runner/) expects. The repeated matcher does not require
+the depths to increase, so a repeated record can match such a line, and
+nothing checks whether its score is right.
 
 ### Transcripts for search on its own thread
 

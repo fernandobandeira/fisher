@@ -9,7 +9,7 @@ import re
 from pathlib import Path
 import subprocess
 import sys
-from tempfile import mkdtemp
+from tempfile import TemporaryDirectory, mkdtemp
 
 ROOT = Path(__file__).resolve().parent.parent
 CONFIG = ".cargo/mutation-gate.json"
@@ -108,22 +108,101 @@ def reconcile(results, reviewed, log_directory="mutants.out/log"):
     return counts, sorted(problems)
 
 
+def verify_mutants(expected, actual, label):
+    # The full report identity includes spans and diffs. The reviewed-equivalent
+    # key ignores coordinates so proofs can survive unrelated edits.
+    expected = Counter(json.dumps(mutant, sort_keys=True) for mutant in expected)
+    actual = Counter(json.dumps(mutant, sort_keys=True) for mutant in actual)
+    duplicates = [json.loads(mutant)["name"] for mutant, count in actual.items() if count > 1]
+    missing = [json.loads(mutant)["name"] for mutant in expected - actual]
+    unexpected = [json.loads(mutant)["name"] for mutant in actual - expected]
+    if duplicates or missing or unexpected:
+        raise ValueError(
+            f"{label}: duplicate mutants {duplicates}, missing mutants {missing}, "
+            f"unexpected mutants {unexpected}"
+        )
+
+
 def read_results(output):
     planned = json.loads((output / "mutants.json").read_text())
     report = json.loads((output / "outcomes.json").read_text())
-    results = [item for item in report["outcomes"] if item["scenario"] != "Baseline"]
-    if not results or not report["end_time"] or len(results) != len(planned):
-        raise ValueError("Mutation results are empty or incomplete. Rerun scripts/check-mutants.")
-    for item in results:
-        mutant = item["scenario"]["Mutant"]
+    if not report["end_time"]:
+        raise ValueError(f"Mutation report is incomplete: {output}")
+    baselines = []
+    results = []
+    for item in report["outcomes"]:
+        if item["scenario"] == "Baseline":
+            baselines.append(item["summary"])
+            continue
+        diff = (output / item["diff_path"]).read_text()
+        mutant = {**item["scenario"]["Mutant"], "diff": diff}
+        results.append((mutant, OUTCOMES[item["summary"]]))
+    if baselines != ["Success"]:
+        raise ValueError(f"Mutation report has no successful baseline: {output}")
+    verify_mutants(planned, (mutant for mutant, _ in results), output)
+    return results
+
+
+def merge_parts(directory, parts, expected):
+    paths = [directory / f"mutation-part-{part}" for part in range(parts)]
+    missing = [path.name for path in paths if not path.is_dir()]
+    if missing:
+        raise ValueError(f"Missing mutation parts: {', '.join(missing)}")
+    unexpected = sorted(path.name for path in set(directory.glob("mutation-part-*")) - set(paths))
+    if unexpected:
+        raise ValueError(f"Unexpected mutation parts: {', '.join(unexpected)}")
+    results = [result for path in paths for result in read_results(path)]
+    verify_mutants(expected, (mutant for mutant, _ in results), "Whole workspace")
+    print(f"Verified {len(results)} mutants across {parts} parts against the unsplit list.")
+    return results
+
+
+def reviewed_results(results):
+    for mutant, outcome in results:
         function = mutant["function"]
-        mutant["function"] = function["function_name"] if function else None
-        mutant["function_sha256"] = (
+        digest = (
             function_digest((ROOT / mutant["file"]).read_bytes().decode("utf-8"), function["span"])
             if function else None
         )
-        site = mutation_site((output / item["diff_path"]).read_text())
-        yield mutant, OUTCOMES[item["summary"]], site
+        yield {
+            **mutant,
+            "function": function["function_name"] if function else None,
+            "function_sha256": digest,
+        }, outcome, mutation_site(mutant["diff"])
+
+
+def test_merge_parts():
+    def write_part(path, mutant):
+        path.mkdir(exist_ok=True)
+        (path / "mutants.json").write_text(json.dumps([{**mutant, "diff": "diff\n"}]))
+        (path / "change.diff").write_text("diff\n")
+        (path / "outcomes.json").write_text(json.dumps({
+            "end_time": "finished",
+            "outcomes": [
+                {"scenario": "Baseline", "summary": "Success"},
+                {"scenario": {"Mutant": mutant}, "summary": "CaughtMutant", "diff_path": "change.diff"},
+            ],
+        }))
+
+    def expect_failure(directory, expected, message):
+        try:
+            merge_parts(directory, 2, expected)
+        except ValueError as error:
+            assert message in str(error), error
+        else:
+            raise AssertionError(f"Expected merge to fail with {message}")
+
+    with TemporaryDirectory() as temporary:
+        directory = Path(temporary)
+        first, second = {"name": "first mutant"}, {"name": "second mutant"}
+        expected = [{**mutant, "diff": "diff\n"} for mutant in (first, second)]
+        write_part(directory / "mutation-part-0", first)
+        expect_failure(directory, expected, "Missing mutation parts: mutation-part-1")
+        write_part(directory / "mutation-part-1", first)
+        expect_failure(directory, expected, "duplicate mutants ['first mutant']")
+        write_part(directory / "mutation-part-1", second)
+        expect_failure(directory, [*expected, {"name": "third mutant"}], "missing mutants ['third mutant']")
+        assert [mutant for mutant, _ in merge_parts(directory, 2, expected)] == expected
 
 
 def self_test():
@@ -165,25 +244,33 @@ def self_test():
     assert "no longer exists" in reconcile([], reviewed)[1][0]
     assert any("timed out" in problem for problem in
                reconcile([(mutant, "timeout", site)], reviewed)[1])
+    test_merge_parts()
 
 
-def run(args):
-    install = f"Install cargo-mutants with `cargo install cargo-mutants --version {VERSION} --locked`."
+def check_version():
     version = subprocess.run(["cargo", "mutants", "--version"], cwd=ROOT, capture_output=True, text=True)
     if version.returncode or version.stdout.strip() != f"cargo-mutants {VERSION}":
-        raise ValueError(install)
+        raise ValueError(f"Install cargo-mutants with `cargo install cargo-mutants --version {VERSION} --locked`.")
 
-    config = json.loads((ROOT / CONFIG).read_text())
-    reviewed = reviewed_entries(config["equivalent"])
-    args.output.mkdir(parents=True, exist_ok=True)
-    output = Path(mkdtemp(prefix="run-", dir=args.output.resolve()))
-    print(f"Mutation reports: {output}", flush=True)
-    command = [
+
+def mutation_command(jobs):
+    return [
         "cargo", "mutants", "--workspace", "--no-config", "--test-workspace=false",
         "--cap-lints=true", "--minimum-test-timeout", "300", "--annotations=none",
         "--copy-target=false", "--cargo-arg=--locked", "--cargo-test-arg=--tests",
-        "--jobs", str(args.jobs), "--output", str(output),
+        "--jobs", str(jobs),
     ]
+
+
+def run_mutants(args):
+    output = args.output.resolve()
+    output.mkdir(parents=True, exist_ok=True)
+    if args.shard is None:
+        output = Path(mkdtemp(prefix="run-", dir=output))
+    print(f"Mutation reports: {output}", flush=True)
+    command = [*mutation_command(args.jobs), "--output", str(output)]
+    if args.shard is not None:
+        command.extend(["--shard", args.shard, "--sharding", "round-robin"])
     status = subprocess.run(command, cwd=ROOT).returncode
     if status not in {0, 2, 3}:
         raise ValueError(
@@ -191,9 +278,18 @@ def run(args):
         )
 
     report = output / "mutants.out"
-    counts, problems = reconcile(read_results(report), reviewed, log_directory=report / "log")
-    if status == 3 and not problems:
-        problems.append(f"cargo-mutants reported a timeout. Inspect {report / 'log'}.")
+    results = read_results(report)
+    if not results:
+        raise ValueError("Mutation results are empty. Rerun scripts/check-mutants.")
+    if status == 3 and not any(outcome == "timeout" for _, outcome in results):
+        raise ValueError(f"cargo-mutants reported a timeout. Inspect {report / 'log'}.")
+    return report, results
+
+
+def check_results(results, log_directory):
+    config = json.loads((ROOT / CONFIG).read_text())
+    reviewed = reviewed_entries(config["equivalent"])
+    counts, problems = reconcile(reviewed_results(results), reviewed, log_directory)
     for crate in sorted(counts):
         summary = ", ".join(f"{counts[crate][name]} {name}" for name in
                             ("caught", "unviable", "surviving", "equivalent", "timeout"))
@@ -207,13 +303,31 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--jobs", type=int, default=4)
     parser.add_argument("--output", type=Path, default=ROOT / "target/mutation")
-    parser.add_argument("--self-test", action="store_true")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--self-test", action="store_true")
+    mode.add_argument("--shard", help="Test one zero-based k/n shard and write its report to --output")
+    mode.add_argument("--merge", type=Path, help="Reconcile the downloaded mutation parts in this directory")
+    parser.add_argument("--parts", type=int, help="Number of parts expected by --merge")
     args = parser.parse_args()
+    if (args.merge is not None) != (args.parts is not None) or (args.parts is not None and args.parts < 1):
+        parser.error("--merge requires a positive --parts, and --parts requires --merge")
     if args.self_test:
         self_test()
         return 0
     try:
-        return run(args)
+        check_version()
+        if args.merge is not None:
+            expected = json.loads(subprocess.check_output(
+                [*mutation_command(args.jobs), "--list", "--json"], cwd=ROOT,
+            ))
+            if not expected:
+                raise ValueError("The whole-workspace mutant list is empty.")
+            results = merge_parts(args.merge, args.parts, expected)
+            return check_results(results, "the mutation-part artifacts under log/")
+        report, results = run_mutants(args)
+        if args.shard is not None:
+            return 0
+        return check_results(results, report / "log")
     except (OSError, subprocess.CalledProcessError, ValueError, KeyError) as error:
         print(f"Could not check mutants: {error}", file=sys.stderr)
         return 1

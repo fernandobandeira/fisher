@@ -21,7 +21,7 @@ Use `bd prime` for the general Beads command reference.
 
 ## Decisions across sessions
 
-- Create an epic with `bd create "<title>" --type epic --body-file <path>` to record the decisions the change needs.
-- Create a ticket for each decision with `--parent <epic-id> --no-inherit-labels`. Add blocking dependencies after creating the tickets.
+- Create an epic with `bd create "<title>" --type epic --body-file <path>`. Include a `## Decisions so far` section in the body to record resolved decisions.
+- Create a ticket for each decision with `--parent <epic-id>`. Add blocking dependencies after creating the tickets.
 - Find ready decisions with `bd ready --parent <epic-id> --unassigned --sort oldest` and claim a ticket with `bd update <id> --claim` before working on it.
 - Record the answer as a comment and close the ticket. Fetch the latest epic body and update its Decisions so far with `bd update <epic-id> --body-file <path>`, referring to the resolved ticket by title and Beads ID.

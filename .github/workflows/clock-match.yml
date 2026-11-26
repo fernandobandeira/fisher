@@ -29,6 +29,9 @@ jobs:
             echo "::error::PGN replay library download or installation failed."
             exit 1
           fi
+      - name: Install the pinned Rust toolchain
+        timeout-minutes: 3
+        run: scripts/install-rust-toolchain
       - name: Download Rust build dependencies
         timeout-minutes: 3
         env:

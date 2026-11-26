@@ -25,6 +25,8 @@ The `main gates` ruleset requires the Actions `check`, `mutation`, `coverage`, a
 | Pre-commit hook | Committing after a failed local check | [Pre-commit hook](../../.githooks/pre-commit) | Every commit with the hooks installed |
 | Claude Code stop hook | Ending a turn with unchecked changes | [Stop hook](../../.claude/hooks/stop-check) | End of a dirty Claude Code turn |
 
+The required checks, real-clock match, and published suite install the checkout’s pinned Rust toolchain in a fresh Rustup home for each job.
+
 See [merge gates](merge-gates.md) for the branch protections.
 
 ## Code shape

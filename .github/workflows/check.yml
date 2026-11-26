@@ -48,7 +48,12 @@ jobs:
           fallback: none
       - env:
           PART: ${{ matrix.part }}
-        run: scripts/check-mutants --shard "$PART/$MUTATION_PARTS" --output target/mutation-part
+        run: |
+          if [ "$PART" = 0 ]; then
+            echo "Planted part 0 failure"
+            exit 1
+          fi
+          scripts/check-mutants --shard "$PART/$MUTATION_PARTS" --output target/mutation-part
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: mutation-part-${{ matrix.part }}

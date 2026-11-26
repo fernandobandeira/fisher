@@ -1,15 +1,16 @@
 # Searches on the clock
 
-Staged by fisher-mhy on 2026-11-26 for a forecast factor of 15: the
-successor of [the schedules for a search with cutoffs](../uci-cutoff/uci-go-clocks.md),
-which is itself the successor of [the active file](../uci-go-clocks/README.md).
-It applies once the search makes cutoffs (fisher-4yn.2) and D49 multiplies
-the time of the last finished depth by 15 instead of 30. [This directory's
-README](README.md) lists every value this file changes and derives each new
-number by hand from D49 and D50. No value came from running fisher.
+Staged by fisher-mhy on 2026-11-26 for a forecast factor of 15, as
+`expectations/uci-forecast-15/uci-go-clocks.md`. It is the successor of
+the clock schedules for a search with cutoffs, which fisher-4yn.2 put at
+`expectations/uci-go-clocks/README.md`. The implementer of fisher-4yn.2
+moves it to that path with a pure rename when D49's factor becomes 15
+instead of 30. [The derivation](../uci-forecast-15/README.md) lists every
+value this document changes and works out each new number by hand from
+D49 and D50. No value came from running fisher.
 
-The note that follows is the one fisher-4yn.1 wrote for the file this one
-replaces. It still holds for the node totals.
+The note that follows is the one fisher-4yn.1 wrote for the document this
+one replaces. It still holds for the node totals.
 
 Staged by fisher-4yn.1 on 2026-11-25 for a search that makes cutoffs: the
 successor of [the active file](../uci-go-clocks/README.md). fisher-4yn.2 moves it
@@ -256,7 +257,7 @@ The last case exercises the distinction in D50 between a time given by
 | Same command. After one node at 0, read 40 ms before entering the next node. | Clock wins before the depth limit. Enter one node, discard depth 1 and return the first legal move (D20). | One matching `bestmove` with no `info`. |
 | Starting position, `go wtime 1500 nodes 19`. Hold elapsed at 1 ms. | Nodes win. Exactly 19 of the 20 nodes needed for depth 1 are entered. Return the first legal move (D20). | One matching `bestmove` with no `info`. |
 | Same command. After one node at 0, read 40 ms before entering the next node. | Clock wins before node 19. Enter one node, discard depth 1 and return the first legal move (D20). | One matching `bestmove` with no `info`. |
-| Starting position, `go wtime 3300 movetime 50`. Finish depth 1 at 3 ms. After one depth-2 node, read 39 ms before the next, enter it, then read 40 ms before the third. | D49 admits depth 2 against the clock's remaining 97 ms (15 × 3 = 45 ≤ 97). Measured against the 37 ms left before the movetime deadline, the same forecast would refuse depth 2 (45 > 37), so the case shows that D49 uses the clock's T alone. D52 applies movetime independently. It wins at 40 ms, ahead of the clock's 100 ms deadline. Enter 22 nodes overall and return the depth-1 move. | Exactly depth 1, cp 0, 20 nodes at 2 ms and nps 10000, then one matching `bestmove`. The scripted reports keep 2 ms. |
+| Starting position, `go wtime 3300 movetime 50`. Finish depth 1 at 4 ms. After one depth-2 node, read 39 ms before the next, enter it, then read 40 ms before the third. | D49 admits depth 2 against the clock's remaining 96 ms (15 × 4 = 60 ≤ 96). Measured against the 36 ms left before the movetime deadline, the same forecast would refuse depth 2 (60 > 36), so the case shows that D49 uses the clock's T alone. D52 applies movetime independently. It wins at 40 ms, ahead of the clock's 100 ms deadline. Enter 22 nodes overall and return the depth-1 move. | Exactly depth 1, cp 0, 20 nodes at 2 ms and nps 10000, then one matching `bestmove`. The scripted reports keep 2 ms. |
 | Starting position, `go wtime 780 movetime 50`. Finish depth 1 at 1 ms. After one depth-2 node, read 15 ms before the next, enter it, then read 16 ms before the third. | T is 16 ms (D50). The forecast permits depth 2 at equality: 15 × 1 = 15 = 16 − 1 ms. Clock wins at 16 ms, ahead of the 40 ms movetime deadline. Enter 22 nodes overall and return the depth-1 move. | Exactly depth 1, cp 0, 20 nodes at 1 ms and nps 20000, then one matching `bestmove`. The scripted case keeps `go wtime 1230 movetime 50` in both orders: a scripted search does not apply D49. |
 | Puzzle `001om`, `go infinite btime 1500`. Use the same controlled expiry inside depth 2 as above. | The clock ends the work at 40 ms with 59 nodes entered. Only depth 1 finishes and the result is `g5g2`. | Send the same depth-1 report and deliver the best-move report. Require `readyok` for `isready` before sending `stop`. Under D52 and UCI go infinite, only then require one `bestmove g5g2`. |
 | Starting position, `go movetime 50` alone. Finish depth 1 at 3 ms. Enter one node of depth 2, read 39 ms before the next node, enter it, then read 40 ms before the third. | Movetime permits depth 2 even though 15 × 3 = 45 ms exceeds the remaining 37 ms. At 39 ms there is still work and no final report. At 40 ms enter no further node, discard depth 2 and return the depth-1 move (D11, D31, D50 and UCI go movetime). | Exactly depth 1, cp 0, 20 nodes at 2 ms and nps 10000. Hold the scripted final report through `isready` and `readyok`, then release it and require one matching `bestmove`. The scripted reports keep 2 ms. |

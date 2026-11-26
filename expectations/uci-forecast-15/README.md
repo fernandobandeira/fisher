@@ -5,18 +5,19 @@ an author who will not change it. Sources: fisher-r6y D49 (start the next
 depth only if the factor times the time the last finished depth took fits
 in what is left), D50 (the time for the move and the margin), D11, D20,
 D22, D31 and D52; the proposal in fisher-4yn.2 (PR #86) to change the
-factor from 30 to 15; and the schedules for a search with cutoffs in
-[`uci-cutoff/uci-go-clocks.md`](../uci-cutoff/uci-go-clocks.md). Every
-value below was worked out by hand from D49 and D50 with a factor of 15.
-No value came from running fisher.
+factor from 30 to 15; and the clock schedules for a search with cutoffs,
+staged by fisher-4yn.1 as `uci-cutoff/uci-go-clocks.md` and moved by
+fisher-4yn.2 to [`uci-go-clocks/README.md`](../uci-go-clocks/README.md).
+Every value below was worked out by hand from D49 and D50 with a factor
+of 15. No value came from running fisher.
 
-No test reads this directory. [`uci-go-clocks.md`](uci-go-clocks.md) is a
-full copy of [`uci-cutoff/uci-go-clocks.md`](../uci-cutoff/uci-go-clocks.md)
-with only the values listed here changed, and replaces it. The change of
-`DEPTH_GROWTH_FACTOR` in `crates/deepening` from 30 to 15 copies these
-values into the private `deepening` tests in the same commit (see
-[Activation](#activation)). Until then main keeps the factor of 30 and the
-schedules for it, so nothing here can fail.
+No test reads this directory. The document
+[`uci-go-clocks.md`](uci-go-clocks.md) here is a full copy of the schedules
+for a search with cutoffs, with only the values listed here changed. It
+replaces the document at the path `expectations/uci-go-clocks/README.md`
+once fisher-4yn.2 has put the cutoff schedules there (see
+[Activation](#activation)). Until then the factor stays 30 and the tests
+keep its schedules, so nothing here can fail.
 
 These values presume a search with cutoffs (fisher-4yn.2): the starting
 position reaches a total of 79 nodes at depth 2 and 80 with one node of
@@ -24,14 +25,23 @@ depth 3.
 
 ## The rule with a factor of 15
 
-Let T be the time the search may use, worked out from the clock by D50:
-the clock divided by the moves to go (30 when absent), plus the
-increment, less the 10 ms margin. When a depth finishes, let d be the
-time it took and f the elapsed time at which it finished. The next depth
+D50 gives T, the time the search may use, from the clock of the side to
+move. Let C be that clock, floored at zero; I its increment, or zero when
+absent; and M the moves to go when positive, or 30 when absent or zero.
+Divide C by M in whole milliseconds, rounding down, and add I. The time
+for the move is the smaller of that sum and C. T is the time for the move
+less the 10 ms margin, floored at zero.
+
+Elapsed time is measured from the acceptance of `go`. When a depth
+finishes, let d be its duration: the elapsed time when it finished less
+the elapsed time when it started. Before the next depth starts, the
+search reads the elapsed time again; call that reading s. The next depth
 starts only if
 
-    15 × d ≤ T − f
+    15 × d ≤ T − s
 
+In the controlled schedules no time passes between the end of one depth
+and that reading, so s equals the time at which the last depth finished.
 The comparison is exact: equality starts the depth. Only the clock's T
 enters it. A time given by `go movetime` does not follow D49 (D50), and
 beside a clock it sets its own deadline (D52). The default of 30 moves
@@ -150,11 +160,21 @@ check 22 and stops, so it fails the case.
 Clock T is 100 ms; the movetime deadline is 40 ms. Old: depth 1 at 2 ms;
 30 × 2 = 60 ≤ 98 admits depth 2, while 60 > 38 against the movetime
 deadline would have refused it. With 15, 30 ≤ 38 admits either way, so
-the case no longer tells the two apart. Finish depth 1 at 3 ms:
-15 × 3 = 45 ≤ 97 admits depth 2, and 45 > 37 would refuse it if measured
-against the movetime deadline. Schedule (20, 3 ms), (22, 39 ms),
-(23, 40 ms). **22 nodes entered**, depth 1 at 3 ms, the depth-1 move;
-movetime wins at 40 ms, ahead of the clock's 100 ms.
+the case no longer tells the two apart. Finish depth 1 at d = 4 ms, so
+s = 4 ms and the clock leaves 96 ms:
+
+- factor 15 admits depth 2: 15 × 4 = 60 ≤ 96;
+- factor 30 refuses it: 30 × 4 = 120 > 96;
+- forecasting against the 36 ms left before the movetime deadline would
+  refuse it: 60 > 36.
+
+(At 3 ms both factors admit depth 2, 45 ≤ 97 and 90 ≤ 97, so a return to
+30 would pass; at 4 ms it fails.) Schedule (20, 4 ms), (22, 39 ms),
+(23, 40 ms). Check 21 enters at 4 ms, check 22 enters at 39 ms, check 23
+reads 40 ms and movetime wins, ahead of the clock's 100 ms. **22 nodes
+entered**, depth 1 at 4 ms, the depth-1 move. With a factor of 30, or
+with the forecast measured against movetime, depth 2 is refused and 20
+nodes are entered.
 
 ### Movetime alone: `go movetime 50`
 
@@ -192,19 +212,40 @@ fisher-4yn.1. `crates/uci` needs no change.
 
 ## Activation
 
-The commit that sets `DEPTH_GROWTH_FACTOR` to 15 copies these values into
-`crates/deepening/src/tests/clocks.rs`. Moving
-[`uci-go-clocks.md`](uci-go-clocks.md) over the file it replaces is a
-change to `expectations/`, left to an author of expected values as for the
-files fisher-4yn.1 staged. Line numbers are at d15ccc2,
-the head of PR #86. Before changing the constant, run the reworked tests
-with the factor of 30 and record that the four marked "fails at 30" do
-fail. The author of these values did so once, in a throwaway copy of
-d15ccc2 with the factor left at 30: those four entered 20 nodes and
-failed, and the other reworked cases passed. fisher was not run with a
-factor of 15.
+The implementer of fisher-4yn.2 activates these values in PR #86, in the
+commit that sets `DEPTH_GROWTH_FACTOR` to 15, after this document is on
+main:
 
-| Test (line at d15ccc2) | Factor 30 | Factor 15 | Fails at 30 |
+1. Before changing the constant, copy the Factor 15 column below into
+   `crates/deepening/src/tests/clocks.rs`, run those tests with the factor
+   of 30, and record that the five cases marked "fails at 30" do fail. The
+   author of these values did so in throwaway copies of d15ccc2 and, for
+   the `wtime 3300 movetime 50` case, of 765d594, with the factor left at
+   30: all five entered 20 nodes and failed, and the other reworked cases
+   passed. fisher was not run with
+   a factor of 15.
+2. Change the constant to 15 and run the tests again.
+3. Move the document with a pure rename, changing no line in it:
+   `git mv expectations/uci-forecast-15/uci-go-clocks.md expectations/uci-go-clocks/README.md`.
+   The document it replaces is the one at that path in PR #86 (765d594),
+   which holds the clock schedules for a search with cutoffs and the
+   factor of 30. The rename touches `expectations/`, so the commit
+   carries a `Guard-Change:` line. Its links are relative to
+   `expectations/` one level down, so they hold at the new path.
+   This README stays where it is as the record of the derivation.
+
+Three test comments name the path `expectations/uci-go-clocks/README.md`
+in PR #86: `crates/deepening/src/tests/clocks.rs` lines 115 and 276, and
+`crates/uci/tests/threaded_session/clocks.rs` line 1. After the rename
+the path holds the factor-15 document, so none of them needs a new path.
+The comment at line 115 should add `expectations/uci-forecast-15/README.md`
+as the derivation of the three new clocks. If the factor changes before
+fisher-4yn.2 has moved the cutoff schedules into place, stop: these values
+assume the search with cutoffs.
+
+Line numbers are at 765d594, the head of PR #86, and match d15ccc2.
+
+| Test (line at 765d594) | Factor 30 | Factor 15 | Fails at 30 |
 |---|---|---|---|
 | `time_for_the_move_uses_the_side_to_move_and_keeps_the_margin` (163, 185, 186) | `white(1230, …, 41, 31)`, `white(2790, …, 93, 83)`, `white(2160, …, 72, 62)` | `white(780, …, 26, 16)`, `white(1050, …, 35, 25)`, `white(1260, …, 42, 32)` | No; D50 only |
 | `starts_next_depth_at_equality_but_stops_one_microsecond_later` (393–406) | `white_clock(1230)`; schedule (20, 1 ms + start), (22, 31 ms); 21 and 20 entered | `white_clock(780)`; schedule (20, 1 ms + start), (22, 16 ms); 21 and 20 entered | Yes, at equality: 20 entered |
@@ -212,15 +253,14 @@ factor of 15.
 | `longer_second_depth_refuses_depth_three` (459–468) | `white_clock(2790)`; (20, 1 ms), (79, 5 ms), (81, 83 ms); 79 entered; reports at 1 and 5 ms | `white_clock(1050)`; (20, 1 ms), (79, 5 ms), (81, 25 ms); 79 entered; reports at 1 and 5 ms | Yes: 20 entered |
 | `shorter_second_depth_admits_depth_three` (470–479) | `white_clock(2160)`; (20, 2 ms), (79, 3 ms), (81, 62 ms); 80 entered; reports at 2 and 3 ms | `white_clock(1260)`; (20, 2 ms), (79, 3 ms), (81, 32 ms); 80 entered; reports at 2 and 3 ms | Yes: 20 entered |
 | `clock_forecast_applies_beside_each_finite_limit` (481–508) | `wtime 1500` with `movetime 80`, `depth 2`, `nodes 79`; (20, 2 ms), (22, 80 ms); 20 entered; report at 2 ms | Same limits; (20, 3 ms), (22, 80 ms); 20 entered; report at 3 ms | No; a rule without the forecast enters 21 |
-| `clock_and_movetime_can_each_end_the_search` (536–554) | `(3300, 2, 40)` and `(1230, 1, 31)` as (clock, depth 1 ends, deadline); 22 entered each | `(3300, 3, 40)` and `(780, 1, 16)`; 22 entered each | Yes for 780: 20 entered |
+| `clock_and_movetime_can_each_end_the_search` (536–554) | `(3300, 2, 40)` and `(1230, 1, 31)` as (clock, depth 1 ends, deadline); 22 entered each | `(3300, 4, 40)` and `(780, 1, 16)`; 22 entered each | Yes, both: 20 entered |
 | `movetime_alone_does_not_forecast_the_next_depth` (556–568) | (20, 2 ms), (22, 39 ms), (23, 40 ms); 22 entered; report at 2 ms | (20, 3 ms), (22, 39 ms), (23, 40 ms); 22 entered; report at 3 ms | No; a rule that forecasts movetime enters 20 |
 
 `running_out_of_search_time_inside_depth_two_keeps_the_puzzle_move`,
 `clock_and_depth_can_each_end_the_search`,
 `clock_and_nodes_can_each_end_the_search`,
 `running_out_of_search_time_inside_depth_one_keeps_the_fallback` and the
-tests of a missing clock or the default depth keep their values. The
-comment above the time cases should cite this file once it is in place.
+tests of a missing clock or the default depth keep their values.
 
 Never replace a value here with one from running fisher. If the code with
 a factor of 15 disagrees with a value, stop and say which.

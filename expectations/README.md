@@ -99,22 +99,31 @@ every change to the evaluation would rewrite (D35, D47). The check is
 split instead (fisher-4yn.4):
 
 - The tests of `search` compare the search with plain minimax at every
-  position in [`test-data/open-scores.tsv`](../test-data/open-scores.tsv),
-  at depths 1 to the depth listed.
+  position in [`test-data/open-scores.txt`](../test-data/open-scores.txt),
+  at depths 1 to 4.
 - The runner fails on a `{score}` at depths 1 to 4, in any searched `info`
   line with or without a principal variation, from a position that file
-  does not list at that depth or deeper. It sets positions up as `uci`
-  does: `startpos`, or a FEN of four, five or six fields with a halfmove
-  clock of 0 and a fullmove number of 1 filled in, then the moves. A
-  position it cannot set up fails, unless the next record expects
-  fisher's `info string` rejection. Then fisher keeps its previous
-  position, and so does the runner. An expected rejection of a position
-  the runner did set up fails too.
+  does not list.
 - The tests of `uci` check that the `info` line carries the score the
   search returned.
 
-A searched line at depth 5 or deeper gets the spelling and length checks
-only, `{score}` included, as the `full-spelling` case in
+To know which position a line belongs to, the runner follows its input as
+`uci` does. It splits each record into commands where `uci` ends a line:
+at CR, and at LF unless LF follows CR. It sets a position up as `uci`
+does: `startpos`, or a FEN of four, five or six fields with a halfmove
+clock of 0 and a fullmove number of 1 filled in, then the moves. It
+accepts exactly the FENs `rules::Position::from_fen` accepts. Each `go`
+searches the position set at that point, and the search's `info` lines and
+`bestmove` are checked against that position, even when a later
+`position` has been sent after `stop`. A command fisher must reject (a
+position or a FEN it cannot set up, or a `position` or `go` sent while a
+search runs without `stop`) fails unless the next record expects fisher's
+`info string` rejection; then fisher keeps its previous position, and so
+does the runner. An expected rejection of a position the runner did set up
+fails too.
+
+A searched line at depth 5 or deeper gets the spelling, length and
+node-rate checks only, `{score}` included, as the `full-spelling` case in
 [`uci-runner/`](uci-runner/) expects. The repeated matcher does not require
 the depths to increase, so a repeated record can match such a line, and
 nothing checks whether its score is right.

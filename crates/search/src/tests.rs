@@ -8,8 +8,6 @@ mod plain_minimax;
 
 #[path = "tests/support/mate_in_two.rs"]
 mod mate_in_two;
-#[path = "tests/support/open_scores.rs"]
-mod open_scores;
 #[path = "tests/support/perft.rs"]
 mod perft;
 #[path = "tests/support/principal_variation.rs"]

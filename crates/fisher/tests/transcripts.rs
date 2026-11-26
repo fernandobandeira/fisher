@@ -1,6 +1,4 @@
-// The positions whose score the search crate checks, and the replay it uses.
-#[path = "../../search/src/tests/support/open_scores.rs"]
-mod open_scores;
+// Replay principal variations as the search crate tests do.
 #[path = "../../search/src/tests/support/principal_variation.rs"]
 mod principal_variation;
 #[path = "support/scripted_transcripts.rs"]
@@ -355,33 +353,41 @@ fn reference_command<'a>(tokens: &mut impl Iterator<Item = &'a str>) -> Option<&
     })
 }
 
-fn reference_position<'a>(mut tokens: impl Iterator<Item = &'a str>) -> Option<Chess> {
-    let mut position = match tokens.next()? {
-        "startpos" => Chess::default(),
-        "fen" => {
-            let fields: Vec<_> = tokens.by_ref().take(6).collect();
-            if fields.len() != 6 {
-                return None;
+/// Sets up a position the way `uci` does: `startpos`, or a FEN of four, five
+/// or six fields, where a missing halfmove clock is 0 and a missing fullmove
+/// number is 1, followed by optional moves.
+fn reference_position<'a>(mut tokens: impl Iterator<Item = &'a str>) -> Result<Chess, String> {
+    let mut tokens = tokens.by_ref().peekable();
+    let mut position = match tokens.next() {
+        Some("startpos") => Chess::default(),
+        Some("fen") => {
+            let mut fields = Vec::new();
+            while let Some(field) = tokens.next_if(|&token| token != "moves") {
+                fields.push(field);
             }
-            fields
-                .join(" ")
-                .parse::<Fen>()
-                .ok()?
+            let fen = match fields.len() {
+                4 => format!("{} 0 1", fields.join(" ")),
+                5 => format!("{} 1", fields.join(" ")),
+                _ => fields.join(" "),
+            };
+            fen.parse::<Fen>()
+                .map_err(|error| format!("invalid FEN {fen:?}: {error}"))?
                 .into_position(CastlingMode::Standard)
-                .ok()?
+                .map_err(|error| format!("invalid position {fen:?}: {error}"))?
         }
-        _ => return None,
+        _ => return Err("expected startpos or fen".to_owned()),
     };
     match tokens.next() {
-        None => return Some(position),
+        None => return Ok(position),
         Some("moves") => {}
-        Some(_) => return None,
+        Some(token) => return Err(format!("expected moves, got {token:?}")),
     }
     for token in tokens {
-        let movement = reference_move(&position, token)?;
+        let movement =
+            reference_move(&position, token).ok_or_else(|| format!("illegal move {token}"))?;
         position.play_unchecked(movement);
     }
-    Some(position)
+    Ok(position)
 }
 
 fn reference_move(position: &Chess, text: &str) -> Option<Move> {
@@ -423,9 +429,15 @@ fn reply_matches(expected: &str, actual: &str, position: &Chess) -> bool {
     }
 }
 
-/// The deepest search whose principal variation the replay checks. The limit
-/// was set by the cost of the reference minimax that fisher-4yn.4 removed.
+/// The deepest searched line whose principal variation the runner replays,
+/// and the deepest `{score}` that must come from a position the tests of
+/// `search` compare with plain minimax. Deeper lines get the spelling and
+/// length checks only, as the `full-spelling` fixture in `uci-runner/` expects.
 const REPLAY_DEPTH: u8 = 4;
+
+/// The positions where a transcript leaves the score open, each with the
+/// deepest depth the tests of `search` compare at.
+const OPEN_SCORES: &str = include_str!("../../../test-data/open-scores.tsv");
 
 #[test]
 fn single_replies_keep_allowances_to_literal_depths() {
@@ -632,7 +644,7 @@ fn uci_move_matches(text: &str) -> bool {
         && (b'1'..=b'8').contains(rank_to)
 }
 
-fn reported_score(text: &str) -> io::Result<i32> {
+fn reported_score(text: &str, depth: u8) -> io::Result<i32> {
     if let Some(cp) = text.strip_prefix("cp ") {
         return cp.parse().map_err(io::Error::other);
     }
@@ -641,24 +653,38 @@ fn reported_score(text: &str) -> io::Result<i32> {
         .ok_or_else(|| io::Error::other("missing score"))?
         .parse::<i32>()
         .map_err(io::Error::other)?;
-    // At depth four only mates in one or two can be reported.
-    if !(1..=2).contains(&mate.unsigned_abs()) {
-        return Err(io::Error::other(format!(
-            "mate {mate} exceeds the search depth"
-        )));
+    if mate == 0 {
+        return Err(io::Error::other("mate 0 at a searched depth"));
     }
     let plies = 2 * mate.abs() - i32::from(mate > 0);
+    if plies > i32::from(depth) {
+        return Err(io::Error::other(format!(
+            "mate {mate} exceeds the search depth {depth}"
+        )));
+    }
     Ok(mate.signum() * (principal_variation::MATE_SCORE - plies))
 }
 
+/// A `{score}` at depths 1 to `REPLAY_DEPTH` must come from a position
+/// listed in `test-data/open-scores.tsv` at that depth or deeper.
 fn verify_open_score_is_covered(position: &Chess, depth: u8) -> io::Result<()> {
+    if !(1..=REPLAY_DEPTH).contains(&depth) {
+        return Ok(());
+    }
     let fen = Fen::from_position(position, EnPassantMode::Legal).to_string();
-    if depth <= open_scores::DEEPEST && open_scores::POSITIONS.contains(&fen.as_str()) {
+    let covered = OPEN_SCORES
+        .lines()
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .filter_map(|line| line.split_once('\t'))
+        .any(|(deepest, listed)| {
+            listed == fen && deepest.parse::<u8>().is_ok_and(|deepest| depth <= deepest)
+        });
+    if covered {
         Ok(())
     } else {
         Err(io::Error::other(format!(
             "{{score}} at depth {depth} from {fen} is not compared with plain minimax. \
-             Add the position to POSITIONS in crates/search/src/tests/support/open_scores.rs"
+             Add the position to test-data/open-scores.tsv"
         )))
     }
 }
@@ -790,6 +816,8 @@ struct Session<I> {
     timeout: Duration,
     position: Chess,
     holding: bool,
+    /// What the runner made of a `position` command sent as the last record.
+    after_position: Option<Result<(), String>>,
     first_variation_move: Option<String>,
     legal_bestmove_replies: Vec<String>,
 }
@@ -801,6 +829,7 @@ impl<I: TranscriptIo> Session<I> {
             timeout,
             position: Chess::default(),
             holding: false,
+            after_position: None,
             first_variation_move: None,
             legal_bestmove_replies: Vec::new(),
         }
@@ -816,6 +845,26 @@ impl<I: TranscriptIo> Session<I> {
     }
 
     fn play_record(&mut self, record: Record<'_>) -> io::Result<()> {
+        let expects_rejection = matches!(
+            record,
+            Record::Observe(None, Delimiter::Reply(expected)) if expected.starts_with("info string ")
+        );
+        match (self.after_position.take(), expects_rejection) {
+            // fisher keeps its previous position, and so does the runner.
+            (Some(Err(_)), true) | (Some(Ok(())) | None, false) | (None, true) => {}
+            (Some(Ok(())), true) => {
+                return Err(io::Error::other(
+                    "the transcript expects fisher to reject the position just sent, \
+                     but the runner set it up and would compare with it",
+                ));
+            }
+            (Some(Err(cause)), false) => {
+                return Err(io::Error::other(format!(
+                    "the runner cannot set up the position just sent ({cause}), and the \
+                     transcript does not expect fisher to reject it"
+                )));
+            }
+        }
         match record {
             Record::Send(command) => {
                 self.io.send(&command)?;
@@ -869,9 +918,8 @@ impl<I: TranscriptIo> Session<I> {
             Some("go") if tokens.any(|token| token == "infinite") => self.holding = true,
             Some("stop") => self.holding = false,
             Some("position") if !self.holding => {
-                if let Some(position) = reference_position(tokens) {
-                    self.position = position;
-                }
+                self.after_position =
+                    Some(reference_position(tokens).map(|position| self.position = position));
             }
             _ => {}
         }
@@ -905,23 +953,24 @@ impl<I: TranscriptIo> Session<I> {
         expected_score: &str,
         info: &SearchInfo<'_>,
     ) -> io::Result<()> {
-        // Depths 1 to 4 have the replay check of D5. Deeper lines have the
-        // documented spelling and length checks only. The runner does not
-        // know the right score: the tests of `search` compare it with plain
-        // minimax, so a score left open must be at a position they cover.
-        let Some((full, depth)) = info.full.as_ref().zip(
-            info.depth
-                .parse::<u8>()
-                .ok()
-                .filter(|depth| (1..=REPLAY_DEPTH).contains(depth)),
-        ) else {
-            self.first_variation_move = None;
-            return Ok(());
-        };
+        // The runner does not know the right score: the tests of `search`
+        // compare it with plain minimax, so a score left open must be at a
+        // position they cover, with or without a principal variation.
+        let depth = info.depth.parse::<u8>().map_err(io::Error::other)?;
         if expected_score == "{score}" {
             verify_open_score_is_covered(&self.position, depth)?;
         }
-        let score = reported_score(info.score)?;
+        // Searched lines with a principal variation at depths 1 to 4 get the
+        // replay of D5.
+        let Some(full) = info
+            .full
+            .as_ref()
+            .filter(|_| (1..=REPLAY_DEPTH).contains(&depth))
+        else {
+            self.first_variation_move = None;
+            return Ok(());
+        };
+        let score = reported_score(info.score, depth)?;
         principal_variation::verify(&self.position, depth, score, full.pv.split(' '))
             .map_err(io::Error::other)?;
         self.first_variation_move = full.pv.split(' ').next().map(str::to_owned);
@@ -936,4 +985,145 @@ impl Drop for Engine {
             drop(child.wait());
         }
     }
+}
+
+/// A stand-in for fisher that answers the nth command with the nth batch of
+/// lines, for checking the runner itself.
+struct FakeEngine {
+    replies: std::collections::VecDeque<Vec<&'static str>>,
+    stdout: std::collections::VecDeque<&'static str>,
+    started: Instant,
+}
+
+impl TranscriptIo for FakeEngine {
+    fn send(&mut self, _: &[u8]) -> io::Result<()> {
+        self.stdout
+            .extend(self.replies.pop_front().unwrap_or_default());
+        Ok(())
+    }
+
+    fn close_input(&mut self) {}
+
+    fn now(&self) -> Instant {
+        self.started
+    }
+
+    fn read_reply(&mut self, _: Instant) -> io::Result<Option<String>> {
+        Ok(self.stdout.pop_front().map(str::to_owned))
+    }
+
+    fn wait_for_success(&mut self, _: Duration) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+fn run_against_fake(transcript: &str, replies: Vec<Vec<&'static str>>) -> io::Result<Vec<String>> {
+    run_transcript("fake", transcript, HANG_TIMEOUT, || {
+        Ok(FakeEngine {
+            replies: replies.into(),
+            stdout: std::collections::VecDeque::new(),
+            started: Instant::now(),
+        })
+    })
+}
+
+fn rejection(result: io::Result<Vec<String>>) -> String {
+    result
+        .err()
+        .map(|error| error.to_string())
+        .unwrap_or_default()
+}
+
+// k7/8/8/8/8/8/8/K7 w is legal and missing from test-data/open-scores.tsv.
+// 7k/8/5K1Q/8/8/8/8/8 b is listed there.
+
+#[test]
+fn open_score_without_a_variation_must_be_covered() {
+    let transcript = |position: &str| {
+        format!(
+            "> position {position}\n> go depth 4\n\
+             < info depth 4 score {{score}} nodes {{nodes}}\n< bestmove a1a2\n! exit\n"
+        )
+    };
+    let replies = || {
+        vec![
+            vec![],
+            vec!["info depth 4 score cp 0 nodes 99", "bestmove a1a2"],
+        ]
+    };
+    let error = rejection(run_against_fake(
+        &transcript("fen k7/8/8/8/8/8/8/K7 w - - 0 1"),
+        replies(),
+    ));
+    assert!(error.contains("not compared with plain minimax"), "{error}");
+    assert!(run_against_fake(&transcript("fen 7k/8/5K1Q/8/8/8/8/8 b - - 0 1"), replies()).is_ok());
+}
+
+#[test]
+fn repeated_open_score_without_a_variation_must_be_covered() {
+    let transcript = "> position fen k7/8/8/8/8/8/8/K7 w - - 0 1\n> go depth 2\n\
+                      <* info depth {depth} score {score} nodes {nodes}\n\
+                      < bestmove a1a2\n! exit\n";
+    let replies = vec![
+        vec![],
+        vec![
+            "info depth 1 score cp 0 nodes 3",
+            "info depth 2 score cp 0 nodes 12",
+            "bestmove a1a2",
+        ],
+    ];
+    let error = rejection(run_against_fake(transcript, replies));
+    assert!(error.contains("not compared with plain minimax"), "{error}");
+}
+
+#[test]
+fn short_fens_are_set_up_as_uci_sets_them_up() {
+    // Before the short FEN, the runner tracks the listed starting position.
+    let transcript = |fen: &str| {
+        format!(
+            "> position startpos\n> position fen {fen}\n> go depth 4\n\
+             < info depth 4 score {{score}} nodes {{nodes}}\n< bestmove a1a2\n! exit\n"
+        )
+    };
+    let replies = || {
+        vec![
+            vec![],
+            vec![],
+            vec!["info depth 4 score cp 0 nodes 99", "bestmove a1a2"],
+        ]
+    };
+    for fen in ["k7/8/8/8/8/8/8/K7 w - -", "k7/8/8/8/8/8/8/K7 w - - 0"] {
+        let error = rejection(run_against_fake(&transcript(fen), replies()));
+        // The missing halfmove clock is 0 and the missing fullmove number is 1.
+        assert!(
+            error.contains("from k7/8/8/8/8/8/8/K7 w - - 0 1 is not compared"),
+            "{fen}: {error}"
+        );
+    }
+    assert!(run_against_fake(&transcript("7k/8/5K1Q/8/8/8/8/8 b - -"), replies()).is_ok());
+}
+
+#[test]
+fn a_position_the_runner_cannot_set_up_must_be_rejected_by_the_transcript() {
+    // The last rank has seven files.
+    let bad = "> position fen k7/8/8/8/8/8/8/K6 w - - 0 1\n";
+    let error = rejection(run_against_fake(
+        &format!("{bad}> go depth 1\n< bestmove a1a2\n! exit\n"),
+        vec![vec![], vec!["bestmove a1a2"]],
+    ));
+    assert!(error.contains("cannot set up the position"), "{error}");
+    assert!(
+        run_against_fake(
+            &format!("{bad}< info string {{message:eight files}}\n! exit\n"),
+            vec![vec![
+                "info string position rejected: invalid FEN: eight files"
+            ]],
+        )
+        .is_ok()
+    );
+    let error = rejection(run_against_fake(
+        "> position fen k7/8/8/8/8/8/8/K7 w - - 0 1\n< info string {message:rejected}\n! exit\n",
+        vec![vec!["info string position rejected"]],
+    ));
+    assert!(error.contains("expects fisher to reject"), "{error}");
 }

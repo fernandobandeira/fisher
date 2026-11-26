@@ -8,7 +8,7 @@ use rules::{Move, Position, Promotion};
 use shakmaty::{CastlingMode, Chess, fen::Fen};
 
 use super::{
-    mate_in_two, open_scores,
+    mate_in_two,
     perft::records,
     plain_minimax::plain_minimax,
     principal_variation::{self, MATE_SCORE},
@@ -217,20 +217,35 @@ fn examples_at_depths_one_to_three() -> TestResult {
     Ok(())
 }
 
+/// The positions where a transcript leaves the score open, with the deepest
+/// depth to compare at. The transcript runner reads the same file.
+const OPEN_SCORES: &str = include_str!("../../../../test-data/open-scores.tsv");
+
 #[test]
 fn positions_whose_score_a_transcript_leaves_open() -> TestResult {
-    for fen in open_scores::POSITIONS {
-        compare_at_depths(fen, 1..=open_scores::DEEPEST)?;
+    let mut positions = 0;
+    for line in OPEN_SCORES.lines() {
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let (deepest, fen) = line
+            .split_once('\t')
+            .ok_or_else(|| format!("expected a depth and a FEN in open-scores.tsv: {line:?}"))?;
+        compare_at_depths(fen, 1..=deepest.parse()?)?;
+        positions += 1;
     }
+    assert!(positions > 0, "open-scores.tsv lists no position");
     Ok(())
 }
 
 #[test]
 fn prefix_check_rejects_a_variation_through_a_worse_reply() -> TestResult {
-    // Perft position 2. The search scores cp 300 with e2a6 at depth 3. After
-    // e2a6 h8g8 a6c8 the material count is also cp 300, so the D5 replay
-    // accepts the variation, but h8g8 is a worse reply for Black: after it,
-    // White can reach cp 600.
+    // Perft position 2 at depth 3. The values come from the review of PR #76,
+    // which reproduced them with the reference minimax on shakmaty before this
+    // change removed it: cp 300 at the root, -300 for Black after e2a6, 600
+    // for White after h8g8 and -300 for Black after a6c8. So e2a6 h8g8 a6c8
+    // ends at cp 300 and passes the D5 replay, but h8g8 is a worse reply than
+    // Black's best.
     let fen = "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1";
     let root = Position::from_fen(fen)?;
     let result = minimax(&root, 3);

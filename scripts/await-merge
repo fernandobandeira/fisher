@@ -4,6 +4,7 @@
 import argparse
 import json
 import math
+import re
 import subprocess
 import sys
 import time
@@ -14,11 +15,56 @@ REQUIRED_CHECKS = {"check", "mutation", "coverage", "guard-change"}
 FAILED_CONCLUSIONS = {"FAILURE", "CANCELLED", "TIMED_OUT"}
 
 
-def gh(deadline, *args):
+def gh(deadline, *args, stderr=None):
     remaining = deadline - time.monotonic()
     if remaining <= 0:
         raise subprocess.TimeoutExpired(args, 0)
-    return subprocess.check_output(("gh", *args), timeout=remaining, text=True).strip()
+    return subprocess.check_output(
+        ("gh", *args), timeout=remaining, text=True, stderr=stderr,
+    ).strip()
+
+
+def read_gh(deadline, parse, *args):
+    try:
+        return parse(gh(deadline, *args, stderr=subprocess.PIPE))
+    except (OSError, subprocess.CalledProcessError, ValueError) as error:
+        detail = " ".join(str(error).splitlines())
+        print(f"Warning: could not read from gh {' '.join(args[:2])}: {detail}", file=sys.stderr)
+        return None
+
+
+def parse_pull(output):
+    pull = json.loads(output)
+    if not isinstance(pull, dict) or any(
+        not isinstance(pull.get(key), str)
+        for key in ("state", "mergeStateStatus", "mergeable", "baseRefName", "headRefOid")
+    ) or not isinstance(pull.get("isDraft"), bool):
+        raise ValueError("unexpected pull request fields")
+
+    # The rollup is scoped to the current head. Only Actions jobs are required.
+    checks = pull.get("statusCheckRollup")
+    if checks is None:
+        checks = []
+    if not isinstance(checks, list) or any(not isinstance(check, dict) for check in checks):
+        raise ValueError("unexpected check rollup")
+    latest = {}
+    for check in checks:
+        name = check.get("name")
+        if check.get("__typename") != "CheckRun" or not isinstance(name, str):
+            continue
+        if name not in REQUIRED_CHECKS:
+            continue
+        if any(not isinstance(check.get(key), str) for key in ("startedAt", "status", "conclusion")):
+            raise ValueError(f"unexpected fields for check {name}")
+        if name not in latest or check["startedAt"] >= latest[name]["startedAt"]:
+            latest[name] = check
+    return pull, latest
+
+
+def parse_base(output):
+    if not re.fullmatch("[0-9a-f]{40}", output):
+        raise ValueError("expected the SHA of main")
+    return output
 
 
 def await_merge(number, timeout, interval):
@@ -26,12 +72,19 @@ def await_merge(number, timeout, interval):
     updated_bases = set()
     updated_head = None
     last_state = "no pull request state received"
+    delay = 0
     try:
         while time.monotonic() < deadline:
-            pull = json.loads(gh(
-                deadline, "pr", "view", number, "--json",
-                "state,mergeStateStatus,mergeable,baseRefName,headRefOid,statusCheckRollup",
-            ))
+            if delay:
+                time.sleep(max(0, min(delay, deadline - time.monotonic())))
+            delay = interval
+            result = read_gh(
+                deadline, parse_pull, "pr", "view", number, "--json",
+                "state,mergeStateStatus,mergeable,baseRefName,headRefOid,statusCheckRollup,isDraft",
+            )
+            if result is None:
+                continue
+            pull, checks = result
             state, merge_state = pull["state"], pull["mergeStateStatus"]
             head = pull["headRefOid"]
             last_state = f"{state}/{merge_state} at {head}"
@@ -40,6 +93,8 @@ def await_merge(number, timeout, interval):
                 return
             if state == "CLOSED":
                 sys.exit(f"Pull request #{number} closed without merging.")
+            if pull["isDraft"]:
+                sys.exit(f"Pull request #{number} is a draft.")
             if pull["baseRefName"] != "main":
                 sys.exit(f"Pull request #{number} must target main.")
             if pull["mergeable"] == "CONFLICTING":
@@ -47,25 +102,21 @@ def await_merge(number, timeout, interval):
 
             # GitHub may still show the old head while an update is being applied.
             if head != updated_head:
-                for check in pull["statusCheckRollup"] or []:
-                    if (check["__typename"] == "CheckRun"
-                            and check["name"] in REQUIRED_CHECKS
-                            and check["status"] == "COMPLETED"
+                for name, check in checks.items():
+                    if (check["status"] == "COMPLETED"
                             and check["conclusion"] in FAILED_CONCLUSIONS):
                         sys.exit(
-                            f"Pull request #{number} required check {check['name']} "
+                            f"Pull request #{number} required check {name} "
                             f"finished with {check['conclusion']} at {head}."
                         )
             if merge_state == "BEHIND":
-                base = gh(deadline, "api", "repos/{owner}/{repo}/git/ref/heads/main",
-                          "--jq", ".object.sha")
-                if base not in updated_bases:
+                base = read_gh(deadline, parse_base, "api",
+                               "repos/{owner}/{repo}/git/ref/heads/main", "--jq", ".object.sha")
+                if base is not None and base not in updated_bases:
                     print(f"Updating pull request #{number} against main at {base}.", flush=True)
                     gh(deadline, "pr", "update-branch", number)
                     updated_bases.add(base)
                     updated_head = head
-
-            time.sleep(max(0, min(interval, deadline - time.monotonic())))
     except subprocess.TimeoutExpired:
         pass
     except (OSError, subprocess.CalledProcessError) as error:

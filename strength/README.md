@@ -36,18 +36,20 @@ Artifacts expire after 90 days. A new dispatch reproduces the games. “Re-run f
 A series uses up to eight hosted runners at once. The `plan` and `record`
 jobs run on either side of the playing jobs. All branches using this
 workflow share one queue. A second and third dispatch remain pending in
-Actions while the first runs, and GitHub starts them one at a time in the
-order they entered the queue. Up to 100 runs can wait. Once the queue is
-full, additional dispatches show as canceled in the Actions run list.
+Actions while the first runs. GitHub starts them one at a time, usually in
+queue-entry order, but does not guarantee that order. Up to 100 runs can
+wait. When the queue is full, additional dispatches show as canceled in
+the Actions run list.
 [GitHub Actions concurrency](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency)
 
-Allow about **40 minutes for conditions 3** and **1 hour 50 minutes for
-conditions 4** after the series starts, plus any wait for runners. These
-estimates schedule the measured playing-job durations onto eight runners
-and add the plan and record times. Conditions 3 used runs
+Allow about **45 minutes for conditions 3** and **2 hours for conditions
+4** after the series starts, plus any wait for runners. These estimates
+schedule the measured playing-job durations in matrix order onto eight
+runners and add the plan and record times. Conditions 3 took an estimated
+44.0 and 41.5 minutes using runs
 [45713248835](https://github.com/fernandobandeira/fisher/actions/runs/45713248835)
 and [45698177264](https://github.com/fernandobandeira/fisher/actions/runs/45698177264).
-Conditions 4 used runs
+Conditions 4 took an estimated 109.9 and 116.7 minutes using runs
 [45713145494](https://github.com/fernandobandeira/fisher/actions/runs/45713145494)
 and [45698173508](https://github.com/fernandobandeira/fisher/actions/runs/45698173508).
 Conditions 1 and 2 are closed.

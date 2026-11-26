@@ -343,6 +343,11 @@ controlled schedules fix the time for the move and the time the search may
 use after the margin, the decision to start another depth and the order
 of responses when several limits apply.
 
+fisher-mhy staged the [clock schedules for a forecast factor of 15](uci-forecast-15/README.md)
+on 2026-11-26, before `deepening` changes the factor of D49 from 30 to 15.
+No test reads them until that change. They rework every controlled case
+that sits on a boundary of D49 and keep the others.
+
 ## Short FEN transcripts
 
 The [four-field session](uci/position-fen-four-fields.uci) and

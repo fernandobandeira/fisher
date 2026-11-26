@@ -17,9 +17,11 @@ This is a record, not a gate. `scripts/check` does not run it, and nothing here 
 
 ## Taking a measurement
 
-Start the **Strength series** workflow by hand. Give the measured revision,
-conditions 3 or 4, and an opponent revision. Leaving the opponent blank
-uses the measured revision from the last record under those conditions.
+Dispatch the **Strength series** workflow by hand when cutting a release
+or when a revision's strength claim warrants a record. Skip it as proof on
+everyday pull requests. Give the measured revision, conditions 3 or 4, and
+an opponent revision. Leaving the opponent blank uses the measured revision
+from the last record under those conditions.
 
 Each of `range-01` through `range-20` plays a contiguous range in opening
 order, with four games at a time. The ranges have 100 openings under
@@ -31,12 +33,24 @@ printed line to `records.tsv` in a pull request.
 
 Artifacts expire after 90 days. A new dispatch reproduces the games. “Re-run failed jobs” joins ranges from different attempts and keeps the first attempt's date.
 
-The repository has 20 concurrent job slots. After planning, a series has
-22 jobs, including 21 playing jobs, so at least one range waits for a slot.
-Allow about twice the slowest range for a series run alone. That is roughly
-30 minutes for conditions 3 and 1 to 2 hours for conditions 4. Two series dispatched together
-run mostly one after the other, with some overlap as slots free up.
-Pull request checks also wait when the series fills the available slots.
+A series uses up to eight hosted runners at once. The `plan` and `record`
+jobs run on either side of the playing jobs. All branches using this
+workflow share one queue. A second and third dispatch remain pending in
+Actions while the first runs, and GitHub starts them one at a time in the
+order they entered the queue. Up to 100 runs can wait. Once the queue is
+full, additional dispatches show as canceled in the Actions run list.
+[GitHub Actions concurrency](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency)
+
+Allow about **40 minutes for conditions 3** and **1 hour 50 minutes for
+conditions 4** after the series starts, plus any wait for runners. These
+estimates schedule the measured playing-job durations onto eight runners
+and add the plan and record times. Conditions 3 used runs
+[45713248835](https://github.com/fernandobandeira/fisher/actions/runs/45713248835)
+and [45698177264](https://github.com/fernandobandeira/fisher/actions/runs/45698177264).
+Conditions 4 used runs
+[45713145494](https://github.com/fernandobandeira/fisher/actions/runs/45713145494)
+and [45698173508](https://github.com/fernandobandeira/fisher/actions/runs/45698173508).
+Conditions 1 and 2 are closed.
 
 Before building, each playing job installs the two revisions' pinned Rust
 channels with the minimal profile in a fresh Rustup directory on the hosted runner.

@@ -14,20 +14,24 @@ import time
 REQUIRED_CHECKS = {"check", "mutation", "coverage", "guard-change"}
 FAILED_CONCLUSIONS = {"FAILURE", "CANCELLED", "TIMED_OUT"}
 UNSTARTED = "0001-01-01T00:00:00Z"
+FAILED_UPDATE_INTERVAL = 5
+FAILED_UPDATE_SECONDS = 30
 
 
-def gh(deadline, *args, stderr=None):
+def gh(deadline, *args, show_stderr=False):
     remaining = deadline - time.monotonic()
     if remaining <= 0:
         raise subprocess.TimeoutExpired(args, 0)
-    return subprocess.check_output(
-        ("gh", *args), timeout=remaining, text=True, stderr=stderr,
-    ).strip()
+    result = subprocess.run(("gh", *args), timeout=remaining, text=True,
+                            capture_output=True, check=True)
+    if show_stderr and result.stderr:
+        sys.stderr.write(result.stderr)
+    return result.stdout.strip()
 
 
 def read_gh(deadline, parse, *args, retry=True):
     try:
-        return parse(gh(deadline, *args, stderr=subprocess.PIPE))
+        return parse(gh(deadline, *args))
     except (OSError, subprocess.CalledProcessError, ValueError) as error:
         stderr = error.stderr if isinstance(error, subprocess.CalledProcessError) else None
         detail = " ".join((stderr or "").strip().splitlines()) or str(error)
@@ -92,13 +96,15 @@ def await_merge(number, timeout, interval):
     updated_head = None
     last_state = None
     delay = 0
+    update_error = None
+    read_deadline = deadline
     try:
-        while time.monotonic() < deadline:
+        while time.monotonic() < read_deadline:
             if delay:
-                time.sleep(max(0, min(delay, deadline - time.monotonic())))
-            delay = interval
+                time.sleep(max(0, min(delay, read_deadline - time.monotonic())))
+            delay = min(interval, FAILED_UPDATE_INTERVAL) if update_error is not None else interval
             result = read_gh(
-                deadline, parse_pull, "pr", "view", number, "--json",
+                read_deadline, parse_pull, "pr", "view", number, "--json",
                 "state,mergeStateStatus,mergeable,baseRefName,headRefOid,statusCheckRollup,isDraft",
                 retry=last_state is not None,
             )
@@ -120,6 +126,13 @@ def await_merge(number, timeout, interval):
             if pull["mergeable"] == "CONFLICTING":
                 sys.exit(f"Pull request #{number} conflicts with main. Rebase is needed.")
 
+            if update_error is not None:
+                if merge_state == "BEHIND":
+                    continue
+                update_error = None
+                read_deadline = deadline
+                delay = interval
+
             # GitHub may still show the old head while an update is being applied.
             if head != updated_head:
                 for name, check in checks.items():
@@ -134,13 +147,23 @@ def await_merge(number, timeout, interval):
                                "repos/{owner}/{repo}/git/ref/heads/main", "--jq", ".object.sha")
                 if base is not None and base not in updated_bases:
                     print(f"Updating pull request #{number} against main at {base}.", flush=True)
-                    gh(deadline, "pr", "update-branch", number)
                     updated_bases.add(base)
-                    updated_head = head
+                    try:
+                        gh(deadline, "pr", "update-branch", number, show_stderr=True)
+                    except subprocess.CalledProcessError as error:
+                        # Main can show the squash commit before the pull request shows the merge.
+                        update_error = error.stderr.strip() or str(error)
+                        read_deadline = min(deadline, time.monotonic() + FAILED_UPDATE_SECONDS)
+                        delay = 0
+                    else:
+                        updated_head = head
     except subprocess.TimeoutExpired:
         pass
     except (OSError, subprocess.CalledProcessError) as error:
         sys.exit(f"Could not wait for pull request #{number}: {error}")
+
+    if update_error is not None:
+        sys.exit(f"Could not wait for pull request #{number}: {update_error}")
 
     last_state = last_state or "no pull request state received"
     sys.exit(f"Timed out waiting for pull request #{number}. Last state: {last_state}.")

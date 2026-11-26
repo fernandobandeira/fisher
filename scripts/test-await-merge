@@ -16,6 +16,7 @@ VIEW = ["pr", "view", "42", "--json",
         "state,mergeStateStatus,mergeable,baseRefName,headRefOid,statusCheckRollup,isDraft"]
 BASE = ["api", "repos/{owner}/{repo}/git/ref/heads/main", "--jq", ".object.sha"]
 UPDATE = ["pr", "update-branch", "42"]
+UPDATE_ERROR = {"error": "X Cannot update PR branch due to conflicts"}
 FIRST_BASE = "a" * 40
 SECOND_BASE = "b" * 40
 
@@ -38,6 +39,23 @@ STAND_IN = """\
     print(output if isinstance(output, str) else json.dumps(output))
 """
 
+CLOCK = """\
+    import json
+    from pathlib import Path
+    import runpy
+    import sys
+    from types import SimpleNamespace
+
+    sleeps = []
+    sys.argv.pop(0)
+    main = runpy.run_path(sys.argv[0])["main"]
+    main.__globals__["time"] = SimpleNamespace(monotonic=lambda: sum(sleeps), sleep=sleeps.append)
+    try:
+        main()
+    finally:
+        Path("sleeps").write_text(json.dumps(sleeps))
+"""
+
 
 def pull(state="OPEN", merge_state="BLOCKED", mergeable="MERGEABLE",
          head="first-head", checks=(), base="main", draft=False):
@@ -56,23 +74,30 @@ def check(name, status, conclusion="", started="2026-11-26T01:00:00Z", job=100):
 
 
 class AwaitMergeTest(unittest.TestCase):
-    def run_script(self, steps, timeout="4"):
+    def run_script(self, steps, timeout="4", interval="0.01", expected_sleeps=None):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             fake = root / "gh"
             fake.write_text(f"#!{sys.executable}\n" + textwrap.dedent(STAND_IN))
             fake.chmod(0o755)
             (root / "steps").write_text(json.dumps(steps))
+            args = [sys.executable]
+            if expected_sleeps is not None:
+                args.extend(("-c", textwrap.dedent(CLOCK)))
+            args.extend((str(SCRIPT), "42", "--timeout", timeout, "--interval", interval))
             result = subprocess.run(
-                (sys.executable, str(SCRIPT), "42", "--timeout", timeout, "--interval", "0.01"),
+                args,
                 cwd=root, env={**os.environ, "PATH": f"{root}{os.pathsep}{os.environ['PATH']}"},
-                capture_output=True, text=True, timeout=float(timeout) + 1.5,
+                capture_output=True, text=True,
+                timeout=5 if expected_sleeps is not None else float(timeout) + 1.5,
             )
+            if expected_sleeps is not None:
+                self.assertEqual(json.loads((root / "sleeps").read_text()), expected_sleeps)
             calls = [json.loads(line) for line in (root / "calls").read_text().splitlines()]
             return result, calls
 
-    def assert_steps(self, steps, status, message):
-        result, calls = self.run_script(steps)
+    def assert_steps(self, steps, status, message, **options):
+        result, calls = self.run_script(steps, **options)
         self.assertEqual(result.returncode, status, result)
         self.assertIn(message, result.stdout + result.stderr)
         self.assertEqual(calls, [args for args, _ in steps])
@@ -205,10 +230,51 @@ class AwaitMergeTest(unittest.TestCase):
         self.assertIn("OPEN/BLOCKED at first-head", result.stderr)
         self.assertGreater(len(calls), 2)
 
-    def test_failed_update_ends_wait(self):
+    def test_failed_update_followed_by_merge(self):
+        behind = pull(merge_state="BEHIND")
+        for reads in ([pull(state="MERGED")], [behind, pull(state="MERGED")]):
+            with self.subTest(reads=reads):
+                self.assert_steps([
+                    behind, (BASE, FIRST_BASE), (UPDATE, UPDATE_ERROR), *reads,
+                ], 0, "Pull request #42 merged.")
+
+    def test_failed_update_followed_by_late_merge(self):
+        behind = pull(merge_state="BEHIND")
         self.assert_steps([
-            pull(merge_state="BEHIND"), (BASE, FIRST_BASE), (UPDATE, {"error": "temporary GitHub error"}),
-        ], 1, "Could not wait for pull request #42")
+            behind, (BASE, FIRST_BASE), (UPDATE, UPDATE_ERROR),
+            *([behind] * 5), pull(state="MERGED"),
+        ], 0, "Pull request #42 merged.", timeout="60", interval="15", expected_sleeps=[5] * 5)
+
+    def test_failed_update_ends_wait(self):
+        behind = pull(merge_state="BEHIND")
+        steps = [behind, (BASE, FIRST_BASE), (UPDATE, UPDATE_ERROR), *([behind] * 6)]
+        result, calls = self.run_script(steps + [pull(state="MERGED")],
+                                        timeout="60", interval="15", expected_sleeps=[5] * 6)
+        self.assertEqual(result.returncode, 1, result)
+        self.assertIn("Could not wait for pull request #42", result.stderr)
+        self.assertIn(UPDATE_ERROR["error"], result.stderr)
+        self.assertEqual(calls, [args for args, _ in steps])
+
+    def test_failed_update_followed_by_closed_draft_or_conflicting(self):
+        for fresh, message in (
+            (pull(state="CLOSED"), "closed without merging"),
+            (pull(draft=True), "is a draft"),
+            (pull(merge_state="DIRTY", mergeable="CONFLICTING"), "conflicts with main. Rebase is needed"),
+        ):
+            with self.subTest(message=message):
+                self.assert_steps([
+                    pull(merge_state="BEHIND"), (BASE, FIRST_BASE), (UPDATE, UPDATE_ERROR), fresh,
+                ], 1, message)
+
+    def test_failed_update_reads_within_time_limit(self):
+        behind = pull(merge_state="BEHIND")
+        result, calls = self.run_script([
+            behind, (BASE, FIRST_BASE), (UPDATE, UPDATE_ERROR), behind,
+            pull(state="MERGED"),
+        ], timeout="1", interval="15", expected_sleeps=[1])
+        self.assertEqual(result.returncode, 1, result)
+        self.assertIn(UPDATE_ERROR["error"], result.stderr)
+        self.assertEqual(calls, [VIEW, BASE, UPDATE, VIEW])
 
     def test_draft_ends_wait(self):
         self.assert_steps([pull(draft=True)], 1, "Pull request #42 is a draft")

@@ -19,9 +19,9 @@ Use `bd prime` for the general Beads command reference.
 - Put the new ID in the code as `// TODO(fisher-<id>): <what is missing>`. [CODING_STANDARDS.md](../../CODING_STANDARDS.md) has the rule.
 - Find the comments for a ticket with `grep -rn 'TODO(<id>)' crates/`.
 
-## Wayfinding operations
+## Decisions across sessions
 
-- Create the map as an epic with `--labels wayfinder:map` and its body supplied through `--body-file`.
-- Create each decision ticket with `--parent <map-id> --no-inherit-labels --labels wayfinder:<type>`. Use `research`, `prototype`, `grilling`, or `task` for `<type>`. Add blocking dependencies after creating the tickets.
-- Find the frontier with `bd ready --parent <map-id> --unassigned --sort oldest` and claim a ticket with `bd update <id> --claim` before working on it.
-- Record the answer as a comment and close the ticket. Fetch the latest map body and update its Decisions so far with `bd update <map-id> --body-file <path>`, referring to the resolved ticket by title and Beads ID.
+- Create an epic with `bd create "<title>" --type epic --body-file <path>` to record the decisions the change needs.
+- Create a ticket for each decision with `--parent <epic-id> --no-inherit-labels`. Add blocking dependencies after creating the tickets.
+- Find ready decisions with `bd ready --parent <epic-id> --unassigned --sort oldest` and claim a ticket with `bd update <id> --claim` before working on it.
+- Record the answer as a comment and close the ticket. Fetch the latest epic body and update its Decisions so far with `bd update <epic-id> --body-file <path>`, referring to the resolved ticket by title and Beads ID.

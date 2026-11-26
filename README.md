@@ -8,12 +8,9 @@ Fisher plays random legal moves over UCI. The [acceptance record](docs/uci-accep
 
 ```sh
 git config core.hooksPath .githooks                           # run the check before every commit
-npx skills@latest experimental_install -a claude-code codex   # restore the agent skills
 cargo install cargo-deny --version 0.22.0 --locked             # check dependency advisories and sources
 scripts/check                                                 # run the local checks
 ```
-
-The skills are Matt Pocock's. They are not committed: `skills-lock.json` pins the commit, and the second command copies them into `.agents/skills/`. A new git worktree needs the same command.
 
 The crate boundary check uses Python 3.8 or newer. The pre-commit hook runs the local gate and needs network access to refresh RustSec and Cargo registry data. If the refresh fails, restore connectivity and rerun `scripts/check`. CI runs the local checks, mutation and coverage on pull requests, pushes to `main`, and weekly. It also checks commit messages for `Guard-Change:` on pull requests and pushes to `main`. Rust comes from [rustup](https://rustup.rs). The version is pinned in `rust-toolchain.toml`.
 
@@ -21,7 +18,7 @@ A separate weekly workflow runs the approved deep perft, all 100 published mates
 
 ## Start work
 
-Open the project in your agent and run `/grill-with-docs` on what you want to build first. [docs/process.md](docs/process.md) describes the path from there to a merge.
+Start by sizing the change you want to make. Follow the steps in [docs/process.md](docs/process.md).
 
 ## Read
 

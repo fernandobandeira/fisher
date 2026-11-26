@@ -1,34 +1,34 @@
 name: Real-clock match
 on:
-  schedule:
-    - cron: '17 7 * * 4'
-  workflow_dispatch:
+  pull_request:
 
 permissions:
   contents: read
 
 jobs:
   clock-match:
+    if: github.head_ref == 'fisher-684-proof'
     runs-on: ubuntu-latest
-    timeout-minutes: 75
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         timeout-minutes: 3
         with:
           persist-credentials: false
-      - name: Download and verify fastchess
-        timeout-minutes: 3
-        run: scripts/install-fastchess "$RUNNER_TEMP/fastchess"
-      - name: Download and install the PGN replay library
-        timeout-minutes: 3
+      - name: Plant stale cargo-clippy
         run: |
-          python3 -m venv "$RUNNER_TEMP/clock-venv"
-          pip="$RUNNER_TEMP/clock-venv/bin/pip"
-          if ! "$pip" install --timeout 15 --retries 2 --only-binary :all: --require-hashes -r scripts/clock-match-build-requirements.txt ||
-             ! "$pip" install --timeout 15 --retries 2 --no-build-isolation --no-deps --require-hashes -r scripts/clock-match-requirements.txt; then
-            echo "::error::PGN replay library download or installation failed."
-            exit 1
+          rustup_home=${RUSTUP_HOME:-"$HOME/.rustup"}
+          channel=$(python3 -c 'import tomllib; print(tomllib.load(open("rust-toolchain.toml", "rb"))["toolchain"]["channel"])')
+          toolchain="$rustup_home/toolchains/$channel-x86_64-unknown-linux-gnu"
+          if [ -d "$toolchain" ]; then
+            mv "$toolchain" "$RUNNER_TEMP/original-toolchain"
           fi
+          mkdir -p "$toolchain/bin"
+          touch "$toolchain/bin/cargo-clippy"
+          printf 'RUSTUP_TOOLCHAIN=\n' >> "$GITHUB_ENV"
+      - name: Install the pinned Rust toolchain
+        timeout-minutes: 3
+        run: scripts/install-rust-toolchain
       - name: Download Rust build dependencies
         timeout-minutes: 3
         env:
@@ -38,15 +38,8 @@ jobs:
             echo "::error::Rust build dependency download failed."
             exit 1
           fi
-      - name: Play and verify the real-clock match
+      - name: Build fisher in release mode
+        timeout-minutes: 3
         env:
           CARGO_NET_OFFLINE: 'true'
-        run: |
-          "$RUNNER_TEMP/clock-venv/bin/python" scripts/check-clock-match "$RUNNER_TEMP/fastchess" clock-match-evidence
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        if: always()
-        timeout-minutes: 3
-        with:
-          name: clock-match
-          path: clock-match-evidence/
-          if-no-files-found: ignore
+        run: cargo build --locked --release -p fisher

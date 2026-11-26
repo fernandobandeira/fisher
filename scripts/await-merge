@@ -14,8 +14,8 @@ import time
 REQUIRED_CHECKS = {"check", "mutation", "coverage", "guard-change"}
 FAILED_CONCLUSIONS = {"FAILURE", "CANCELLED", "TIMED_OUT"}
 UNSTARTED = "0001-01-01T00:00:00Z"
-FAILED_UPDATE_READS = 3
-FAILED_UPDATE_SECONDS = 5
+FAILED_UPDATE_INTERVAL = 5
+FAILED_UPDATE_SECONDS = 30
 
 
 def gh(deadline, *args, show_stderr=False):
@@ -97,17 +97,12 @@ def await_merge(number, timeout, interval):
     last_state = None
     delay = 0
     update_error = None
-    reads_left = 0
     read_deadline = deadline
     try:
         while time.monotonic() < read_deadline:
-            if update_error is not None:
-                if reads_left == 0:
-                    break
-                reads_left -= 1
             if delay:
                 time.sleep(max(0, min(delay, read_deadline - time.monotonic())))
-            delay = min(interval, 1) if update_error is not None else interval
+            delay = min(interval, FAILED_UPDATE_INTERVAL) if update_error is not None else interval
             result = read_gh(
                 read_deadline, parse_pull, "pr", "view", number, "--json",
                 "state,mergeStateStatus,mergeable,baseRefName,headRefOid,statusCheckRollup,isDraft",
@@ -158,7 +153,6 @@ def await_merge(number, timeout, interval):
                     except subprocess.CalledProcessError as error:
                         # Main can show the squash commit before the pull request shows the merge.
                         update_error = error.stderr.strip() or str(error)
-                        reads_left = FAILED_UPDATE_READS
                         read_deadline = min(deadline, time.monotonic() + FAILED_UPDATE_SECONDS)
                         delay = 0
                     else:

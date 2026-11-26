@@ -2,13 +2,20 @@
 """Play a range of openings between two revisions of fisher and print its SHA-256."""
 
 import argparse
+import csv
+from datetime import date
 import hashlib
 import json
+from math import inf, isfinite, log10, sqrt
+import os
 from pathlib import Path
+import re
 import shutil
+from statistics import mean, median, pstdev
 import subprocess
 import sys
 from tempfile import TemporaryDirectory
+from time import perf_counter
 
 try:
     import chess.pgn
@@ -19,6 +26,8 @@ ROOT = Path(__file__).resolve().parents[1]
 OPENINGS = ROOT / "strength/series-openings.epd"
 FIRST_NODE_REVISION = "4fd30025a6974840b2a65a4427c819a89eefcd13"
 CONDITIONS = {3: (1_000_000, 2_000), 4: (10_000_000, 500)}
+RANGE_COUNT = 20
+BENCH_RUNS = 5
 FINISHED_RESULTS = {"1-0", "0-1", "1/2-1/2"}
 
 
@@ -43,11 +52,37 @@ def build(commit, engine):
         subprocess.run(["git", "archive", "-o", archive, commit], cwd=ROOT, check=True)
         subprocess.run(["tar", "-xf", archive], cwd=source, check=True)
         target = source / "target"
+        command = ["cargo", "build", "--locked", "--release", "-p", "fisher", "--target-dir", target]
+        environment = os.environ.copy()
+        if rustup_home := environment.get("SERIES_RUSTUP_HOME"):
+            environment["RUSTUP_HOME"] = rustup_home
+            command[:0] = ["rustup", "run", toolchain(commit)]
         subprocess.run(
-            ["cargo", "build", "--locked", "--release", "-p", "fisher", "--target-dir", target],
-            cwd=source, check=True, stdout=sys.stderr,
+            command, cwd=source, env=environment, check=True, stdout=sys.stderr,
         )
         shutil.copy2(target / "release/fisher", engine)
+
+
+def bench_nps(engine):
+    start = perf_counter()
+    output = subprocess.check_output([engine, "bench"], text=True, timeout=120)
+    elapsed = perf_counter() - start
+    total = re.search(r"^Nodes searched\s*:\s*([1-9][0-9]*)$", output, re.MULTILINE)
+    if not total:
+        raise ValueError(f"{engine.name}: bench did not report its node count")
+    return int(total[1]) / elapsed
+
+
+def measure_speed(measured, opponent):
+    engines = (measured, opponent)
+    samples = {engine: [] for engine in engines}
+    # As in Fishtest, warm up before timing nodes per second.
+    for engine in engines:
+        bench_nps(engine)
+    for repeat in range(BENCH_RUNS):
+        for engine in engines if repeat % 2 == 0 else reversed(engines):
+            samples[engine].append(bench_nps(engine))
+    return median(samples[measured]) / median(samples[opponent])
 
 
 class SeriesGame(chess.pgn.GameBuilder):
@@ -75,7 +110,7 @@ def final_result(position):
     return None
 
 
-def games_in_order(pgn, openings, first, measured, opponent):
+def read_games(pgn, openings, first, measured, opponent):
     numbers = {fen: number for number, fen in enumerate(openings, first)}
     measured_name = f"measured-{measured}"
     opponent_name = f"opponent-{opponent}"
@@ -112,10 +147,26 @@ def games_in_order(pgn, openings, first, measured, opponent):
             if result != final_result(parsed.end().board()):
                 raise ValueError(f"{description}: final position does not justify result {result}")
             games[key] = [number, fen, white, moves, result, termination]
+    return games
 
-    if len(games) != 2 * len(openings):
-        raise ValueError(f"Expected {2 * len(openings)} games, found {len(games)}")
-    return [games[key] for key in sorted(games)]
+
+def missing_games(games, first, count):
+    if not games:
+        return f"openings {first}–{first + count - 1}, both colors ({2 * count} games)"
+    missing = []
+    for number in range(first, first + count):
+        white = (number, 0) not in games
+        black = (number, 1) not in games
+        if white or black:
+            color = "both colors" if white and black else "measured as White" if white else "measured as Black"
+            missing.append(f"opening {number}, {color}")
+    return "; ".join(missing)
+
+
+def game_bytes(games):
+    return "".join(
+        json.dumps(game, separators=(",", ":")) + "\n" for game in games
+    ).encode("utf-8")
 
 
 def play(args, out, nodes, measured, opponent):
@@ -123,6 +174,11 @@ def play(args, out, nodes, measured, opponent):
         raise ValueError("fastchess is not installed")
     build(measured, out / "measured")
     build(opponent, out / "opponent")
+    if args.bench:
+        ratio = measure_speed(out / "measured", out / "opponent")
+        runner = subprocess.check_output(["fastchess", "--version"], text=True).strip()
+        (out / "bench.json").write_text(json.dumps({"ratio": ratio, "runner": runner}) + "\n")
+        print(f"Speed ratio: {ratio:.4f}", file=sys.stderr)
     print(f"{args.count} openings from {args.first}, {nodes:,} nodes per move", file=sys.stderr)
     log = out / "fastchess.log"
     with log.open("w", encoding="utf-8") as stream:
@@ -143,7 +199,39 @@ def play(args, out, nodes, measured, opponent):
         raise ValueError(f"fastchess exited with status {result.returncode}. See {log}")
 
 
-def main():
+def pair(measured, opponent):
+    measured = revision(measured)
+    opponent = revision(opponent)
+    if measured == opponent:
+        raise ValueError("Measured and opponent revisions must resolve to different commits")
+    return measured, opponent
+
+
+def toolchain(commit):
+    import tomllib
+
+    manifest = subprocess.check_output(
+        ["git", "show", f"{commit}:rust-toolchain.toml"], cwd=ROOT, text=True,
+    )
+    return tomllib.loads(manifest)["toolchain"]["channel"]
+
+
+def prepare_rust(measured, opponent):
+    # Provision a new home per job so an incomplete runner installation
+    # cannot leave stale component files in the toolchains used by the builds.
+    environment = dict(os.environ, RUSTUP_HOME=os.environ["SERIES_RUSTUP_HOME"])
+    for channel in dict.fromkeys(map(toolchain, pair(measured, opponent))):
+        subprocess.run(
+            ["rustup", "toolchain", "install", channel, "--profile", "minimal", "--no-self-update"],
+            env=environment, check=True,
+        )
+        subprocess.run(
+            ["rustup", "component", "list", "--installed", "--toolchain", channel],
+            env=environment, check=True,
+        )
+
+
+def play_range():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("measured")
     parser.add_argument("opponent")
@@ -152,6 +240,7 @@ def main():
     parser.add_argument("count", type=int, help="number of openings")
     parser.add_argument("directory", type=Path, help="new directory for the games")
     parser.add_argument("--concurrency", type=int, default=1, help="games at a time (default: 1)")
+    parser.add_argument("--bench", action="store_true", help="time the two builds before playing")
     parser.add_argument("--pgn", type=Path, help="validate and digest an existing PGN without playing")
     args = parser.parse_args()
 
@@ -161,10 +250,7 @@ def main():
     if args.concurrency < 1:
         parser.error("concurrency must be positive")
 
-    measured = revision(args.measured)
-    opponent = revision(args.opponent)
-    if measured == opponent:
-        raise ValueError("Measured and opponent revisions must resolve to different commits")
+    measured, opponent = pair(args.measured, args.opponent)
     openings = OPENINGS.read_text(encoding="utf-8").splitlines()
     selected = openings[args.first - 1:args.first + args.count - 1]
     if len(selected) != args.count or len(set(selected)) != args.count:
@@ -175,16 +261,155 @@ def main():
     pgn = args.pgn if args.pgn is not None else out / "games.pgn"
     if args.pgn is None:
         play(args, out, nodes, measured, opponent)
-    games = games_in_order(pgn, selected, args.first, measured, opponent)
-    data = "".join(
-        json.dumps(game, separators=(",", ":")) + "\n" for game in games
-    ).encode("utf-8")
+    games = read_games(pgn, selected, args.first, measured, opponent)
+    if missing := missing_games(games, args.first, args.count):
+        raise ValueError(f"Missing games: {missing}")
+    data = game_bytes(games[key] for key in sorted(games))
     (out / "games.jsonl").write_bytes(data)
     print(hashlib.sha256(data).hexdigest())
+
+
+def ranges(conditions):
+    _, total = CONDITIONS[conditions]
+    count, remainder = divmod(total, RANGE_COUNT)
+    if remainder:
+        raise ValueError("The openings do not divide into equal ranges")
+    return [
+        {"name": f"range-{index + 1:02}", "first": 1 + index * count, "count": count}
+        for index in range(RANGE_COUNT)
+    ] + [{"name": "repeat-01", "first": 1, "count": count}]
+
+
+def plan(measured, opponent, conditions):
+    if not opponent:
+        with (ROOT / "strength/records.tsv").open(encoding="utf-8", newline="") as stream:
+            for record in csv.DictReader(stream, delimiter="\t"):
+                if record["conditions"] == str(conditions):
+                    opponent = record["revision"]
+        if not opponent:
+            raise ValueError(f"No record under conditions {conditions}; supply an opponent revision")
+    measured, opponent = pair(measured, opponent)
+    print(f"measured={measured}")
+    print(f"opponent={opponent}")
+    print(f"date={date.today()}")
+    print("matrix=" + json.dumps({"include": ranges(conditions)}, separators=(",", ":")))
+
+
+def elo(games, measured):
+    from summarise import outcome
+
+    points = {"won": 1, "drawn": 0.5, "lost": 0}
+    scores = [points[outcome(game[4], game[2] == measured)] for game in games]
+    pair_scores = [mean(scores[index:index + 2]) for index in range(0, len(scores), 2)]
+    score = mean(pair_scores)
+    margin = 1.959963984540054 * pstdev(pair_scores) / sqrt(len(pair_scores))
+
+    def difference(value):
+        if value <= 0:
+            return -inf
+        if value >= 1:
+            return inf
+        return 400 * log10(value / (1 - value))
+
+    interval = (difference(score + margin) - difference(score - margin)) / 2
+    return f"{difference(score):.2f}", f"{interval:.2f}"
+
+
+def collect_range(artifacts, item, openings, measured, opponent):
+    artifact = artifacts / f"series-{item['name']}"
+    first, count = item["first"], item["count"]
+    pgn = artifact / "games.pgn"
+    selected = openings[first - 1:first - 1 + count]
+    games = read_games(pgn, selected, first, measured, opponent) if pgn.is_file() else {}
+    if missing := missing_games(games, first, count):
+        raise ValueError(f"missing {missing}")
+    bench = json.loads((artifact / "bench.json").read_text())
+    if not isfinite(bench["ratio"]) or bench["ratio"] <= 0 or not bench["runner"]:
+        raise ValueError("invalid bench report")
+    return [games[key] for key in sorted(games)], pgn, bench
+
+
+def join(args):
+    from summarise import summarise
+
+    measured, opponent = pair(args.measured, args.opponent)
+    openings = OPENINGS.read_text(encoding="utf-8").splitlines()
+    owed = ranges(args.conditions)
+    complete = []
+    problems = []
+    for item in owed:
+        try:
+            complete.append(collect_range(args.artifacts, item, openings, measured, opponent))
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            problems.append(f"{item['name']}: {error}")
+    if args.play_result != "success":
+        problems.append(f"Playing jobs ended with status {args.play_result}")
+    if problems:
+        raise ValueError("\n".join(problems))
+
+    first, repeated = complete[0][0], complete[-1][0]
+    for original, repeat in zip(first, repeated):
+        if original != repeat:
+            raise ValueError(f"repeat-01 differs from range-01 at opening {original[0]}, White {original[2]}")
+
+    ranges_played = complete[:-1]
+    games = [game for series, _, _ in ranges_played for game in series]
+    runners = {bench["runner"] for _, _, bench in complete}
+    if len(runners) != 1:
+        raise ValueError("Playing jobs used different fastchess versions")
+    speed = median(bench["ratio"] for _, _, bench in ranges_played)
+    args.directory.mkdir()
+    joined = args.directory / "games.pgn"
+    with joined.open("wb") as stream:
+        for _, pgn, _ in ranges_played:
+            stream.write(pgn.read_bytes().rstrip() + b"\n\n")
+    (args.directory / "games.jsonl").write_bytes(game_bytes(games))
+    with joined.open(encoding="utf-8") as stream:
+        count, outcomes, queen_ahead, abnormal = summarise(stream, f"measured-{measured}")
+    if count != len(games) or abnormal:
+        raise ValueError(f"Joined PGN has {count} games and {abnormal} abnormal endings")
+    score = 100 * (outcomes["won"] + outcomes["drawn"] / 2) / count
+    fields = [args.date, measured, opponent, args.conditions, count, *outcomes.values(),
+              f"{score:.1f}", *queen_ahead.values(), abnormal, *elo(games, measured),
+              runners.pop(), f"{speed:.4f}"]
+    record = "\t".join(map(str, fields))
+    (args.directory / "record.tsv").write_text(record + "\n", encoding="utf-8")
+    print(record)
+
+
+def main():
+    if sys.argv[1:2] not in (["plan"], ["join"], ["bench"], ["prepare-rust"]):
+        play_range()
+        return
+    command = sys.argv[1]
+    parser = argparse.ArgumentParser(prog=f"series {command}")
+    parser.add_argument("measured")
+    parser.add_argument("opponent")
+    if command in ("plan", "join"):
+        parser.add_argument("conditions", type=int, choices=CONDITIONS)
+    if command == "join":
+        parser.add_argument("date")
+        parser.add_argument("play_result")
+        parser.add_argument("artifacts", type=Path)
+        parser.add_argument("directory", type=Path)
+    args = parser.parse_args(sys.argv[2:])
+    if command == "plan":
+        plan(args.measured, args.opponent, args.conditions)
+    elif command == "join":
+        join(args)
+    elif command == "prepare-rust":
+        prepare_rust(args.measured, args.opponent)
+    else:
+        measured, opponent = pair(args.measured, args.opponent)
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            build(measured, root / "measured")
+            build(opponent, root / "opponent")
+            print(f"{measure_speed(root / 'measured', root / 'opponent'):.4f}")
 
 
 if __name__ == "__main__":
     try:
         main()
-    except (OSError, ValueError, subprocess.CalledProcessError) as error:
+    except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
         sys.exit(f"Series failed: {error}")

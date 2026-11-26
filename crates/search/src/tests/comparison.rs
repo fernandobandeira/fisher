@@ -217,24 +217,22 @@ fn examples_at_depths_one_to_three() -> TestResult {
     Ok(())
 }
 
-/// The positions where a transcript leaves the score open, with the deepest
-/// depth to compare at. The transcript runner reads the same file.
-const OPEN_SCORES: &str = include_str!("../../../../test-data/open-scores.tsv");
+/// The positions where a transcript leaves the score open. The transcript
+/// runner reads the same file and requires a position there for every
+/// `{score}` at depths 1 to 4.
+const OPEN_SCORES: &str = include_str!("../../../../test-data/open-scores.txt");
 
 #[test]
 fn positions_whose_score_a_transcript_leaves_open() -> TestResult {
     let mut positions = 0;
-    for line in OPEN_SCORES.lines() {
-        if line.is_empty() || line.starts_with('#') {
+    for fen in OPEN_SCORES.lines() {
+        if fen.is_empty() || fen.starts_with('#') {
             continue;
         }
-        let (deepest, fen) = line
-            .split_once('\t')
-            .ok_or_else(|| format!("expected a depth and a FEN in open-scores.tsv: {line:?}"))?;
-        compare_at_depths(fen, 1..=deepest.parse()?)?;
+        compare_at_depths(fen, 1..=4)?;
         positions += 1;
     }
-    assert!(positions > 0, "open-scores.tsv lists no position");
+    assert!(positions > 0, "open-scores.txt lists no position");
     Ok(())
 }
 

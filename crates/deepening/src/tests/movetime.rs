@@ -83,7 +83,7 @@ fn expiry_or_interrupt_inside_depth_two_keeps_the_puzzle_move()
         let checks = Cell::new(0);
         let readings = RefCell::new(Vec::new());
         let mut reports = Vec::new();
-        search_with_elapsed_time(
+        let entered = run_search::<60>(
             &request,
             &mut |event| reports.push(event),
             &|| {
@@ -92,7 +92,7 @@ fn expiry_or_interrupt_inside_depth_two_keeps_the_puzzle_move()
             },
             &mut || {
                 checks.set(checks.get() + 1);
-                if checks.get() == 1024 {
+                if checks.get() == 60 {
                     if interrupt_first {
                         request.interrupt.store(true, Ordering::Relaxed);
                     } else {
@@ -100,13 +100,14 @@ fn expiry_or_interrupt_inside_depth_two_keeps_the_puzzle_move()
                     }
                 }
             },
-            3,
+            SearchLimits::new(&request, 3),
         );
-        assert_eq!(checks.get(), 1024);
+        assert_eq!(checks.get(), 60);
+        assert_eq!(entered, 59);
         let expected_readings = if interrupt_first {
             &[0, 30, 30][..]
         } else {
-            &[0, 30, 30, 1024][..]
+            &[0, 30, 30, 60][..]
         };
         assert_eq!(readings.into_inner(), expected_readings);
         let [
@@ -129,7 +130,7 @@ fn expiry_inside_depth_three_keeps_the_second_variation() -> std::io::Result<()>
     let elapsed = Cell::new(2);
     let mut reports = Vec::new();
     let mut checks = 0;
-    search_with_elapsed_time(
+    let entered = run_search::<81>(
         &request,
         &mut |event| {
             reports.push(event);
@@ -138,13 +139,14 @@ fn expiry_inside_depth_three_keeps_the_second_variation() -> std::io::Result<()>
         &|| request.started + Duration::from_millis(elapsed.get()),
         &mut || {
             checks += 1;
-            if checks == 1024 {
+            if checks == 81 {
                 elapsed.set(40);
             }
         },
-        3,
+        SearchLimits::new(&request, 3),
     );
-    assert_eq!(checks, 1024);
+    assert_eq!(checks, 81);
+    assert_eq!(entered, 80);
     let [
         SearchReport::FinishedDepth(first),
         SearchReport::FinishedDepth(second),
@@ -156,7 +158,7 @@ fn expiry_inside_depth_three_keeps_the_second_variation() -> std::io::Result<()>
         )));
     };
     assert_starting_depth(first, 1, 20, 2);
-    assert_starting_depth(second, 2, 440, 5);
+    assert_starting_depth(second, 2, 79, 5);
     assert_eq!(second.principal_variation.first().copied(), *best_move);
     Ok(())
 }
@@ -210,23 +212,35 @@ fn assert_starting_depth(report: &FinishedDepth, depth: u8, nodes: u64, millis: 
 }
 
 #[test]
-fn reads_elapsed_time_again_after_the_first_1024_nodes() {
+fn reads_elapsed_time_at_depth_boundaries_and_every_1024_nodes() {
     let request = timed_request(Position::starting(), 50, false);
-    let mut checks = 0;
-    let elapsed = Cell::new(39);
-    search_with_elapsed_time(
+    let checks = Cell::new(0);
+    let readings = RefCell::new(Vec::new());
+    let mut finished_depths = Vec::new();
+    let entered = search_with_elapsed_time(
         &request,
-        &mut |_| {},
-        &|| request.started + Duration::from_millis(elapsed.get()),
-        &mut || {
-            checks += 1;
-            if checks == 1025 {
-                elapsed.set(40);
+        &mut |report| {
+            if let SearchReport::FinishedDepth(depth) = report {
+                finished_depths.push(depth.nodes);
             }
         },
-        3,
+        &|| {
+            readings.borrow_mut().push(checks.get());
+            let elapsed = if checks.get() < 2048 { 39 } else { 40 };
+            request.started + Duration::from_millis(elapsed)
+        },
+        &mut || checks.set(checks.get() + 1),
+        103,
     );
-    assert_eq!(checks, 2048);
+    assert_eq!(checks.get(), 2048);
+    assert_eq!(entered, 2047);
+    assert!(finished_depths.starts_with(&[20, 79]));
+    let mut expected = vec![0, 1024, 2048];
+    for nodes in finished_depths {
+        expected.extend([nodes, nodes]);
+    }
+    expected.sort_unstable();
+    assert_eq!(readings.into_inner(), expected);
 }
 
 #[test]
@@ -311,14 +325,14 @@ fn counts_entries_until_nodes_or_movetime_refuses_entry() {
     for (node_limit, initial_elapsed, expiry_check, expected_entries) in [
         (19, 39, None, 19),
         (19, 40, None, 0),
-        (1308, 39, Some(1024), 1023),
+        (1308, 39, Some(81), 80),
     ] {
         let mut request = timed_request(Position::starting(), 50, false);
         request.limits.nodes = Some(node_limit);
         let elapsed = Cell::new(initial_elapsed);
         let mut reports = Vec::new();
         let mut checks = 0;
-        let entered = search_with_elapsed_time(
+        let entered = run_search::<81>(
             &request,
             &mut |event| reports.push(event),
             &|| request.started + Duration::from_millis(elapsed.get()),
@@ -328,11 +342,11 @@ fn counts_entries_until_nodes_or_movetime_refuses_entry() {
                     elapsed.set(40);
                 }
             },
-            3,
+            SearchLimits::new(&request, 3),
         );
         assert_eq!(entered, expected_entries);
         let totals: &[u64] = if expiry_check.is_some() {
-            &[20, 440]
+            &[20, 79]
         } else {
             &[]
         };

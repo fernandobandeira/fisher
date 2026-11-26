@@ -14,15 +14,10 @@ fn reports_for(fen: &str) -> Result<Vec<SearchReport>, Box<dyn Error>> {
     Ok(reports_with_limits(
         Position::from_fen(fen)?,
         Limits::default(),
-        4,
     ))
 }
 
-fn reports_with_limits(
-    position: Position,
-    limits: Limits,
-    expected_depth: u8,
-) -> Vec<SearchReport> {
+fn reports_with_limits(position: Position, limits: Limits) -> Vec<SearchReport> {
     let request = SearchRequest {
         position,
         limits,
@@ -30,16 +25,7 @@ fn reports_with_limits(
         started: Instant::now(),
     };
     let mut reports = Vec::new();
-    deepening::search(request, &mut |report| {
-        if let SearchReport::FinishedDepth(depth) = &report {
-            assert!(
-                depth.depth <= expected_depth,
-                "reported depth {}",
-                depth.depth
-            );
-        }
-        reports.push(report);
-    });
+    search(request, &mut |report| reports.push(report));
     reports
 }
 
@@ -79,20 +65,11 @@ fn reports_terminal_positions_without_searching_a_depth() -> Result<(), Box<dyn 
 
 #[test]
 fn reports_the_finished_depth_before_the_best_move() -> Result<(), Box<dyn Error>> {
-    // The python-chess counts and the sole legal move are recorded in new-game.uci.
+    // The node bounds are from expectations/uci-cutoff/uci-depth-and-nodes.md.
     let reports = reports_for("7k/8/5K1Q/8/8/8/8/8 b - - 0 1")?;
-    let [
-        SearchReport::FinishedDepth(_),
-        SearchReport::FinishedDepth(_),
-        SearchReport::FinishedDepth(_),
-        SearchReport::FinishedDepth(report),
-        SearchReport::BestMove(Some(best_move)),
-    ] = reports.as_slice()
-    else {
-        return Err(format!("unexpected reports: {reports:?}").into());
-    };
-    assert_eq!(report.depth, 4);
-    assert_eq!(report.nodes, 857);
+    let (depths, best_move) = forced_move_reports(&reports)?;
+    assert_eq!(depths.len(), 4);
+    let report = depths.last().ok_or("missing last finished depth")?;
     assert_eq!(
         report.score,
         Score::Mate {
@@ -151,48 +128,56 @@ fn infinite_search_reaches_past_the_default_depth() -> Result<(), Box<dyn Error>
 #[test]
 fn explicit_limits_can_search_beyond_four_plies() -> Result<(), Box<dyn Error>> {
     let position = Position::from_fen("7k/8/5K1Q/8/8/8/8/8 b - - 0 1")?;
-    // Counts from expectations/uci-depth-and-nodes/README.md.
-    for (limits, highest_depth, totals) in [
-        (
-            Limits {
-                depth: Some(5),
-                ..Limits::default()
-            },
-            5,
-            &[1, 23, 75, 857, 3138][..],
-        ),
-        (
-            Limits {
-                nodes: Some(3138),
-                ..Limits::default()
-            },
-            5,
-            &[1, 23, 75, 857, 3138][..],
-        ),
-        (
-            Limits {
-                nodes: Some(3137),
-                ..Limits::default()
-            },
-            4,
-            &[1, 23, 75, 857][..],
-        ),
-    ] {
-        let reports = reports_with_limits(position, limits, highest_depth);
-        let Some((SearchReport::BestMove(best_move), depths)) = reports.split_last() else {
-            return Err(format!("unexpected reports: {reports:?}").into());
-        };
-        let actual: Vec<_> = depths
-            .iter()
-            .filter_map(|report| match report {
-                SearchReport::FinishedDepth(report) => Some(report.nodes),
-                SearchReport::BestMove(_) => None,
-            })
-            .collect();
-        assert_eq!(actual, totals);
-        assert_eq!(*best_move, position.legal_moves().into_iter().next());
+    let reports = reports_with_limits(
+        position,
+        Limits {
+            depth: Some(5),
+            ..Limits::default()
+        },
+    );
+    let (depths, _) = forced_move_reports(&reports)?;
+    assert_eq!(depths.len(), 5);
+
+    let reports = reports_with_limits(
+        position,
+        Limits {
+            nodes: Some(3138),
+            ..Limits::default()
+        },
+    );
+    let (depths, _) = forced_move_reports(&reports)?;
+    assert!(depths.len() >= 5);
+    for depth in depths {
+        assert!(depth.nodes <= 3138);
     }
     Ok(())
+}
+
+fn forced_move_reports(
+    reports: &[SearchReport],
+) -> Result<(Vec<&FinishedDepth>, &rules::Move), Box<dyn Error>> {
+    let Some((SearchReport::BestMove(Some(best_move)), depths)) = reports.split_last() else {
+        return Err(format!("unexpected reports: {reports:?}").into());
+    };
+    assert_eq!(format!("{}{}", best_move.from(), best_move.to()), "h8g8");
+
+    // Node totals from expectations/uci-cutoff/uci-depth-and-nodes.md.
+    let bounds = [1..=1, 23..=23, 24..=75, 25..=857, 26..=3138];
+    let mut previous_nodes = 0;
+    let mut finished = Vec::new();
+    for (index, report) in depths.iter().enumerate() {
+        let SearchReport::FinishedDepth(report) = report else {
+            return Err(format!("unexpected report: {report:?}").into());
+        };
+        assert_eq!(usize::from(report.depth), index + 1);
+        assert!(report.nodes > previous_nodes, "{report:?}");
+        if let Some(bound) = bounds.get(index) {
+            assert!(bound.contains(&report.nodes), "{report:?}");
+        }
+        previous_nodes = report.nodes;
+        finished.push(report);
+    }
+    Ok((finished, best_move))
 }
 
 #[test]
@@ -212,11 +197,11 @@ fn zero_limits_return_the_first_legal_move_or_the_terminal_score() -> Result<(),
         },
     ] {
         assert_eq!(
-            reports_with_limits(position, limits.clone(), 0),
+            reports_with_limits(position, limits.clone()),
             [SearchReport::BestMove(movement)]
         );
         assert_eq!(
-            reports_with_limits(terminal, limits, 0),
+            reports_with_limits(terminal, limits),
             [
                 SearchReport::FinishedDepth(FinishedDepth {
                     depth: 0,

@@ -87,6 +87,11 @@ fn go_depth() -> io::Result<()> {
 }
 
 #[test]
+fn startpos_depth_two() -> io::Result<()> {
+    play_transcript("startpos-depth-2")
+}
+
+#[test]
 fn go_nodes() -> io::Result<()> {
     play_transcript("go-nodes")
 }
@@ -210,8 +215,13 @@ fn play_transcript(name: &str) -> io::Result<()> {
 }
 
 fn collect_legal_bestmove_replies(name: &str) -> io::Result<Vec<String>> {
+    let directory = match name {
+        "go-depth" | "go-nodes" | "startpos-depth-2" => "uci-cutoff",
+        _ => "uci",
+    };
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../expectations/uci")
+        .join("../../expectations")
+        .join(directory)
         .join(format!("{name}.uci"));
     let transcript = fs::read_to_string(path)?;
     run_transcript(name, &transcript, HANG_TIMEOUT, Engine::start)

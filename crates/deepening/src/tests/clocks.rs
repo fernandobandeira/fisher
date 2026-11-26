@@ -244,8 +244,7 @@ fn missing_clock_keeps_the_default_or_explicit_depth() {
         },
     ] {
         let (entered, reports) = run_with_limits(position, limits, 5);
-        assert_eq!(entered, 216_365);
-        assert_reports(&reports, &[20, 440, 9762, 216_365], position);
+        assert_default_starting_depths(entered, &reports);
     }
     let (entered, reports) = run_with_limits(
         position,
@@ -270,8 +269,30 @@ fn the_other_colors_clock_does_not_limit_white() {
         },
     );
     let (entered, reports) = scheduled_search(&request, Duration::ZERO, &[(1, ms(2000))], 5);
-    assert_eq!(entered, 216_365);
-    assert_reports(&reports, &[20, 440, 9762, 216_365], position);
+    assert_default_starting_depths(entered, &reports);
+}
+
+// Exact depth-1 and depth-2 counts, then the exhaustive upper bounds from
+// expectations/uci-cutoff/uci-go-clocks.md.
+fn assert_default_starting_depths(entered: u64, reports: &[SearchReport]) {
+    let [
+        SearchReport::FinishedDepth(_),
+        SearchReport::FinishedDepth(_),
+        SearchReport::FinishedDepth(third),
+        SearchReport::FinishedDepth(fourth),
+        SearchReport::BestMove(_),
+    ] = reports
+    else {
+        unreachable!("expected four finished depths and a best move");
+    };
+    assert!((80..=9762).contains(&third.nodes));
+    assert!((third.nodes + 1..=216_365).contains(&fourth.nodes));
+    assert_eq!(entered, fourth.nodes);
+    assert_reports(
+        reports,
+        &[20, 79, third.nodes, fourth.nodes],
+        Position::starting(),
+    );
 }
 
 #[test]
@@ -279,7 +300,6 @@ fn the_other_colors_clock_does_not_limit_black() -> Result<(), rules::FenError> 
     let position = Position::from_fen("7k/8/5K1Q/8/8/8/8/8 b - - 0 1")?;
     let request = request(position, white_clock(60_000));
     let (entered, reports) = scheduled_search(&request, Duration::ZERO, &[(1, ms(2000))], 5);
-    assert_eq!(entered, 857);
     let Some((SearchReport::BestMove(best), depths)) = reports.split_last() else {
         unreachable!("expected finished depths and a best move");
     };
@@ -288,17 +308,23 @@ fn the_other_colors_clock_does_not_limit_black() -> Result<(), rules::FenError> 
         winning: false,
     };
     let cp = Score::Centipawns(-900);
-    let expected = [(1, 1, cp), (2, 23, cp), (3, 75, mate), (4, 857, mate)];
+    let expected = [
+        (1, 1..=1, cp),
+        (2, 23..=23, cp),
+        (3, 24..=75, mate),
+        (4, 25..=857, mate),
+    ];
+    let mut previous_nodes = 0;
     assert_eq!(depths.len(), expected.len());
     for (report, (depth, nodes, score)) in depths.iter().zip(expected) {
         let SearchReport::FinishedDepth(report) = report else {
             unreachable!("expected a finished depth");
         };
-        assert_eq!(
-            (report.depth, report.nodes, report.score),
-            (depth, nodes, score)
-        );
+        assert_eq!((report.depth, report.score), (depth, score));
+        assert!(nodes.contains(&report.nodes) && report.nodes > previous_nodes);
+        previous_nodes = report.nodes;
     }
+    assert_eq!(entered, previous_nodes);
     assert_eq!(move_text(*best).as_deref(), Some("h8g8"));
     Ok(())
 }
@@ -308,8 +334,7 @@ fn a_request_without_any_limits_finishes_the_default_depth() {
     // Each of the five unreadable signed UCI values produces this request.
     let position = Position::starting();
     let (entered, reports) = run_with_limits(position, Limits::default(), 5);
-    assert_eq!(entered, 216_365);
-    assert_reports(&reports, &[20, 440, 9762, 216_365], position);
+    assert_default_starting_depths(entered, &reports);
 }
 
 #[test]
@@ -404,8 +429,8 @@ fn running_out_of_search_time_inside_depth_two_keeps_the_puzzle_move()
             },
         );
         let (entered, reports) =
-            scheduled_search(&request, Duration::ZERO, &[(30, ms(1)), (1308, ms(40))], 3);
-        assert_eq!(entered, 1307);
+            scheduled_search(&request, Duration::ZERO, &[(30, ms(1)), (60, ms(40))], 3);
+        assert_eq!(entered, 59);
         let [
             first @ SearchReport::FinishedDepth(depth),
             SearchReport::BestMove(best_move),
@@ -425,9 +450,9 @@ fn forecasts_with_the_duration_of_the_last_depth() {
     check_starting_position(
         white_clock(3300),
         Duration::ZERO,
-        &[(20, ms(1)), (440, ms(4)), (442, ms(100))],
-        441,
-        &[(20, ms(1)), (440, ms(4))],
+        &[(20, ms(1)), (79, ms(4)), (81, ms(100))],
+        80,
+        &[(20, ms(1)), (79, ms(4))],
     );
 }
 
@@ -436,9 +461,9 @@ fn longer_second_depth_refuses_depth_three() {
     check_starting_position(
         white_clock(2790),
         Duration::ZERO,
-        &[(20, ms(1)), (440, ms(5)), (442, ms(83))],
-        440,
-        &[(20, ms(1)), (440, ms(5))],
+        &[(20, ms(1)), (79, ms(5)), (81, ms(83))],
+        79,
+        &[(20, ms(1)), (79, ms(5))],
     );
 }
 
@@ -447,9 +472,9 @@ fn shorter_second_depth_admits_depth_three() {
     check_starting_position(
         white_clock(2160),
         Duration::ZERO,
-        &[(20, ms(2)), (440, ms(3)), (442, ms(62))],
-        441,
-        &[(20, ms(2)), (440, ms(3))],
+        &[(20, ms(2)), (79, ms(3)), (81, ms(62))],
+        80,
+        &[(20, ms(2)), (79, ms(3))],
     );
 }
 
@@ -465,7 +490,7 @@ fn clock_forecast_applies_beside_each_finite_limit() {
             ..Limits::default()
         },
         Limits {
-            nodes: Some(440),
+            nodes: Some(79),
             ..Limits::default()
         },
     ] {

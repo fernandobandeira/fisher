@@ -735,21 +735,21 @@ fn holds_the_move_at_the_production_depth_cap() -> io::Result<()> {
 mod movetime;
 
 #[test]
-fn commands_on_either_side_of_the_node_limit() -> io::Result<()> {
+fn commands_on_either_side_of_the_depth_limit() -> io::Result<()> {
     for command in [Some("stop"), Some("quit"), None] {
-        node_limit_with_command(command, true)?;
-        node_limit_with_command(command, false)?;
+        depth_limit_with_command(command, true)?;
+        depth_limit_with_command(command, false)?;
     }
     Ok(())
 }
 
-fn node_limit_with_command(command: Option<&'static str>, command_first: bool) -> io::Result<()> {
-    let mut session = search_to_node_limit(command_first);
+fn depth_limit_with_command(command: Option<&'static str>, command_first: bool) -> io::Result<()> {
+    let mut session = search_to_depth_limit(command_first);
     session.command(PUZZLE)?;
-    session.command("go nodes 1308")?;
-    expect_puzzle_depth(&session, 1, -600, 30, "g5g2")?;
+    session.command("go depth 2")?;
+    expect_puzzle_depth(&session, 1, -600, 30..=30, "g5g2")?;
     if !command_first {
-        expect_puzzle_depth(&session, 2, -700, 1308, "c5f2 g2g3")?;
+        expect_puzzle_depth(&session, 2, -700, 90..=1308, "c5f2 g2g3")?;
         assert_eq!(session.reply()?, "bestmove c5f2\n");
     }
 
@@ -776,7 +776,7 @@ fn send_release_command(session: &mut Session, command: Option<&'static str>) ->
     }
 }
 
-fn search_to_node_limit(command_first: bool) -> Session {
+fn search_to_depth_limit(command_first: bool) -> Session {
     Session::start(move |request, report| {
         let interrupt = Arc::clone(&request.interrupt);
         deepening::search(request, &mut |event| {
@@ -798,13 +798,21 @@ fn expect_puzzle_depth(
     session: &Session,
     depth: u8,
     cp: i32,
-    nodes: u64,
+    nodes: std::ops::RangeInclusive<u64>,
     pv: &str,
 ) -> io::Result<()> {
     let line = session.reply()?;
-    assert!(line.starts_with(&format!(
-        "info depth {depth} multipv 1 score cp {cp} nodes {nodes} nps "
-    )));
+    let prefix = format!("info depth {depth} multipv 1 score cp {cp} nodes ");
+    let Some((total, _)) = line
+        .strip_prefix(&prefix)
+        .and_then(|rest| rest.split_once(" nps "))
+    else {
+        return Err(io::Error::other(format!(
+            "unexpected depth report: {line:?}"
+        )));
+    };
+    let total = total.parse::<u64>().map_err(io::Error::other)?;
+    assert!(nodes.contains(&total), "{line}");
     assert!(line.ends_with(&format!(" pv {pv}\n")));
     Ok(())
 }

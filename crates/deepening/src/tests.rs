@@ -104,9 +104,9 @@ fn reports_totals_from_the_start_of_go() -> std::io::Result<()> {
             "unexpected reports: {reports:?}"
         )));
     };
-    // The frozen schedule in expectations/uci-deepen-until-stop/README.md.
-    assert_eq!(node_checks, 440);
-    for (report, depth, nodes, millis) in [(first, 1, 20, 2), (second, 2, 440, 5)] {
+    // The frozen schedule in expectations/uci-cutoff/uci-deepen-until-stop.md.
+    assert_eq!(node_checks, 79);
+    for (report, depth, nodes, millis) in [(first, 1, 20, 2), (second, 2, 79, 5)] {
         assert_eq!(report.depth, depth);
         assert_eq!(report.nodes, nodes);
         assert_eq!(report.elapsed, Duration::from_millis(millis));
@@ -118,13 +118,11 @@ fn reports_totals_from_the_start_of_go() -> std::io::Result<()> {
 
 #[test]
 fn puzzle_keeps_the_last_finished_depth() -> Result<(), Box<dyn std::error::Error>> {
-    for (interrupt_at, expected_move, expected_checks) in
-        [(Some(30 + 640), "g5g2", 670), (None, "c5f2", 1308)]
-    {
+    for (interrupt_at, expected_move) in [(Some(60), "g5g2"), (None, "c5f2")] {
         let request = SearchRequest {
             position: puzzle()?,
             limits: Limits {
-                nodes: Some(1308),
+                depth: Some(2),
                 ..Limits::default()
             },
             interrupt: Arc::new(AtomicBool::new(false)),
@@ -144,13 +142,21 @@ fn puzzle_keeps_the_last_finished_depth() -> Result<(), Box<dyn std::error::Erro
             },
             3,
         );
-        assert_eq!(checks, expected_checks);
-        assert_eq!(entered, if interrupt_at.is_some() { 669 } else { 1308 });
         let Some((SearchReport::BestMove(best_move), depths)) = reports.split_last() else {
             return Err(format!("unexpected reports: {reports:?}").into());
         };
         assert_eq!(move_text(*best_move).as_deref(), Some(expected_move));
         assert_puzzle_depths(depths, if interrupt_at.is_some() { 1 } else { 2 })?;
+        if let Some(interrupt_at) = interrupt_at {
+            assert_eq!(checks, interrupt_at);
+            assert_eq!(entered, 59);
+        } else {
+            let Some(SearchReport::FinishedDepth(last)) = depths.last() else {
+                return Err("missing depth 2".into());
+            };
+            assert_eq!(checks, last.nodes);
+            assert_eq!(entered, last.nodes);
+        }
     }
     Ok(())
 }
@@ -160,8 +166,8 @@ fn assert_puzzle_depths(
     count: usize,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let expected = [
-        (1, 30, -600, &["g5g2"][..]),
-        (2, 1308, -700, &["c5f2", "g2g3"][..]),
+        (1, 30..=30, -600, &["g5g2"][..]),
+        (2, 90..=1308, -700, &["c5f2", "g2g3"][..]),
     ];
     assert_eq!(depths.len(), count);
     for (report, (depth, nodes, score, pv)) in depths.iter().zip(expected) {
@@ -169,7 +175,7 @@ fn assert_puzzle_depths(
             return Err(format!("unexpected depth report: {report:?}").into());
         };
         assert_eq!(report.depth, depth);
-        assert_eq!(report.nodes, nodes);
+        assert!(nodes.contains(&report.nodes), "depth {depth}: {report:?}");
         assert_eq!(report.score, Score::Centipawns(score));
         let variation: Vec<_> = report
             .principal_variation
@@ -220,14 +226,14 @@ fn infinite_search_reaches_the_production_depth_cap() -> Result<(), Box<dyn std:
 
 #[test]
 fn node_limit_counts_entries_even_when_a_depth_is_interrupted() {
-    // Independent counts from expectations/uci-depth-and-nodes/README.md.
+    // Independent counts from expectations/uci-cutoff/uci-depth-and-nodes.md.
     for (limit, totals) in [
         (0, &[][..]),
         (19, &[][..]),
         (20, &[20][..]),
         (21, &[20][..]),
-        (439, &[20][..]),
-        (440, &[20, 440][..]),
+        (78, &[20][..]),
+        (79, &[20, 79][..]),
     ] {
         let (entered, reports) = run_with_limits(
             Position::starting(),
@@ -254,14 +260,14 @@ fn depth_is_clamped_before_narrowing() {
             },
             2,
         );
-        assert_eq!(entered, 440, "go depth {depth}");
-        assert_reports(&reports, &[20, 440], position);
+        assert_eq!(entered, 79, "go depth {depth}");
+        assert_reports(&reports, &[20, 79], position);
     }
 }
 
 #[test]
 fn the_first_limit_reached_ends_search() {
-    for (depth, nodes) in [(1, 440), (2, 20)] {
+    for (depth, nodes) in [(1, 79), (2, 20)] {
         let position = Position::starting();
         let (entered, reports) = run_with_limits(
             position,

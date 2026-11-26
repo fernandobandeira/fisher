@@ -19,14 +19,14 @@ fn search_nodes(fen: &str, depth: u8) -> Result<u64, Box<dyn Error>> {
 }
 
 #[test]
-fn node_count_matches_published_perft_at_two_plies() -> TestResult {
-    check_perft(2, search_nodes)
+fn depth_one_counts_each_legal_move_from_the_published_positions() -> TestResult {
+    check_perft(1, search_nodes)
 }
 
 #[test]
-#[ignore = "run in release mode for the published four-ply counts"]
-fn node_count_matches_published_perft_at_four_plies() -> TestResult {
-    check_perft(4, search_nodes)
+fn starting_position_depth_two_counts_only_moves_played() {
+    // The first root move costs 1 + 20 nodes, the other 19 cost 1 + 1 each.
+    assert_eq!(minimax(&Position::starting(), 2).nodes, 59);
 }
 
 fn reference_position(fen: &str) -> Result<Chess, Box<dyn Error>> {
@@ -250,8 +250,8 @@ fn checks_for_an_interrupt_before_each_node() {
     use search::minimax_until_interrupted;
 
     let position = Position::starting();
-    // Published starting-position perft counts.
-    let nodes = 20 + 400;
+    // Starting-position count for a single depth of 2, from fisher-4yn.
+    let nodes = 59;
     for interrupt_at in [1, 2, 22, nodes] {
         let mut interrupt_checks = 0;
         let result = minimax_until_interrupted(&position, 2, || {

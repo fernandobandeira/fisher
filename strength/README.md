@@ -8,8 +8,8 @@ This is a record, not a gate. `scripts/check` does not run it, and nothing here 
 
 | Path | What it holds |
 |---|---|
-| `records.tsv` | One line per recorded series or historical match. |
-| `measure` | Plays a match by hand using the historical conditions. |
+| `records.tsv` | One line per recorded series or match played by hand. |
+| `measure` | Plays a clocked match by hand under conditions 2. |
 | `summarise.py` | Counts results and queen-ahead games in a PGN. |
 | `openings.epd` | The 200 positions for conditions 1 and 2. |
 | `series` | Plays and validates ranges, measures speed, and joins the games for a record. |
@@ -52,7 +52,6 @@ and [45698177264](https://github.com/fernandobandeira/fisher/actions/runs/456981
 Conditions 4 took an estimated 109.9 and 116.7 minutes using runs
 [45713145494](https://github.com/fernandobandeira/fisher/actions/runs/45713145494)
 and [45698173508](https://github.com/fernandobandeira/fisher/actions/runs/45698173508).
-Conditions 1 and 2 are closed.
 
 Before building, each playing job installs the two revisions' pinned Rust
 channels with the minimal profile in a fresh Rustup directory on the hosted runner.
@@ -61,12 +60,19 @@ The release builds explicitly use those installations.
 For a clocked match by hand, check out the revision to measure and run
 `strength/measure stockfish /tmp/fisher-against-stockfish` with fastchess,
 Stockfish and Python 3 with `chess==1.11.2`. Give a new directory for the
-games. Conditions 1 and 2 are closed and their historical records remain
-in the table.
+games. Record clocked matches played by hand under conditions 2.
 
 ## What a record says
 
 Each line of `records.tsv` describes one match, from the measured revision's point of view.
+
+The four alpha-beta records name the squash commit `5c5d6cf`. The conditions 4
+series and both conditions 2 matches were played on `1a2d03d`, which has the
+same tree. The conditions 3 series was played on `d15ccc2`, whose only engine
+difference was a clock forecast factor that has no effect under a node limit.
+Its record was joined locally from the artifacts of
+[run 45876884742](https://github.com/fernandobandeira/fisher/actions/runs/45876884742)
+after the played revision became unreachable to the record job.
 
 | Field | Meaning |
 |---|---|
@@ -79,7 +85,7 @@ Each line of `records.tsv` describes one match, from the measured revision's poi
 | `score` | The share of the points it took, in percent. A draw is half a point. |
 | `queen_ahead_won`, `queen_ahead_drawn`, `queen_ahead_lost` | Results of the games in which it was a queen ahead. |
 | `abnormal_endings` | Games whose PGN `Termination` tag is not `normal`: an engine crashed, played an illegal move or lost on time. Either engine may be at fault; the PGN says which. |
-| `elo_difference`, `elo_interval` | The Elo difference and its 95% interval. A positive difference means the measured revision scored above 50%. Historical records use the values printed by fastchess. The series computes them from the opening pairs and can print `inf` or `nan` for a one-sided score. |
+| `elo_difference`, `elo_interval` | The Elo difference and its 95% interval. A positive difference means the measured revision scored above 50%. Conditions 1 and 2 use the values printed by fastchess. The series computes them from the opening pairs and can print `inf` or `nan` for a one-sided score. |
 | `runner` | The version of fastchess that ran the games. |
 | `speed_ratio` | The median over the 20 playing ranges of measured to opponent bench speed on the same machine. Empty for conditions 1 and 2. |
 
@@ -99,7 +105,7 @@ A revision was a queen ahead in a game if its material minus the opponent's was 
 
 The conditions do not fix the Stockfish version or the machine. Compare two records against Stockfish only if `opponent` reads the same in both, and treat records from different machines with care.
 
-### 2 (closed)
+### 2
 
 Both engines get 10 seconds plus 0.1 seconds a move. The other conditions are the same as in conditions 1.
 
@@ -175,8 +181,12 @@ A node limit gives no credit for speed. The ratio compares the two builds
 on each machine to catch large slowdowns. Treat values within about 1%
 of 1 as noise. The first series had per-range ratios of 0.9813–1.0175 under
 conditions 3 and 0.9557–1.0826 under conditions 4.
+Process startup dominates the alpha-beta bench's wall time because it searches
+94,178 nodes, down from 11,024,485 with plain minimax, which explains both ratios
+near 0.19. With `go nodes 3000000`, both builds search about 7–11 million nodes
+per second (Beads ticket `fisher-b5i` tracks the fix).
 
-For the historical Stockfish records under conditions 1 and 2, scores
+For the Stockfish records under conditions 1 and 2, scores
 vary from match to match. These matches do not establish an Elo rating
 for fisher. A score near 0% or 100% says little about how large the
 strength difference is.

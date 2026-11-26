@@ -90,15 +90,34 @@ and an optional lowercase promotion suffix. The move pattern excludes
 `0000`. Digits in every allowance are ASCII. The runner checks the nodes
 per second from the reported nodes and time. At depths 1 to 4 it also
 checks the principal variation under D5. A literal score is itself the
-expected value. For a `{score}`, the transcripts check that UCI reports
-the search's score in this grammar, supported by its own principal
-variation. Score correctness lives in the search comparison: the tests of
-`search` compare the search with plain minimax at every position where a
-transcript leaves the score open, at depths 1 to 4, and the runner fails
-on a `{score}` at those depths from a position missing from that
-comparison (fisher-4yn.4). The tests of `uci` check that the `info` line
-carries the score the search returned. Deeper lines get the spelling and
-length checks only.
+expected value.
+
+The runner cannot tell whether a `{score}` is the right score: it does not
+compare the score end to end with the search, which would need a
+dependency from `fisher` on `search` or a table of literal scores that
+every change to the evaluation would rewrite (D35, D47). The check is
+split instead (fisher-4yn.4):
+
+- The tests of `search` compare the search with plain minimax at every
+  position in [`test-data/open-scores.tsv`](../test-data/open-scores.tsv),
+  at depths 1 to the depth listed.
+- The runner fails on a `{score}` at depths 1 to 4, in any searched `info`
+  line with or without a principal variation, from a position that file
+  does not list at that depth or deeper. It sets positions up as `uci`
+  does: `startpos`, or a FEN of four, five or six fields with a halfmove
+  clock of 0 and a fullmove number of 1 filled in, then the moves. A
+  position it cannot set up fails, unless the next record expects
+  fisher's `info string` rejection. Then fisher keeps its previous
+  position, and so does the runner. An expected rejection of a position
+  the runner did set up fails too.
+- The tests of `uci` check that the `info` line carries the score the
+  search returned.
+
+A searched line at depth 5 or deeper gets the spelling and length checks
+only, `{score}` included, as the `full-spelling` case in
+[`uci-runner/`](uci-runner/) expects. The repeated matcher does not require
+the depths to increase, so a repeated record can match such a line, and
+nothing checks whether its score is right.
 
 ### Transcripts for search on its own thread
 

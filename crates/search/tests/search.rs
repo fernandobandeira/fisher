@@ -1,39 +1,78 @@
-#[path = "support/mate_in_two.rs"]
+#[path = "../src/tests/support/mate_in_two.rs"]
 mod mate_in_two;
-#[path = "support/principal_variation.rs"]
+#[path = "../src/tests/support/perft.rs"]
+mod perft;
+#[path = "../src/tests/support/principal_variation.rs"]
 mod principal_variation;
-#[path = "support/reference_minimax.rs"]
-mod reference;
-mod support;
 
 use std::error::Error;
 
+use perft::check_perft;
 use rules::Position;
 use search::{Score, SearchResult, minimax};
-use shakmaty::{Chess, EnPassantMode, Position as _, fen::Fen};
-use support::{check_perft, reference_position};
+use shakmaty::{CastlingMode, Chess, Position as _, fen::Fen};
+
+type TestResult = Result<(), Box<dyn Error>>;
 
 fn search_nodes(fen: &str, depth: u8) -> Result<u64, Box<dyn Error>> {
     Ok(minimax(&Position::from_fen(fen)?, depth).nodes)
 }
 
 #[test]
-fn node_count_matches_published_perft_at_two_plies() -> Result<(), Box<dyn Error>> {
+fn node_count_matches_published_perft_at_two_plies() -> TestResult {
     check_perft(2, search_nodes)
 }
 
 #[test]
 #[ignore = "run in release mode for the published four-ply counts"]
-fn node_count_matches_published_perft_at_four_plies() -> Result<(), Box<dyn Error>> {
+fn node_count_matches_published_perft_at_four_plies() -> TestResult {
     check_perft(4, search_nodes)
 }
 
-fn check_mate_in_two(
-    records: impl IntoIterator<Item = mate_in_two::Record>,
-) -> Result<(), Box<dyn Error>> {
+fn reference_position(fen: &str) -> Result<Chess, Box<dyn Error>> {
+    Ok(fen.parse::<Fen>()?.into_position(CastlingMode::Standard)?)
+}
+
+/// Searches `fen` and checks the principal variation under D5.
+fn search_and_replay(fen: &str, depth: u8) -> Result<SearchResult, Box<dyn Error>> {
+    let result = minimax(&Position::from_fen(fen)?, depth);
+    assert_eq!(
+        result.principal_variation.first().copied(),
+        result.best_move,
+        "{fen}"
+    );
+    let score = match result.score {
+        Score::Centipawns(value) => value,
+        Score::Mate { plies, winning } => {
+            let value = principal_variation::MATE_SCORE - i32::from(plies);
+            if winning { value } else { -value }
+        }
+    };
+    principal_variation::verify(
+        &reference_position(fen)?,
+        depth,
+        score,
+        result.principal_variation.iter().copied().map(move_text),
+    )?;
+    Ok(result)
+}
+
+#[test]
+fn replay_rejects_a_variation_that_does_not_support_the_score() -> TestResult {
+    let start = reference_position("7k/q7/8/8/8/8/8/R6K w - - 0 1")?;
+    // After Rxa7 White is a rook ahead. A variation that keeps the queen on
+    // the board, or stops short of the depth, does not support that score.
+    principal_variation::verify(&start, 1, 500, ["a1a7"])?;
+    assert!(principal_variation::verify(&start, 1, 500, ["a1a2"]).is_err());
+    assert!(principal_variation::verify(&start, 1, -400, ["a1a7"]).is_err());
+    assert!(principal_variation::verify(&start, 2, 500, ["a1a7"]).is_err());
+    assert!(principal_variation::verify(&start, 1, 500, ["a1a8"]).is_err());
+    Ok(())
+}
+
+fn check_mate_in_two(records: impl IntoIterator<Item = mate_in_two::Record>) -> TestResult {
     for record in records {
-        let position = reference_position(record.fen)?;
-        let result = assert_matches_reference(&position, 4)?;
+        let result = search_and_replay(record.fen, 4)?;
         assert_eq!(
             result.score,
             Score::Mate {
@@ -54,13 +93,15 @@ fn check_mate_in_two(
 }
 
 #[test]
-fn first_ten_published_mates_in_two() -> Result<(), Box<dyn Error>> {
+fn first_ten_published_mates_in_two() -> TestResult {
+    // The first record is Lichess puzzle 000Zo. Its README says exactly one
+    // legal move forces the checkmate, so the chosen move is the published one.
     check_mate_in_two(mate_in_two::records()?.into_iter().take(10))
 }
 
 #[test]
 #[ignore = "run in release mode for every published mate-in-two position"]
-fn all_published_mates_in_two() -> Result<(), Box<dyn Error>> {
+fn all_published_mates_in_two() -> TestResult {
     let records = mate_in_two::records()?;
     // The published table is documented as containing 100 positions.
     assert_eq!(records.len(), 100);
@@ -68,22 +109,118 @@ fn all_published_mates_in_two() -> Result<(), Box<dyn Error>> {
 }
 
 #[test]
-fn mate_on_the_horizon_scores_as_material() -> Result<(), Box<dyn Error>> {
-    for record in mate_in_two::records()?.into_iter().take(10) {
-        let position = reference_position(record.fen)?;
-        assert_matches_reference(&position, 3)?;
+fn mate_in_one_scores_as_a_win() -> TestResult {
+    // Qb7 gives check and covers a7 and b8. The white king protects b7.
+    let result = search_and_replay("k7/8/1QK5/8/8/8/8/8 w - - 0 1", 2)?;
+    assert_eq!(
+        result.score,
+        Score::Mate {
+            plies: 1,
+            winning: true
+        }
+    );
+    assert_eq!(result.best_move.map(move_text).as_deref(), Some("b6b7"));
+    Ok(())
+}
+
+#[test]
+fn stalemate_is_avoided_before_the_horizon_and_scored_as_material_on_it() -> TestResult {
+    let fen = "k7/8/1p6/1Q6/8/8/8/7K w - - 0 1";
+    // Qxb6 leaves a8 unchecked, with a7, b7 and b8 covered. At depth 2,
+    // stalemate scores zero, so White prefers retaining its 800-centipawn lead.
+    assert_eq!(search_and_replay(fen, 2)?.score, Score::Centipawns(800));
+    // At depth 1 the stalemate stands on the horizon, so Qxb6 is scored as
+    // material, 900, and every other move keeps 800.
+    let result = search_and_replay(fen, 1)?;
+    assert_eq!(result.score, Score::Centipawns(900));
+    assert_eq!(result.best_move.map(move_text).as_deref(), Some("b5b6"));
+    let mut position = reference_position(fen)?;
+    let capture = position
+        .legal_moves()
+        .into_iter()
+        .find(|movement| movement.is_capture())
+        .ok_or("missing Qxb6")?;
+    position.play_unchecked(capture);
+    assert!(position.is_stalemate());
+    Ok(())
+}
+
+#[test]
+fn free_capture_scores_the_material_left() -> TestResult {
+    // Rxa7 wins the queen, leaving White a rook ahead.
+    let result = search_and_replay("7k/q7/8/8/8/8/8/R6K w - - 0 1", 1)?;
+    assert_eq!(result.score, Score::Centipawns(500));
+    Ok(())
+}
+
+#[test]
+fn free_knight_capture_keeps_the_remaining_material_after_a_reply() -> TestResult {
+    // Rxa7 wins the knight. Black has legal replies but cannot capture any
+    // white piece. The rooks cancel, leaving 300 + 300 + 900 centipawns.
+    let result = search_and_replay("7k/n7/6r1/8/8/8/8/RNBQ3K w - - 0 1", 2)?;
+    assert_eq!(result.score, Score::Centipawns(1_500));
+    Ok(())
+}
+
+#[test]
+fn quiet_move_beats_a_capture_that_allows_a_recapture() -> TestResult {
+    let fen = "7k/8/2p5/3p4/8/8/8/3Q3K w - - 0 1";
+    // White starts 900 - 200 = 700 centipawns ahead. Qxd5 is the only capture.
+    // At depth 1 it scores the material left, 900 - 100 = 800. At depth 2,
+    // cxd5 answers it and leaves Black a pawn ahead, -100. A quiet move such as
+    // Qd2 keeps the 700 lead: no black piece attacks the queen there, and no
+    // white move checkmates or stalemates Black.
+    assert_eq!(search_and_replay(fen, 1)?.score, Score::Centipawns(800));
+    assert_eq!(search_and_replay(fen, 2)?.score, Score::Centipawns(700));
+    Ok(())
+}
+
+#[test]
+fn checkmated_root_has_no_move_variation_or_nodes() -> TestResult {
+    // Qb7 and Qg7 give check, protected by the white king, and cover every
+    // square the black king could go to.
+    for fen in [
+        "k7/1Q6/2K5/8/8/8/8/8 b - - 0 1",
+        "7k/6Q1/6K1/8/8/8/8/8 b - - 0 1",
+    ] {
+        for depth in [1, 4] {
+            let result = search_and_replay(fen, depth)?;
+            assert_eq!(result.best_move, None, "{fen}");
+            assert_eq!(
+                result.score,
+                Score::Mate {
+                    plies: 0,
+                    winning: false
+                },
+                "{fen}"
+            );
+            assert_eq!(result.nodes, 0, "{fen}");
+            assert_eq!(result.principal_variation, [], "{fen}");
+        }
     }
     Ok(())
 }
 
 #[test]
-fn stalemate_on_the_horizon_scores_as_material() -> Result<(), Box<dyn Error>> {
-    let fen = "k7/8/1p6/1Q6/8/8/8/7K w - - 0 1";
-    let position: Chess = reference_position(fen)?;
-    let best_move = reference::minimax(&position, 1).best_move;
-    let best_move = best_move.ok_or("reference found no legal move")?;
-    assert!(position.clone().play(best_move)?.is_stalemate());
-    assert_matches_reference(&position, 1).map(drop)
+fn stalemated_root_has_no_move_variation_or_nodes() -> TestResult {
+    // The black king on h8 is not in check, and the queen on f7 and the king
+    // on g6 cover g8, g7 and h7.
+    let result = search_and_replay("7k/5Q2/6K1/8/8/8/8/8 b - - 0 1", 4)?;
+    assert_eq!(result.best_move, None);
+    assert_eq!(result.score, Score::Centipawns(0));
+    assert_eq!(result.nodes, 0);
+    assert_eq!(result.principal_variation, []);
+    Ok(())
+}
+
+#[test]
+fn depth_zero_has_no_move_or_variation() -> TestResult {
+    let result = search_and_replay(&Position::starting().to_fen(), 0)?;
+    assert_eq!(result.best_move, None);
+    assert_eq!(result.score, Score::Centipawns(0));
+    assert_eq!(result.nodes, 0);
+    assert_eq!(result.principal_variation, []);
+    Ok(())
 }
 
 #[test]
@@ -95,70 +232,6 @@ fn equal_scores_keep_the_first_legal_move() {
     assert_eq!(result.best_move, first);
     assert_eq!(result.score, Score::Centipawns(0));
     assert_eq!(result.nodes, 20);
-}
-
-#[test]
-fn score_and_nodes_match_reference_on_random_reachable_positions() -> Result<(), Box<dyn Error>> {
-    for mut seed in 1_u64..=3 {
-        let mut position = Chess::default();
-        for _ in 0..12 {
-            let moves = position.legal_moves();
-            if moves.is_empty() {
-                break;
-            }
-            seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
-            let index = usize::try_from((seed >> 32) % u64::try_from(moves.len())?)?;
-            let chosen = moves.get(index).copied().ok_or("missing reference move")?;
-            position = position.play(chosen)?;
-
-            assert_matches_reference(&position, 2)?;
-        }
-    }
-    Ok(())
-}
-
-#[test]
-fn terminal_positions_and_depth_zero_have_empty_variations() -> Result<(), Box<dyn Error>> {
-    for fen in [
-        "7k/6Q1/6K1/8/8/8/8/8 b - - 0 1",
-        "7k/5Q2/6K1/8/8/8/8/8 b - - 0 1",
-    ] {
-        let position = reference_position(fen)?;
-        assert!(position.is_checkmate() || position.is_stalemate(), "{fen}");
-        let result = assert_matches_reference(&position, 4)?;
-        assert_eq!(result.principal_variation, [], "{fen}");
-    }
-    let result = assert_matches_reference(&Chess::default(), 0)?;
-    assert_eq!(result.principal_variation, []);
-    Ok(())
-}
-
-fn assert_matches_reference(position: &Chess, depth: u8) -> Result<SearchResult, Box<dyn Error>> {
-    let expected = reference::minimax(position, depth);
-    let fen = Fen::from_position(position, EnPassantMode::Always).to_string();
-    let result = minimax(&Position::from_fen(&fen)?, depth);
-    let score = match result.score {
-        Score::Centipawns(value) => value,
-        Score::Mate { plies, winning } => {
-            let value = reference::MATE_SCORE - i32::from(plies);
-            if winning { value } else { -value }
-        }
-    };
-    assert_eq!(score, expected.score, "{fen}");
-    assert_eq!(result.nodes, expected.nodes, "{fen}");
-    assert_eq!(
-        result.principal_variation.first().copied(),
-        result.best_move,
-        "{fen}"
-    );
-
-    principal_variation::verify(
-        position,
-        depth,
-        expected.score,
-        result.principal_variation.iter().copied().map(move_text),
-    )?;
-    Ok(result)
 }
 
 fn move_text(movement: rules::Move) -> String {

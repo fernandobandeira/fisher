@@ -1,10 +1,10 @@
+#![cfg(test)]
 //! Reads the published mate-in-two positions by the parsing rules in
 //! `expectations/README.md`. It uses no part of fisher.
 //!
-//! Include it from a test under `crates/fisher/tests/` with
-//! `#[path = "support/mate_in_two.rs"] mod mate_in_two;`.
+//! The unit tests of `search` and its integration tests both include it.
 
-const TABLE: &str = include_str!("../../../../expectations/mate-in-two.tsv");
+const TABLE: &str = include_str!("../../../../../expectations/mate-in-two.tsv");
 
 /// One data line of `expectations/mate-in-two.tsv`.
 pub(super) struct Record {

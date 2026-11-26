@@ -1,12 +1,11 @@
-// Replay the same reference used by the search crate tests.
-#[path = "../../search/tests/support/principal_variation.rs"]
+// Replay principal variations as the search crate tests do.
+#[path = "../../search/src/tests/support/principal_variation.rs"]
 mod principal_variation;
-#[path = "../../search/tests/support/reference_minimax.rs"]
-mod reference;
 #[path = "support/scripted_transcripts.rs"]
 mod scripted_transcripts;
 
 use std::{
+    collections::VecDeque,
     fs,
     io::{self, BufRead, BufReader, Write},
     path::Path,
@@ -19,7 +18,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-use shakmaty::{CastlingMode, Chess, Move, Position, fen::Fen, uci::UciMove};
+use shakmaty::{
+    CastlingMode, Chess, EnPassantMode, Move, Position, PositionError, fen::Fen, uci::UciMove,
+};
 use wait_timeout::ChildExt;
 
 const LEGAL_BESTMOVE: &str = "bestmove {legal}";
@@ -355,33 +356,161 @@ fn reference_command<'a>(tokens: &mut impl Iterator<Item = &'a str>) -> Option<&
     })
 }
 
-fn reference_position<'a>(mut tokens: impl Iterator<Item = &'a str>) -> Option<Chess> {
-    let mut position = match tokens.next()? {
-        "startpos" => Chess::default(),
-        "fen" => {
-            let fields: Vec<_> = tokens.by_ref().take(6).collect();
-            if fields.len() != 6 {
-                return None;
+/// A position as fisher holds it. shakmaty keeps the move counters as `u32`
+/// and fisher as `u64`, so the runner keeps fisher's counters itself.
+#[derive(Clone)]
+struct Tracked {
+    chess: Chess,
+    halfmove: u64,
+    fullmove: u64,
+}
+
+impl Tracked {
+    const STARTING: &str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+
+    /// Sets up a six-field FEN by fisher's rules.
+    fn from_fen(fen: &str) -> Result<Self, String> {
+        let (halfmove, fullmove) =
+            check_fen_text(fen).map_err(|error| format!("invalid FEN {fen:?}: {error}"))?;
+        // fisher does not reject an impossible check or too much material,
+        // so the runner accepts them too.
+        let chess = fen
+            .parse::<Fen>()
+            .map_err(|error| format!("invalid FEN {fen:?}: {error}"))?
+            .into_position(CastlingMode::Standard)
+            .or_else(PositionError::ignore_too_much_material)
+            .or_else(PositionError::ignore_impossible_check)
+            .map_err(|error| format!("invalid position {fen:?}: {error}"))?;
+        Ok(Self {
+            chess,
+            halfmove,
+            fullmove,
+        })
+    }
+
+    /// The FEN of the position with fisher's counters, and an en passant
+    /// square only when a capture there is legal.
+    fn fen(&self) -> String {
+        let fen = Fen::from_position(&self.chess, EnPassantMode::Legal).to_string();
+        let fields: Vec<_> = fen.split(' ').take(4).collect();
+        format!("{} {} {}", fields.join(" "), self.halfmove, self.fullmove)
+    }
+}
+
+/// Sets up a position the way `uci` does: `startpos`, or a FEN of four, five
+/// or six fields, where a missing halfmove clock is 0 and a missing fullmove
+/// number is 1, followed by optional moves.
+fn reference_position<'a>(mut tokens: impl Iterator<Item = &'a str>) -> Result<Tracked, String> {
+    let mut tokens = tokens.by_ref().peekable();
+    let mut position = match tokens.next() {
+        Some("startpos") => Tracked::from_fen(Tracked::STARTING)?,
+        Some("fen") => {
+            let mut fields = Vec::new();
+            while let Some(field) = tokens.next_if(|&token| token != "moves") {
+                fields.push(field);
             }
-            fields
-                .join(" ")
-                .parse::<Fen>()
-                .ok()?
-                .into_position(CastlingMode::Standard)
-                .ok()?
+            Tracked::from_fen(&match fields.len() {
+                4 => format!("{} 0 1", fields.join(" ")),
+                5 => format!("{} 1", fields.join(" ")),
+                _ => fields.join(" "),
+            })?
         }
-        _ => return None,
+        _ => return Err("expected startpos or fen".to_owned()),
     };
     match tokens.next() {
-        None => return Some(position),
+        None => return Ok(position),
         Some("moves") => {}
-        Some(_) => return None,
+        Some(token) => return Err(format!("expected moves, got {token:?}")),
     }
+    // The counters change as `rules` changes them.
     for token in tokens {
-        let movement = reference_move(&position, token)?;
-        position.play_unchecked(movement);
+        let movement = reference_move(&position.chess, token)
+            .ok_or_else(|| format!("illegal move {token}"))?;
+        position.halfmove = if movement.is_zeroing() {
+            0
+        } else {
+            position.halfmove.saturating_add(1)
+        };
+        let mover = movement
+            .from()
+            .and_then(|square| position.chess.board().color_at(square));
+        if mover == Some(shakmaty::Color::Black) {
+            position.fullmove = position.fullmove.saturating_add(1);
+        }
+        position.chess.play_unchecked(movement);
     }
-    Some(position)
+    Ok(position)
+}
+
+/// Checks the text of a FEN by the rules of `rules::Position::from_fen`,
+/// which accepts less than shakmaty: shakmaty also reads missing fields,
+/// pockets, promoted pieces, check counters, `_` between fields, castling by
+/// file, clocks beyond `u32` and a fullmove number of 0. The rules about
+/// kings, pawns, castling pieces and the en passant pawn are the same in both
+/// and are left to shakmaty. Returns the move counters as fisher reads them.
+fn check_fen_text(fen: &str) -> Result<(u64, u64), &'static str> {
+    let [pieces, color, castling, en_passant, halfmove, fullmove] =
+        fen.split_whitespace().collect::<Vec<_>>()[..]
+    else {
+        return Err("FEN must have six fields");
+    };
+    let ranks: Vec<_> = pieces.split('/').collect();
+    if ranks.len() != 8 {
+        return Err("piece placement must have eight ranks");
+    }
+    for rank in ranks {
+        let mut file = 0;
+        for byte in rank.bytes() {
+            if file >= 8 {
+                return Err("each rank must have eight files");
+            }
+            match byte {
+                b'1'..=b'8' => file += byte - b'0',
+                b'p' | b'n' | b'b' | b'r' | b'q' | b'k' | b'P' | b'N' | b'B' | b'R' | b'Q'
+                | b'K' => file += 1,
+                _ => return Err("unknown piece letter in FEN"),
+            }
+        }
+        if file != 8 {
+            return Err("each rank must have eight files");
+        }
+    }
+    let en_passant_rank = match color {
+        "w" => b'6',
+        "b" => b'3',
+        _ => return Err("side to move must be w or b"),
+    };
+    if castling != "-" {
+        let mut seen = Vec::new();
+        for letter in castling.chars() {
+            if !"KQkq".contains(letter) {
+                return Err("castling rights must use K, Q, k, q, or -");
+            }
+            if seen.contains(&letter) {
+                return Err("castling rights must not contain duplicates");
+            }
+            seen.push(letter);
+        }
+    }
+    match *en_passant.as_bytes() {
+        [b'-'] => {}
+        [b'a'..=b'h', rank] if rank == en_passant_rank => {}
+        [b'a'..=b'h', b'1'..=b'8'] => {
+            return Err("en passant square has the wrong rank for the side to move");
+        }
+        _ => return Err("invalid en passant square"),
+    }
+    let decimal = |text: &str| {
+        text.bytes()
+            .all(|byte| byte.is_ascii_digit())
+            .then(|| text.parse::<u64>().ok())
+            .flatten()
+    };
+    let halfmove = decimal(halfmove).ok_or("halfmove clock must be an unsigned decimal integer")?;
+    let fullmove = decimal(fullmove)
+        .filter(|&number| number > 0)
+        .ok_or("fullmove number must be a positive decimal integer")?;
+    Ok((halfmove, fullmove))
 }
 
 fn reference_move(position: &Chess, text: &str) -> Option<Move> {
@@ -391,14 +520,14 @@ fn reference_move(position: &Chess, text: &str) -> Option<Move> {
         .find(|&movement| UciMove::from_standard(movement).to_string() == text)
 }
 
-fn reply_matches(expected: &str, actual: &str, position: &Chess) -> bool {
+fn reply_matches(expected: &str, actual: &str, position: Option<&Chess>) -> bool {
     match expected {
         "id name fisher {version}" => {
             actual == concat!("id name fisher ", env!("CARGO_PKG_VERSION"))
         }
-        LEGAL_BESTMOVE => actual
-            .strip_prefix("bestmove ")
-            .is_some_and(|text| reference_move(position, text).is_some()),
+        LEGAL_BESTMOVE => actual.strip_prefix("bestmove ").is_some_and(|text| {
+            position.is_some_and(|position| reference_move(position, text).is_some())
+        }),
         // The README makes the full spelling special for a single `< ` record at
         // any literal positive depth, and the short spelling at depth 4 only;
         // `{depth}` belongs to `<* ` alone.
@@ -423,8 +552,16 @@ fn reply_matches(expected: &str, actual: &str, position: &Chess) -> bool {
     }
 }
 
-/// The deepest search the reference minimax checks; it prunes nothing.
-const REFERENCE_DEPTH: u8 = 4;
+/// The deepest searched line whose principal variation the runner replays,
+/// and the deepest `{score}` that must come from a position the tests of
+/// `search` compare with plain minimax at depths 1 to 4. Deeper lines get the
+/// spelling, length and node-rate checks only, as the `full-spelling` fixture
+/// in `uci-runner/` expects.
+const REPLAY_DEPTH: u8 = 4;
+
+/// The positions where a transcript leaves the score open. The tests of
+/// `search` compare each of them with plain minimax at depths 1 to 4.
+const OPEN_SCORES: &str = include_str!("../../../test-data/open-scores.txt");
 
 #[test]
 fn single_replies_keep_allowances_to_literal_depths() {
@@ -445,14 +582,14 @@ fn single_replies_keep_allowances_to_literal_depths() {
     ];
     for (expected, actual) in cases {
         assert!(
-            !reply_matches(expected, actual, &position),
+            !reply_matches(expected, actual, Some(&position)),
             "{expected:?} must compare exactly"
         );
     }
     assert!(reply_matches(
         "info depth 4 score {score} nodes {nodes}",
         "info depth 4 score cp 0 nodes 206603",
-        &position
+        Some(&position)
     ));
     for (expected, actual) in [
         (
@@ -465,7 +602,7 @@ fn single_replies_keep_allowances_to_literal_depths() {
         ),
     ] {
         assert!(
-            reply_matches(expected, actual, &position),
+            reply_matches(expected, actual, Some(&position)),
             "{expected:?} must accept {actual:?}"
         );
     }
@@ -631,7 +768,7 @@ fn uci_move_matches(text: &str) -> bool {
         && (b'1'..=b'8').contains(rank_to)
 }
 
-fn reported_score(text: &str) -> io::Result<i32> {
+fn reported_score(text: &str, depth: u8) -> io::Result<i32> {
     if let Some(cp) = text.strip_prefix("cp ") {
         return cp.parse().map_err(io::Error::other);
     }
@@ -640,14 +777,31 @@ fn reported_score(text: &str) -> io::Result<i32> {
         .ok_or_else(|| io::Error::other("missing score"))?
         .parse::<i32>()
         .map_err(io::Error::other)?;
-    // At depth four only mates in one or two can be reported.
-    if !(1..=2).contains(&mate.unsigned_abs()) {
-        return Err(io::Error::other(format!(
-            "mate {mate} exceeds the search depth"
-        )));
+    if mate == 0 {
+        return Err(io::Error::other("mate 0 at a searched depth"));
     }
     let plies = 2 * mate.abs() - i32::from(mate > 0);
-    Ok(mate.signum() * (reference::MATE_SCORE - plies))
+    if plies > i32::from(depth) {
+        return Err(io::Error::other(format!(
+            "mate {mate} exceeds the search depth {depth}"
+        )));
+    }
+    Ok(mate.signum() * (principal_variation::MATE_SCORE - plies))
+}
+
+/// A `{score}` at depths 1 to `REPLAY_DEPTH` must come from a position
+/// listed in `test-data/open-scores.txt`.
+fn verify_open_score_is_covered(position: &Tracked, depth: u8) -> io::Result<()> {
+    let fen = position.fen();
+    let covered = OPEN_SCORES.lines().any(|listed| listed == fen);
+    if covered {
+        Ok(())
+    } else {
+        Err(io::Error::other(format!(
+            "{{score}} at depth {depth} from {fen} is not compared with plain minimax. \
+             Add the position to test-data/open-scores.txt"
+        )))
+    }
 }
 
 fn positive_decimal(text: &str) -> bool {
@@ -772,13 +926,36 @@ fn exit_timeout() -> io::Error {
     )
 }
 
+/// The runner's model of fisher. It knows a search's position only when the
+/// search started while fisher was known to be idle, from a position sent
+/// while fisher was known to be idle. It never predicts a race: a command
+/// sent while a search might still be running makes the position unknown.
 struct Session<I> {
     io: I,
     timeout: Duration,
-    position: Chess,
-    holding: bool,
+    /// fisher's position, or `None` when the runner cannot know it.
+    position: Option<Tracked>,
+    /// Each search whose `bestmove` the runner has not read, oldest first.
+    /// Each one was certainly started, so each gets exactly one `bestmove`.
+    searches: VecDeque<Search>,
+    /// A `go` was sent while a search might still be running. The runner
+    /// cannot tell whether fisher started it, so it cannot tell which search
+    /// any later output belongs to, for the rest of the session.
+    lost: bool,
+    /// `quit` was sent: fisher reads nothing after it.
+    quit: bool,
+    /// The last byte sent was CR. Every record ends a line, so no line spans
+    /// two records, but an LF that starts one may end no line.
+    previous_cr: bool,
     first_variation_move: Option<String>,
     legal_bestmove_replies: Vec<String>,
+}
+
+struct Search {
+    position: Option<Tracked>,
+    infinite: bool,
+    /// `stop` was sent: fisher finishes this search before it reads on.
+    stopped: bool,
 }
 
 impl<I: TranscriptIo> Session<I> {
@@ -786,8 +963,11 @@ impl<I: TranscriptIo> Session<I> {
         Self {
             io,
             timeout,
-            position: Chess::default(),
-            holding: false,
+            position: Tracked::from_fen(Tracked::STARTING).ok(),
+            searches: VecDeque::new(),
+            lost: false,
+            quit: false,
+            previous_cr: false,
             first_variation_move: None,
             legal_bestmove_replies: Vec::new(),
         }
@@ -806,7 +986,7 @@ impl<I: TranscriptIo> Session<I> {
         match record {
             Record::Send(command) => {
                 self.io.send(&command)?;
-                self.track_reference_command(&command);
+                self.track_input(&command);
                 Ok(())
             }
             Record::CloseInput => {
@@ -815,6 +995,78 @@ impl<I: TranscriptIo> Session<I> {
             }
             Record::Observe(pattern, delimiter) => self.observe(pattern.as_ref(), delimiter),
         }
+    }
+
+    /// Splits input into lines as `uci` does: CR ends a line, and so does LF
+    /// unless it follows CR.
+    fn track_input(&mut self, bytes: &[u8]) {
+        let mut line = Vec::new();
+        for &byte in bytes {
+            if byte == b'\r' || (byte == b'\n' && !self.previous_cr) {
+                self.track_line(&std::mem::take(&mut line));
+            } else if byte != b'\n' {
+                line.push(byte);
+            }
+            self.previous_cr = byte == b'\r';
+        }
+    }
+
+    /// Follows one command. Two facts about a running search are certain
+    /// from `uci`'s session, and the runner uses only those: an infinite
+    /// search keeps fisher busy until `stop`, so fisher rejects `position`
+    /// and `go` until then; and after `stop`, fisher finishes the search
+    /// before it reads on.
+    fn track_line(&mut self, line: &[u8]) {
+        if self.quit {
+            return;
+        }
+        let text = String::from_utf8_lossy(line);
+        let mut tokens = text.split_whitespace();
+        let running = self.searches.back().filter(|search| !search.stopped);
+        let maybe_running = running.is_some();
+        match reference_command(&mut tokens) {
+            // fisher rejects these during an infinite search, or does
+            // nothing for `ucinewgame`.
+            Some("position" | "go" | "ucinewgame")
+                if running.is_some_and(|search| search.infinite) => {}
+            Some("position" | "ucinewgame") if maybe_running => self.position = None,
+            // A position fisher rejects leaves its position in place.
+            Some("position") => {
+                if let Ok(position) = reference_position(tokens) {
+                    self.position = Some(position);
+                }
+            }
+            Some("go") if maybe_running => self.lost = true,
+            Some("go") => {
+                self.searches.push_back(Search {
+                    position: self.position.clone(),
+                    infinite: tokens.any(|token| token == "infinite"),
+                    stopped: false,
+                });
+            }
+            Some("stop") => {
+                if let Some(search) = self.searches.back_mut() {
+                    search.stopped = true;
+                }
+            }
+            Some("quit") => self.quit = true,
+            _ => {}
+        }
+    }
+
+    /// The position of the search whose output the runner reads now.
+    fn search_position(&self, need: &str) -> io::Result<Tracked> {
+        self.searches
+            .front()
+            .and_then(|search| search.position.clone())
+            .filter(|_| !self.lost)
+            .ok_or_else(|| {
+                io::Error::other(format!(
+                    "{need} from a search whose position the runner cannot know: a position \
+                     or go was sent while a search might still be running. Read bestmove \
+                     before sending it, or use a literal value"
+                ))
+            })
     }
 
     fn observe(
@@ -849,23 +1101,14 @@ impl<I: TranscriptIo> Session<I> {
         }
     }
 
-    fn track_reference_command(&mut self, command: &[u8]) {
-        let text = String::from_utf8_lossy(command);
-        let mut tokens = text.split_whitespace();
-        match reference_command(&mut tokens) {
-            Some("go") if tokens.any(|token| token == "infinite") => self.holding = true,
-            Some("stop") => self.holding = false,
-            Some("position") if !self.holding => {
-                if let Some(position) = reference_position(tokens) {
-                    self.position = position;
-                }
-            }
-            _ => {}
-        }
-    }
-
     fn expect_reply(&mut self, expected: &str, actual: String) -> io::Result<()> {
-        if !reply_matches(expected, &actual, &self.position) {
+        let is_bestmove = actual.starts_with("bestmove ");
+        let position = if expected == LEGAL_BESTMOVE {
+            Some(self.search_position("bestmove {legal}")?.chess)
+        } else {
+            None
+        };
+        if !reply_matches(expected, &actual, position.as_ref()) {
             return Err(io::Error::other(format!(
                 "expected {expected:?}, got {actual:?}"
             )));
@@ -884,6 +1127,9 @@ impl<I: TranscriptIo> Session<I> {
         if expected == LEGAL_BESTMOVE {
             self.legal_bestmove_replies.push(actual);
         }
+        if is_bestmove {
+            self.searches.pop_front();
+        }
         Ok(())
     }
 
@@ -892,28 +1138,23 @@ impl<I: TranscriptIo> Session<I> {
         expected_score: &str,
         info: &SearchInfo<'_>,
     ) -> io::Result<()> {
-        // Depths 1 to 4 have an independent minimax and replay check. Deeper
-        // lines have the documented spelling and length checks only, because
-        // the reference minimax prunes nothing.
-        let Some((full, depth)) = info.full.as_ref().zip(
-            info.depth
-                .parse::<u8>()
-                .ok()
-                .filter(|depth| (1..=REFERENCE_DEPTH).contains(depth)),
-        ) else {
+        // The runner does not know the right score: the tests of `search`
+        // compare it with plain minimax, so a score left open must be at a
+        // position they cover, with or without a principal variation.
+        let depth = info.depth.parse::<u8>().map_err(io::Error::other)?;
+        let checked = (1..=REPLAY_DEPTH).contains(&depth);
+        if expected_score == "{score}" && checked {
+            verify_open_score_is_covered(&self.search_position("{score}")?, depth)?;
+        }
+        // Searched lines with a principal variation at depths 1 to 4 get the
+        // replay of D5.
+        let Some(full) = info.full.as_ref().filter(|_| checked) else {
             self.first_variation_move = None;
             return Ok(());
         };
-        let score = reported_score(info.score)?;
-        if expected_score == "{score}" || depth <= 2 {
-            let best = reference::minimax(&self.position, depth).score;
-            if score != best {
-                return Err(io::Error::other(format!(
-                    "reported score {score} differs from reference {best}"
-                )));
-            }
-        }
-        principal_variation::verify(&self.position, depth, score, full.pv.split(' '))
+        let score = reported_score(info.score, depth)?;
+        let position = self.search_position("a principal variation")?;
+        principal_variation::verify(&position.chess, depth, score, full.pv.split(' '))
             .map_err(io::Error::other)?;
         self.first_variation_move = full.pv.split(' ').next().map(str::to_owned);
         Ok(())
@@ -927,4 +1168,393 @@ impl Drop for Engine {
             drop(child.wait());
         }
     }
+}
+
+/// A stand-in for fisher that answers the nth command with the nth batch of
+/// lines, for checking the runner itself.
+struct FakeEngine {
+    replies: std::collections::VecDeque<Vec<&'static str>>,
+    stdout: std::collections::VecDeque<&'static str>,
+    started: Instant,
+}
+
+impl TranscriptIo for FakeEngine {
+    fn send(&mut self, _: &[u8]) -> io::Result<()> {
+        self.stdout
+            .extend(self.replies.pop_front().unwrap_or_default());
+        Ok(())
+    }
+
+    fn close_input(&mut self) {}
+
+    fn now(&self) -> Instant {
+        self.started
+    }
+
+    fn read_reply(&mut self, _: Instant) -> io::Result<Option<String>> {
+        Ok(self.stdout.pop_front().map(str::to_owned))
+    }
+
+    fn wait_for_success(&mut self, _: Duration) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+fn run_against_fake(transcript: &str, replies: Vec<Vec<&'static str>>) -> io::Result<Vec<String>> {
+    run_transcript("fake", transcript, HANG_TIMEOUT, || {
+        Ok(FakeEngine {
+            replies: replies.into(),
+            stdout: std::collections::VecDeque::new(),
+            started: Instant::now(),
+        })
+    })
+}
+
+fn rejection(result: io::Result<Vec<String>>) -> String {
+    result
+        .err()
+        .map(|error| error.to_string())
+        .unwrap_or_default()
+}
+
+// k7/8/8/8/8/8/8/K7 w is legal and missing from test-data/open-scores.txt.
+// 7k/8/5K1Q/8/8/8/8/8 b is listed there.
+
+#[test]
+fn open_score_without_a_variation_must_be_covered() {
+    let transcript = |position: &str| {
+        format!(
+            "> position {position}\n> go depth 4\n\
+             < info depth 4 score {{score}} nodes {{nodes}}\n< bestmove a1a2\n! exit\n"
+        )
+    };
+    let replies = || {
+        vec![
+            vec![],
+            vec!["info depth 4 score cp 0 nodes 99", "bestmove a1a2"],
+        ]
+    };
+    let error = rejection(run_against_fake(
+        &transcript("fen k7/8/8/8/8/8/8/K7 w - - 0 1"),
+        replies(),
+    ));
+    assert!(error.contains("not compared with plain minimax"), "{error}");
+    assert!(run_against_fake(&transcript("fen 7k/8/5K1Q/8/8/8/8/8 b - - 0 1"), replies()).is_ok());
+}
+
+#[test]
+fn repeated_open_score_without_a_variation_must_be_covered() {
+    let transcript = "> position fen k7/8/8/8/8/8/8/K7 w - - 0 1\n> go depth 2\n\
+                      <* info depth {depth} score {score} nodes {nodes}\n\
+                      < bestmove a1a2\n! exit\n";
+    let replies = vec![
+        vec![],
+        vec![
+            "info depth 1 score cp 0 nodes 3",
+            "info depth 2 score cp 0 nodes 12",
+            "bestmove a1a2",
+        ],
+    ];
+    let error = rejection(run_against_fake(transcript, replies));
+    assert!(error.contains("not compared with plain minimax"), "{error}");
+}
+
+#[test]
+fn short_fens_are_set_up_as_uci_sets_them_up() {
+    // Before the short FEN, the runner tracks the listed starting position.
+    let transcript = |fen: &str| {
+        format!(
+            "> position startpos\n> position fen {fen}\n> go depth 4\n\
+             < info depth 4 score {{score}} nodes {{nodes}}\n< bestmove a1a2\n! exit\n"
+        )
+    };
+    let replies = || {
+        vec![
+            vec![],
+            vec![],
+            vec!["info depth 4 score cp 0 nodes 99", "bestmove a1a2"],
+        ]
+    };
+    for fen in ["k7/8/8/8/8/8/8/K7 w - -", "k7/8/8/8/8/8/8/K7 w - - 0"] {
+        let error = rejection(run_against_fake(&transcript(fen), replies()));
+        // The missing halfmove clock is 0 and the missing fullmove number is 1.
+        assert!(
+            error.contains("from k7/8/8/8/8/8/8/K7 w - - 0 1 is not compared"),
+            "{fen}: {error}"
+        );
+    }
+    assert!(run_against_fake(&transcript("7k/8/5K1Q/8/8/8/8/8 b - -"), replies()).is_ok());
+}
+
+#[test]
+fn a_record_with_a_cr_sends_two_commands() {
+    // `uci` ends a line at CR, so this record sends `ucinewgame` and then a
+    // position: the starting position with a halfmove clock of 1, which
+    // test-data/open-scores.txt does not list.
+    let transcript = |clock: &str| {
+        format!(
+            "> ucinewgame\\rposition fen rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR \
+             w KQkq - {clock} 1\n> go depth 4\n< info depth 4 score {{score}} nodes {{nodes}}\n\
+             < bestmove a2a3\n! exit\n"
+        )
+    };
+    let replies = || {
+        vec![
+            vec![],
+            vec!["info depth 4 score cp 0 nodes 99", "bestmove a2a3"],
+        ]
+    };
+    let error = rejection(run_against_fake(&transcript("1"), replies()));
+    assert!(
+        error.contains("RNBQKBNR w KQkq - 1 1 is not compared"),
+        "{error}"
+    );
+    assert!(run_against_fake(&transcript("0"), replies()).is_ok());
+}
+
+#[test]
+fn a_stopped_search_reports_on_its_own_position() {
+    // After stop, fisher finishes the search before it reads the next
+    // position, but the search's last report can still be unread.
+    let transcript = |searched: &str, next: &str, bestmove: &str| {
+        format!(
+            "> position fen {searched}\n> go infinite\n> stop\n> position fen {next}\n\
+             < info depth 4 score {{score}} nodes {{nodes}}\n< bestmove {bestmove}\n! exit\n"
+        )
+    };
+    let replies = |bestmove| {
+        vec![
+            vec![],
+            vec![],
+            vec!["info depth 4 score cp 0 nodes 9", bestmove],
+            vec![],
+        ]
+    };
+    let unlisted = "k7/8/8/8/8/8/8/K7 w - - 0 1";
+    let listed = "7k/8/5K1Q/8/8/8/8/8 b - - 0 1";
+    let error = rejection(run_against_fake(
+        &transcript(unlisted, listed, "a1a2"),
+        replies("bestmove a1a2"),
+    ));
+    assert!(error.contains("from k7/8/8/8/8/8/8/K7 w"), "{error}");
+    assert!(
+        run_against_fake(
+            &transcript(listed, unlisted, "h8g8"),
+            replies("bestmove h8g8")
+        )
+        .is_ok()
+    );
+}
+
+#[test]
+fn the_runner_sets_up_the_fens_fisher_accepts() {
+    // Expected verdicts from the rules in crates/rules/src/fen.rs
+    // (`Position::from_fen`), after `uci` fills in four- and five-field FENs.
+    let board = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR";
+    let cases = [
+        (format!("{board} w KQkq - 0 1"), true),
+        (format!("{board} w KQkq -"), true),
+        (format!("{board} w KQkq - 0"), true),
+        (format!("{board} w qkQK - 01 1"), true),
+        (format!("{board} w KQkq - 99999999999 1"), true),
+        // Too much material and an impossible check: fisher does not check.
+        ("k7/8/8/8/8/8/PPPPPPPP/QQQQQQQK w - - 0 1".to_owned(), true),
+        ("4k3/8/3N1N2/8/8/8/8/4K3 b - - 0 1".to_owned(), true),
+        (format!("{board} w KQkq - 0 0"), false),
+        (format!("{board} w KQkq - +1 1"), false),
+        (format!("{board} w KK - 0 1"), false),
+        (format!("{board} w HAha - 0 1"), false),
+        (format!("{board} W KQkq - 0 1"), false),
+        (format!("{board} w KQkq - 0 1 +3+3"), false),
+        (format!("{board} w KQkq"), false),
+        (format!("{board} w KQkq e3 0 1"), false),
+        (
+            "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBN~ w Qkq - 0 1".to_owned(),
+            false,
+        ),
+        (
+            "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR[] w KQkq - 0 1".to_owned(),
+            false,
+        ),
+    ];
+    for (fen, accepted) in cases {
+        let command = format!("fen {fen}");
+        assert_eq!(
+            reference_position(command.split_whitespace()).is_ok(),
+            accepted,
+            "{fen}"
+        );
+    }
+}
+
+#[test]
+fn a_position_fisher_rejects_leaves_the_position_in_place() {
+    // The last rank of the rejected FEN has seven files.
+    let transcript = "> position fen 7k/8/5K1Q/8/8/8/8/8 b - - 0 1\n\
+                      > position fen k7/8/8/8/8/8/8/K6 w - - 0 1\n\
+                      < info string {message:eight files}\n> go depth 4\n\
+                      < info depth 4 score {score} nodes {nodes}\n< bestmove h8g8\n! exit\n";
+    let replies = vec![
+        vec![],
+        vec!["info string position rejected: invalid FEN: eight files"],
+        vec!["info depth 4 score mate -1 nodes 99", "bestmove h8g8"],
+    ];
+    assert!(run_against_fake(transcript, replies).is_ok());
+}
+
+#[test]
+fn a_command_sent_during_a_finite_search_makes_the_position_unknown() {
+    // fisher may have finished depth 1 and accepted the position, or not.
+    let transcript = |score: &str| {
+        format!(
+            "> go depth 1\n> position startpos\n\
+             < info depth 1 multipv 1 score cp 0 nodes 20 nps 20000 time 1 pv e2e4\n\
+             < bestmove e2e4\n> go depth 4\n< info depth 4 score {score} nodes {{nodes}}\n\
+             < bestmove e2e4\n! exit\n"
+        )
+    };
+    let replies = || {
+        vec![
+            vec![
+                "info depth 1 multipv 1 score cp 0 nodes 20 nps 20000 time 1 pv e2e4",
+                "bestmove e2e4",
+            ],
+            vec![],
+            vec!["info depth 4 score cp 0 nodes 99", "bestmove e2e4"],
+        ]
+    };
+    let error = rejection(run_against_fake(&transcript("{score}"), replies()));
+    assert!(
+        error.contains("{score} from a search whose position"),
+        "{error}"
+    );
+    assert!(error.contains("Read bestmove before sending it"), "{error}");
+    assert!(run_against_fake(&transcript("cp 0"), replies()).is_ok());
+}
+
+#[test]
+fn a_go_sent_during_a_finite_search_leaves_every_later_position_unknown() {
+    // fisher may have started the second search, or rejected it.
+    let transcript = "> go depth 1\n> go depth 1\n< bestmove e2e4\n> position startpos\n\
+                      > go depth 4\n< info depth 4 score {score} nodes {nodes}\n\
+                      < bestmove e2e4\n! exit\n";
+    let replies = vec![
+        vec!["bestmove e2e4"],
+        vec![],
+        vec![],
+        vec!["info depth 4 score cp 0 nodes 99", "bestmove e2e4"],
+    ];
+    let error = rejection(run_against_fake(transcript, replies));
+    assert!(
+        error.contains("{score} from a search whose position"),
+        "{error}"
+    );
+}
+
+#[test]
+fn fisher_rejects_position_and_go_during_an_infinite_search() {
+    // Until stop, an infinite search keeps fisher busy, whatever comes next.
+    for (next, replies) in [
+        (
+            "isready\n< info string {message:waiting for stop}\n< readyok",
+            vec!["readyok"],
+        ),
+        (
+            "ucinewgame\n< info string {message:waiting for stop}",
+            vec![],
+        ),
+        ("\n< info string {message:waiting for stop}", vec![]),
+        (
+            "position startpos\\r\\r\n< info string {message:waiting for stop}\n\
+             < info string {message:waiting for stop}",
+            vec!["info string position rejected: waiting for stop"],
+        ),
+        (
+            "go depth 4\n< info string {message:waiting for stop}\n\
+          < info string {message:waiting for stop}",
+            vec!["info string go rejected: waiting for stop"],
+        ),
+    ] {
+        let transcript = format!(
+            "> go infinite\n> position fen k7/8/8/8/8/8/8/K7 w - - 0 1\n> {next}\n\
+             > stop\n< bestmove e2e4\n> go depth 4\n\
+             < info depth 4 score {{score}} nodes {{nodes}}\n< bestmove e2e4\n! exit\n"
+        );
+        let replies = vec![
+            vec![],
+            vec!["info string position rejected: waiting for stop"],
+            replies,
+            vec!["bestmove e2e4"],
+            vec!["info depth 4 score cp 0 nodes 99", "bestmove e2e4"],
+        ];
+        // The starting position stays, and test-data/open-scores.txt lists it.
+        let result = run_against_fake(&transcript, replies);
+        assert!(result.is_ok(), "{next}: {result:?}");
+    }
+    let eof = "> go infinite\n> position fen k7/8/8/8/8/8/8/K7 w - - 0 1\n\
+               < info string {message:waiting for stop}\n! eof\n< bestmove e2e4\n! exit\n";
+    let replies = vec![
+        vec![],
+        vec![
+            "info string position rejected: waiting for stop",
+            "bestmove e2e4",
+        ],
+    ];
+    assert!(run_against_fake(eof, replies).is_ok());
+}
+
+#[test]
+fn nothing_after_quit_is_read() {
+    let replies = vec![vec![]];
+    assert!(run_against_fake("> quit\\rposition rubbish\n! exit\n", replies).is_ok());
+}
+
+#[test]
+fn move_counters_keep_fisher_s_range() {
+    // fisher keeps both counters as u64; shakmaty would write 4294967295.
+    let fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 4294967296";
+    let position = reference_position(format!("fen {fen}").split_whitespace());
+    assert_eq!(position.map(|position| position.fen()), Ok(fen.to_owned()));
+    let error = rejection(run_against_fake(
+        &format!(
+            "> position fen {fen}\n> go depth 4\n< info depth 4 score {{score}} nodes {{nodes}}\n\
+             < bestmove e2e4\n! exit\n"
+        ),
+        vec![
+            vec![],
+            vec!["info depth 4 score cp 0 nodes 99", "bestmove e2e4"],
+        ],
+    ));
+    assert!(error.contains("- 0 4294967296 is not compared"), "{error}");
+}
+
+#[test]
+fn a_rejected_go_loses_attribution_for_the_rest_of_the_session() {
+    // fisher rejects the second go, so it never gets a bestmove. Neither stop
+    // nor a fresh position restores which search later output belongs to:
+    // the last search has the queen on h5, which open-scores.txt does not
+    // list.
+    let transcript = "> position fen 7k/8/5K1Q/8/8/8/8/8 b - - 0 1\n\
+                      > go depth 0\\rgo depth 0\n< info string {message:waiting for stop}\n\
+                      < bestmove h8g8\n> stop\n> position fen 7k/8/5K1Q/8/8/8/8/8 b - - 0 1\n\
+                      > go depth 0\n< bestmove h8g8\n> stop\n\
+                      > position fen 7k/8/5K2/7Q/8/8/8/8 b - - 0 1\n> go depth 1\n\
+                      < info depth 1 multipv 1 score {score} nodes 1 nps {nps} time {time} pv h8g8\n\
+                      < bestmove {legal}\n> quit\n! exit\n";
+    let replies = vec![
+        vec![],
+        vec!["info string go rejected: waiting for stop", "bestmove h8g8"],
+        vec![],
+        vec![],
+        vec!["bestmove h8g8"],
+        vec![],
+        vec![],
+        vec![
+            "info depth 1 multipv 1 score cp -900 nodes 1 nps 1000 time 1 pv h8g8",
+            "bestmove h8g8",
+        ],
+        vec![],
+    ];
+    let error = rejection(run_against_fake(transcript, replies));
+    assert!(error.contains("from a search whose position"), "{error}");
 }

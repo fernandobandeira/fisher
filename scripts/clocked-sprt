@@ -1,0 +1,168 @@
+#!/usr/bin/env python3
+"""Play or replay a clocked SPRT range between two commits of fisher."""
+
+import argparse
+from enum import Enum, auto
+from hashlib import sha256
+import os
+from pathlib import Path
+import signal
+import subprocess
+import sys
+
+sys.dont_write_bytecode = True
+
+from clocked_sprt import (
+    TIME_CONTROL, Refused, UnreadableGames, fetch_openings, judge_pairs,
+    opening_bytes, play, preflight, print_report, read_range, revision,
+)
+from sprt_statistic import MAX_PAIRS, SPRT_BOUNDS
+
+
+INTERRUPT_SIGNALS = (signal.SIGINT, signal.SIGTERM)
+
+
+class Stage(Enum):
+    BEFORE_PLAY = auto()
+    PLAY_STARTED = auto()
+    RESULT_PRINTED = auto()
+
+
+class RunState:
+    def __init__(self):
+        self.stage = Stage.BEFORE_PLAY
+        self.status = None
+        self.replay = False
+        self.match = None
+        self.launching = False
+        self.interrupted = False
+
+    def interrupt(self, signum, frame):
+        if self.stage is Stage.RESULT_PRINTED or self.interrupted:
+            return
+        self.interrupted = True
+        # During Popen, keep the interrupt pending until we have the group ID.
+        if not (self.launching and self.stage is Stage.PLAY_STARTED):
+            raise KeyboardInterrupt
+
+    def start_match(self, command, **options):
+        try:
+            self.launching = True
+            self.stage = Stage.PLAY_STARTED
+            self.match = subprocess.Popen(command, start_new_session=True, **options)
+        finally:
+            self.launching = False
+            if self.interrupted:
+                raise KeyboardInterrupt
+        return self.match
+
+    def stop_match(self):
+        if self.match is not None:
+            try:
+                os.killpg(self.match.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            self.match.wait()
+
+    def finish(self, result, status):
+        # Publish the line and its status together before handling pending signals.
+        old_mask = signal.pthread_sigmask(signal.SIG_BLOCK, INTERRUPT_SIGNALS)
+        try:
+            print(f"Result: {result}", flush=True)
+            self.status = status
+            self.stage = Stage.RESULT_PRINTED
+        finally:
+            signal.pthread_sigmask(signal.SIG_SETMASK, old_mask)
+        return status
+
+
+class ArgumentParser(argparse.ArgumentParser):
+    def error(self, message):
+        raise Refused(message)
+
+
+def main(state):
+    parser = ArgumentParser(description=__doc__)
+    parser.add_argument("measured")
+    parser.add_argument("opponent")
+    parser.add_argument("test", choices=SPRT_BOUNDS)
+    parser.add_argument("first", type=int, help="first opening, starting at 1")
+    parser.add_argument("count", type=int, help="number of pairs")
+    parser.add_argument("directory", type=Path, help="new directory for the evidence")
+    parser.add_argument("--concurrency", type=int, default=1, help="games at a time (default: 1)")
+    parser.add_argument("--pgn", type=Path, help="replay a kept PGN for this range without playing")
+    parser.add_argument("--previous-pgn", type=Path, help="kept PGN for openings 1 through FIRST - 1")
+    parser.add_argument("--opponent-view", action="store_true", help="score kept PGNs from the opponent's side")
+    args = parser.parse_args()
+    state.replay = args.pgn is not None
+
+    end = args.first + args.count - 1
+    if args.first < 1 or args.count < 1 or end > MAX_PAIRS:
+        parser.error(f"the range must be within openings 1 through {MAX_PAIRS}")
+    if args.concurrency < 1:
+        parser.error("concurrency must be positive")
+    if args.previous_pgn and args.first == 1:
+        parser.error("--previous-pgn requires a first opening greater than 1")
+    if args.opponent_view and args.pgn is None:
+        parser.error("--opponent-view requires --pgn")
+
+    with preflight():
+        measured, opponent = revision(args.measured), revision(args.opponent)
+        seed = f"{measured}:{opponent}"
+        openings = fetch_openings(seed)
+        out = args.directory.resolve()
+        out.mkdir()
+        order = opening_bytes(openings)
+        order_sha256 = sha256(order).hexdigest()
+        (out / "opening-order.epd").write_bytes(order)
+    print(f"Seed: {seed}")
+    print(f"Opening order SHA-256: {order_sha256}")
+    low, high = SPRT_BOUNDS[args.test]
+    print(f"Test: {args.test} (SPRT bounds {low} and {high} Elo)")
+    if args.opponent_view:
+        print(f"Reading from the opponent's side of the test played as measured {measured} against opponent {opponent}")
+    print(f"Time control: {TIME_CONTROL}")
+    print(f"Range: {args.first}–{end} ({args.count} pairs)", flush=True)
+
+    previous = []
+    if args.previous_pgn:
+        previous = read_range(args.previous_pgn, openings[:args.first - 1], 1, measured, opponent)
+        if args.pgn is None and judge_pairs(previous, args.test)[0].verdict:
+            raise Refused("The previous openings already gave a verdict. Replay the kept PGN.")
+    selected = openings[args.first - 1:end]
+    status = 0 if args.pgn else play(out, measured, opponent, selected, args.concurrency, state.start_match)
+    current = read_range(args.pgn or out / "games.pgn", selected, args.first, measured, opponent)
+    if status:
+        raise RuntimeError(f"fastchess exited with status {status}. See fastchess.log.")
+    have_prefix = args.first == 1 or args.previous_pgn is not None
+    return print_report(previous + current, args.test, have_prefix, args.opponent_view)
+
+
+def run():
+    state = RunState()
+    try:
+        for signum in INTERRUPT_SIGNALS:
+            signal.signal(signum, state.interrupt)
+        try:
+            return state.finish(main(state), 0)
+        except UnreadableGames as error:
+            return state.finish(f"void ({error})", 1)
+        except Refused as error:
+            print(f"Refused: {error}", file=sys.stderr)
+            return 2
+        except Exception as error:
+            print(f"Unexpected error ({type(error).__name__}): {error}", file=sys.stderr)
+            return 3
+    except KeyboardInterrupt:
+        if state.stage is Stage.RESULT_PRINTED:
+            return state.status
+        if state.stage is Stage.PLAY_STARTED:
+            state.stop_match()
+            return state.finish("void (interrupted)", 1)
+        description = "while replaying kept games" if state.replay else "while preparing the range"
+        print(f"Refused: interrupted {description}", file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    sys.exit(run())

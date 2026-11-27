@@ -43,6 +43,7 @@ permissions:
 
 jobs:
   plan:
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
@@ -53,13 +54,13 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      - name: Verify the earlier dispatch and download its games
         if: inputs.previous_run != '' || inputs.replay_run != ''
-        with:
-          github-token: ${{ github.token }}
-          run-id: ${{ inputs.previous_run || inputs.replay_run }}
-          name: sprt-record
-          path: ${{ runner.temp }}/source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN: ${{ inputs.previous_run || inputs.replay_run }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: scripts/hosted-sprt fetch-source -- "$SOURCE_RUN" "$DEFAULT_BRANCH" "$RUNNER_TEMP/earlier"
       - name: Plan ranges and check any previous games
         id: plan
         env:
@@ -73,12 +74,21 @@ jobs:
           OPPONENT_VIEW: ${{ inputs.opponent_view }}
         run: |
           scripts/hosted-sprt plan -- "$MEASURED" "$OPPONENT" "$TEST" "$FIRST" "$PAIRS" \
-            "$PREVIOUS_RUN" "$REPLAY_RUN" "$OPPONENT_VIEW" "$RUNNER_TEMP/source" >> "$GITHUB_OUTPUT"
+            "$PREVIOUS_RUN" "$REPLAY_RUN" "$OPPONENT_VIEW" "$RUNNER_TEMP/earlier/sprt-record" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: inputs.previous_run != '' || inputs.replay_run != ''
         with:
           name: sprt-source-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/source/games.pgn
+          path: ${{ runner.temp }}/earlier/sprt-record/games.pgn
+          if-no-files-found: error
+      - name: Save the requested range for recovery
+        env:
+          PLAN: ${{ steps.plan.outputs.plan }}
+        run: printf '%s\n' "$PLAN" > "$RUNNER_TEMP/plan.json"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: sprt-plan-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/plan.json
           if-no-files-found: error
 
   play:
@@ -147,23 +157,16 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        if: fromJSON(needs.plan.outputs.plan).source_run != ''
-        continue-on-error: true
-        with:
-          name: sprt-source-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/source
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        if: fromJSON(needs.plan.outputs.plan).replay == false
-        continue-on-error: true
-        with:
-          pattern: sprt-${{ github.run_attempt }}-*
-          path: ${{ runner.temp }}/ranges
+      - name: List and download uploaded games
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PLAN: ${{ needs.plan.outputs.plan }}
+        run: scripts/hosted-sprt collect -- "$PLAN" "$RUNNER_TEMP/ranges"
       - name: Read kept games and print the record
         env:
           PLAN: ${{ needs.plan.outputs.plan }}
         run: |
-          scripts/hosted-sprt record -- "$PLAN" "$RUNNER_TEMP/source" \
+          scripts/hosted-sprt record -- "$PLAN" "$RUNNER_TEMP/ranges/sprt-source-$GITHUB_RUN_ATTEMPT" \
             "$RUNNER_TEMP/ranges" "$RUNNER_TEMP/joined" | tee -a "$GITHUB_STEP_SUMMARY"
         shell: bash
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

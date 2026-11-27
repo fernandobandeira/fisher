@@ -23,12 +23,104 @@ RESULTS = {"pass", "fail", "inconclusive", "no verdict yet"}
 ENDINGS = ("loss on time", "crash or stall", "illegal move")
 FEN = re.compile(r'^\[FEN "([^"\n]+)"\]$', re.MULTILINE)
 RUN_ID = re.compile(r"[1-9][0-9]*")
+WORKFLOW = ".github/workflows/clocked-sprt.yml"
+MAX_RANGE_PAIRS = 50
+
+
+def github_json(*args):
+    return json.loads(subprocess.check_output(["gh", "api", *args], text=True))
+
+
+def require_source_run(repository, run, default_branch):
+    if not RUN_ID.fullmatch(run):
+        raise ValueError("Use the numeric Actions run ID for kept games.")
+    info = github_json(f"repos/{repository}/actions/runs/{run}")
+    if (
+        str(info["id"]) != run
+        or info["repository"]["full_name"] != repository
+        or (info.get("head_repository") or {}).get("full_name") != repository
+        or info["path"] != WORKFLOW
+        or info["event"] != "workflow_dispatch"
+        or info["head_branch"] != default_branch
+        or subprocess.run(
+            ["git", "merge-base", "--is-ancestor", info["head_sha"], f"origin/{default_branch}"],
+            cwd=ROOT,
+        ).returncode != 0
+    ):
+        raise ValueError(f"Run {run} must be a {WORKFLOW} dispatch from {repository}'s default branch.")
+
+
+def artifact_names(repository, run):
+    pages = github_json(
+        "--paginate", "--slurp", f"repos/{repository}/actions/runs/{run}/artifacts?per_page=100",
+    )
+    return {artifact["name"] for page in pages for artifact in page["artifacts"]}
+
+
+def download_artifacts(repository, run, names, directory):
+    if not names:
+        return
+    # gh extracts one explicitly named artifact directly into its destination.
+    target = directory / names[0] if len(names) == 1 else directory
+    options = [option for name in names for option in ("--name", name)]
+    try:
+        subprocess.run(
+            ["gh", "run", "download", run, "--repo", repository, "--dir", target, *options],
+            check=True,
+        )
+    except subprocess.CalledProcessError as error:
+        raise ValueError(f"Artifact transfer failed for run {run}: {', '.join(names)}.") from error
+    for name in names:
+        path = directory / name
+        if not path.is_dir() or not any(path.iterdir()):
+            raise ValueError(f"GitHub lists artifact {name} for run {run}, but it did not arrive.")
+
+
+def range_artifacts(plan, attempt, listed):
+    return [
+        name for shard in plan["ranges"]
+        if (name := f"sprt-{attempt}-{shard['first']}") in listed
+    ]
+
+
+def collect_artifacts(plan, repository, attempt, directory, listed):
+    names = range_artifacts(plan, attempt, listed)
+    source_name = f"sprt-source-{attempt}"
+    if plan["source_run"]:
+        if source_name not in listed:
+            raise ValueError(f"GitHub did not list the required source artifact {source_name}.")
+        names.append(source_name)
+    download_artifacts(repository, plan["run"], names, directory)
+
+
+def fetch_source(repository, run, default_branch, directory):
+    require_source_run(repository, run, default_branch)
+    listed = artifact_names(repository, run)
+    source = directory / "sprt-record"
+    if "sprt-record" in listed:
+        download_artifacts(repository, run, ["sprt-record"], directory)
+        if (source / "record.tsv").is_file():
+            return
+
+    if "sprt-plan-1" not in listed:
+        raise ValueError(f"Run {run} has no record or kept plan to replay.")
+    download_artifacts(repository, run, ["sprt-plan-1"], directory)
+    plan_path = directory / "sprt-plan-1/plan.json"
+    plan = json.loads(plan_path.read_text())
+    if plan["run"] != run:
+        raise ValueError("The downloaded plan is from a different run.")
+    collect_artifacts(plan, repository, "1", directory, listed)
+    prior = (directory / "sprt-source-1/games.pgn").read_bytes() if plan["source_run"] else b""
+    games = prior if plan["replay"] else prior + b"\n\n" + join_ranges(directory, plan["ranges"], "1")
+    source.mkdir(exist_ok=True)
+    (source / "plan.json").write_bytes(plan_path.read_bytes())
+    (source / "games.pgn").write_bytes(games)
 
 
 def ranges(first, count):
     # At most eight simultaneous runners. Large dispatches use successive
-    # groups of ranges, with at most 125 pairs per playing job.
-    shards = max(min(count, 8), (count + 124) // 125)
+    # groups of ranges, with at most MAX_RANGE_PAIRS pairs per playing job.
+    shards = max(min(count, 8), (count + MAX_RANGE_PAIRS - 1) // MAX_RANGE_PAIRS)
     size, extra = divmod(count, shards)
     for index in range(shards):
         pairs = size + (index < extra)
@@ -58,7 +150,10 @@ def prior_runs(plan, source, directory):
     for field in ("measured", "opponent"):
         if previous[field] != plan[field]:
             raise ValueError("The source record must have the same original engine revisions.")
-    if plan["first"] > 1:
+    if plan["replay"]:
+        if plan["first"] != 1 or plan["count"] != previous["first"] + previous["count"] - 1:
+            raise ValueError("Replay must cover the full requested range of the source run from opening 1.")
+    else:
         if previous["replay"] or previous["test"] != plan["test"]:
             raise ValueError("Continue the original playing run with the same test.")
         if previous["first"] + previous["count"] != plan["first"]:
@@ -130,10 +225,11 @@ def join_ranges(directory, shards, attempt):
 
 
 def report_fields(report):
+    result = re.search(r"^Result: (.*)\n?\Z", report.stdout, re.MULTILINE | re.DOTALL)
+    result = result[1].rstrip("\r\n") if result else ""
     lines = dict(line.split(": ", 1) for line in report.stdout.splitlines() if ": " in line)
-    result = lines.get("Result", "")
     if report.returncode == 1 and result.startswith("void (") and result.endswith(")"):
-        return [""] * 7 + ["void", result[6:-1]]
+        return [""] * 7 + ["void", " ".join(result[6:-1].split())]
     if report.returncode != 0:
         raise ValueError(f"The judge did not report a result (status {report.returncode}).")
     if result not in RESULTS:
@@ -174,12 +270,12 @@ def record_run(args):
     prior = args.source / "games.pgn"
     attempt = os.environ["GITHUB_RUN_ATTEMPT"]
     if plan["replay"]:
-        current = prior.read_bytes() if prior.is_file() else b""
+        current = prior.read_bytes()
     else:
         current = join_ranges(args.shards, plan["ranges"], attempt)
     (out / "range.pgn").write_bytes(current)
     if plan["first"] > 1:
-        previous = prior.read_bytes() if prior.is_file() else b""
+        previous = prior.read_bytes()
         (out / "games.pgn").write_bytes(previous + b"\n\n" + current)
     else:
         (out / "games.pgn").write_bytes(current)
@@ -192,7 +288,11 @@ def record_run(args):
     url = f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{plan['run']}"
     if attempt != "1":
         url += f"/attempts/{attempt}"
-    write_record(plan, report_fields(report), out / "record.tsv", url)
+    fields = report_fields(report)
+    if plan["replay"]:
+        replay_detail = f"replay of run {plan['source_run']}"
+        fields[-1] = f"{replay_detail}. {fields[-1]}" if fields[-1] else replay_detail
+    write_record(plan, fields, out / "record.tsv", url)
 
 
 def main():
@@ -208,6 +308,13 @@ def main():
     plan.add_argument("replay_run")
     plan.add_argument("opponent_view", choices=("true", "false"))
     plan.add_argument("source", type=Path)
+    source = commands.add_parser("fetch-source")
+    source.add_argument("run")
+    source.add_argument("default_branch")
+    source.add_argument("directory", type=Path)
+    collect = commands.add_parser("collect")
+    collect.add_argument("plan")
+    collect.add_argument("directory", type=Path)
     record = commands.add_parser("record")
     record.add_argument("plan")
     record.add_argument("source", type=Path)
@@ -217,6 +324,13 @@ def main():
     if args.command == "plan":
         args.opponent_view = args.opponent_view == "true"
         plan_run(args)
+    elif args.command == "fetch-source":
+        fetch_source(os.environ["GITHUB_REPOSITORY"], args.run, args.default_branch, args.directory)
+    elif args.command == "collect":
+        plan = json.loads(args.plan)
+        repository = os.environ["GITHUB_REPOSITORY"]
+        collect_artifacts(plan, repository, os.environ["GITHUB_RUN_ATTEMPT"], args.directory,
+                          artifact_names(repository, plan["run"]))
     else:
         record_run(args)
 

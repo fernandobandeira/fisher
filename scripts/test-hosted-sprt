@@ -9,7 +9,7 @@ import json
 import os
 from pathlib import Path
 from runpy import run_path
-from subprocess import CompletedProcess
+from subprocess import CalledProcessError, CompletedProcess
 import sys
 from tempfile import TemporaryDirectory
 import unittest
@@ -17,7 +17,7 @@ from unittest.mock import Mock, patch
 
 sys.dont_write_bytecode = True
 
-from clocked_sprt import ROOT, Pair, print_report
+from clocked_sprt import ROOT, Pair, UnreadableGames, engine_names, print_report, read_range
 
 
 hosted = run_path(str(ROOT / "scripts/hosted-sprt"))["record_run"].__globals__
@@ -49,9 +49,9 @@ class HostedSprt(unittest.TestCase):
             list(hosted["ranges"](10, 2)),
         )
         ranges = list(hosted["ranges"](20, 1001))
-        self.assertEqual(9, len(ranges))
+        self.assertEqual(21, len(ranges))
         self.assertEqual(1001, sum(shard["count"] for shard in ranges))
-        self.assertLessEqual(max(shard["count"] for shard in ranges), 125)
+        self.assertLessEqual(max(shard["count"] for shard in ranges), 50)
         self.assertEqual(
             [20, *[shard["first"] + shard["count"] for shard in ranges[:-1]]],
             [shard["first"] for shard in ranges],
@@ -85,7 +85,7 @@ class HostedSprt(unittest.TestCase):
             won if n * 5072 // 10000 > (n - 1) * 5072 // 10000 else lost
             for n in range(1, 10001)
         ]
-        for expected, verdict in (
+        for expected, judge_output in (
             ("pass", report([won] * 600)),
             ("fail", report([lost] * 600)),
             ("inconclusive", report(mixed)),
@@ -93,7 +93,7 @@ class HostedSprt(unittest.TestCase):
             ("void", report([], 1, "void (Missing game at opening 1)")),
         ):
             with self.subTest(expected=expected):
-                fields = hosted["report_fields"](verdict)
+                fields = hosted["report_fields"](judge_output)
                 output = self.directory / "record.tsv"
                 with redirect_stdout(StringIO()):
                     hosted["write_record"](self.plan, fields, output, "run")
@@ -123,7 +123,7 @@ class HostedSprt(unittest.TestCase):
 
     def test_record_replays_joined_range_and_keeps_cumulative_pgn(self):
         (self.source / "games.pgn").write_bytes(b"Earlier games")
-        plan = dict(self.plan, first=3, count=1, prior_runs=["122"], ranges=[{"first": 3, "count": 1}])
+        plan = dict(self.plan, first=3, count=1, prior_runs=["121", "122"], ranges=[{"first": 3, "count": 1}])
         shard = self.directory / "sprt-1-3"
         shard.mkdir()
         current = (fixtures / "crash.pgn").read_bytes()
@@ -140,8 +140,174 @@ class HostedSprt(unittest.TestCase):
         judge.assert_called_once_with(plan, target / "range.pgn", 3, 1, target / "judge", self.source / "games.pgn")
         self.assertEqual(current, (target / "range.pgn").read_bytes())
         self.assertEqual(b"Earlier games\n\n" + current, (target / "games.pgn").read_bytes())
-        self.assertIn("\tvoid\tfixture\t122\thttps://github.com/owner/fisher/actions/runs/123\n",
+        self.assertIn("\tvoid\tfixture\t121 122\thttps://github.com/owner/fisher/actions/runs/123\n",
                       (target / "record.tsv").read_text())
+
+    def test_continuation_refusals(self):
+        earlier = dict(self.plan, run="122", first=2, count=1)
+        plan = dict(self.plan, source_run="122", first=3)
+        judge = Mock(return_value=report([Pair(2, ("normal", "normal"))]))
+        for changes, message in (
+            ({"count": 2}, "immediately after"),
+            ({"measured": "c" * 40}, "same original engine revisions"),
+            ({"opponent": "c" * 40}, "same original engine revisions"),
+            ({"test": "no-loss"}, "same test"),
+            ({"replay": True}, "original playing run"),
+        ):
+            with self.subTest(changes=changes):
+                (self.source / "plan.json").write_text(json.dumps(dict(earlier, **changes)))
+                with patch.dict(hosted, judge=judge), self.assertRaisesRegex(ValueError, message):
+                    hosted["prior_runs"](plan, self.source, self.directory / "replay")
+        judge.assert_not_called()
+
+    def test_replay_cannot_shorten_a_void_range(self):
+        openings = [f"opening-{number}" for number in range(601)]
+        measured, opponent = engine_names(self.plan["measured"], self.plan["opponent"])
+        games = self.source / "games.pgn"
+        with games.open("w") as stream:
+            for opening in openings[:-1]:
+                for white, black, result in ((measured, opponent, "1-0"), (opponent, measured, "0-1")):
+                    stream.write(
+                        f'[Event "Fixture"]\n[FEN "{opening}"]\n[White "{white}"]\n[Black "{black}"]\n'
+                        f'[Result "{result}"]\n[Termination "normal"]\n[TimeControl "10+0.1"]\n'
+                        f'[PlyCount "1"]\n\n1. a2a3 {result}\n\n'
+                    )
+        revisions = (self.plan["measured"], self.plan["opponent"])
+        surviving = read_range(games, openings[:-1], 1, *revisions)
+        self.assertIn("Result: pass", report(surviving).stdout)
+        with self.assertRaisesRegex(UnreadableGames, "Missing game at opening 601"):
+            read_range(games, openings, 1, *revisions)
+        earlier = dict(self.plan, run="122", first=401, count=201, prior_runs=["121"])
+        (self.source / "plan.json").write_text(json.dumps(earlier))
+        for opponent_view in (False, True):
+            plan = dict(self.plan, source_run="122", replay=True, count=600, opponent_view=opponent_view)
+            with self.subTest(opponent_view=opponent_view):
+                with self.assertRaisesRegex(ValueError, "full requested range"):
+                    hosted["prior_runs"](plan, self.source, self.directory / "replay")
+                plan["count"] = 601
+                self.assertEqual(["121", "122"], hosted["prior_runs"](plan, self.source, self.directory / "replay"))
+
+    def test_blank_opponent_uses_first_parent_of_a_main_revision(self):
+        measured, parent = "a" * 40, "b" * 40
+        args = argparse.Namespace(
+            source=self.source, measured=measured, opponent="", test="gain", first=1,
+            count=1, replay_run="", previous_run="", opponent_view=False,
+        )
+        resolve = Mock(side_effect=[measured, parent])
+        with patch.dict(hosted, revision=resolve), patch.dict(os.environ, GITHUB_RUN_ID="123"), patch(
+            "subprocess.check_output", return_value=measured + "\n",
+        ), redirect_stdout(StringIO()) as output:
+            hosted["plan_run"](args)
+        plan = json.loads(output.getvalue().splitlines()[0].removeprefix("plan="))
+        self.assertEqual(parent, plan["opponent"])
+        resolve.assert_called_with(f"{measured}^1")
+
+    def test_source_run_is_verified_by_github_before_artifact_download(self):
+        info = {
+            "id": 122, "path": ".github/workflows/clocked-sprt.yml", "head_branch": "main",
+            "event": "workflow_dispatch", "head_sha": "c" * 40,
+            "repository": {"full_name": "owner/fisher"}, "head_repository": {"full_name": "owner/fisher"},
+        }
+        for changes in (
+            {"id": 121}, {"repository": {"full_name": "owner/other"}},
+            {"head_repository": {"full_name": "other/fisher"}},
+            {"path": ".github/workflows/another.yml"}, {"event": "pull_request"},
+            {"head_branch": "trial"},
+        ):
+            with self.subTest(changes=changes), patch.dict(
+                hosted, github_json=Mock(return_value=dict(info, **changes)), artifact_names=Mock(),
+            ):
+                with self.assertRaisesRegex(ValueError, "default branch"):
+                    hosted["fetch_source"]("owner/fisher", "122", "main", self.source)
+                hosted["artifact_names"].assert_not_called()
+        with patch.dict(hosted, github_json=Mock(return_value=info)), patch(
+            "subprocess.run", return_value=CompletedProcess([], 0),
+        ) as ancestor:
+            hosted["require_source_run"]("owner/fisher", "122", "main")
+            hosted["github_json"].assert_called_once_with("repos/owner/fisher/actions/runs/122")
+            self.assertEqual("origin/main", ancestor.call_args.args[0][-1])
+            ancestor.return_value = CompletedProcess([], 1)
+            with self.assertRaisesRegex(ValueError, "default branch"):
+                hosted["require_source_run"]("owner/fisher", "122", "main")
+
+    def test_an_unlisted_range_can_be_missing_but_a_listed_transfer_must_arrive(self):
+        plan = dict(self.plan, ranges=[{"first": 1, "count": 2}])
+        collect = hosted["collect_artifacts"]
+        with patch("subprocess.run") as download:
+            collect(plan, "owner/fisher", "2", self.source, {"sprt-1-1"})
+            download.assert_not_called()
+            with self.assertRaisesRegex(ValueError, r"sprt-2-1.*did not arrive"):
+                collect(plan, "owner/fisher", "2", self.source, {"sprt-2-1"})
+            download.side_effect = CalledProcessError(1, "gh download")
+            with self.assertRaisesRegex(ValueError, r"transfer failed.*sprt-2-1"):
+                collect(plan, "owner/fisher", "2", self.source, {"sprt-2-1"})
+            with self.assertRaisesRegex(ValueError, r"transfer failed.*sprt-source-2"):
+                collect(dict(plan, source_run="122"), "owner/fisher", "2", self.source, {"sprt-source-2"})
+
+    def test_replay_recovers_from_uploaded_inputs_when_no_record_was_printed(self):
+        earlier = dict(self.plan, run="122", source_run="121", first=3, count=2,
+                       ranges=[{"first": 3, "count": 1}, {"first": 4, "count": 1}], prior_runs=["121"])
+        uploads = {
+            "sprt-record": {"plan.json": "{}"},
+            "sprt-plan-1": {"plan.json": json.dumps(earlier)},
+            "sprt-source-1": {"games.pgn": "earlier games"},
+            "sprt-1-3": {"games.pgn": "current games"},
+        }
+
+        def download(repository, run, names, directory):
+            for name in names:
+                artifact = directory / name
+                artifact.mkdir()
+                for file, content in uploads[name].items():
+                    (artifact / file).write_text(content)
+
+        with patch.dict(hosted, require_source_run=Mock(), artifact_names=lambda *args: uploads.keys(),
+                        download_artifacts=download):
+            hosted["fetch_source"]("owner/fisher", "122", "main", self.source)
+        recovered = self.source / "sprt-record"
+        self.assertEqual(earlier, json.loads((recovered / "plan.json").read_text()))
+        self.assertEqual("earlier games\n\ncurrent games\n\n", (recovered / "games.pgn").read_text())
+
+    def test_complete_row_matches_the_published_record_header(self):
+        output = self.directory / "record.tsv"
+        fixture = CompletedProcess([], 0, (
+            "Pairs counted: 104\nPair counts (0, 0.5, 1, 1.5, 2 points): [0, 2, 61, 35, 6]\n"
+            "Elo difference: +76.37 (95% interval [+54.51, +98.85])\nLog-likelihood ratio: +2.950056122\n"
+            "Games ending by loss on time among all games read: 1\n"
+            "Games ending by crash or stall among all games read: 2\n"
+            "Games ending by illegal move among all games read: 3\nResult: pass\n"
+        ), "")
+        with redirect_stdout(StringIO()):
+            hosted["write_record"](dict(self.plan, first=50, count=90, prior_runs=["121", "122"]),
+                                   hosted["report_fields"](fixture), output, "run")
+        header = hosted["RECORD"].read_text().splitlines()[0]
+        [row] = list(csv.DictReader(StringIO(header + "\n" + output.read_text()), delimiter="\t"))
+        self.assertEqual({
+            "date": "2026-11-27", "measured": "a" * 40, "opponent": "b" * 40, "test": "gain",
+            "sprt_low_elo": "0", "sprt_high_elo": "10", "time_control": "10+0.1",
+            "seed": f"{'a' * 40}:{'b' * 40}", "draw": "sha256-seed-colon-position", "view": "measured",
+            "first": "50", "pairs_requested": "90", "pairs_counted": "104",
+            "pair_counts": "[0, 2, 61, 35, 6]", "elo_difference_and_95_interval": "+76.37 (95% interval [+54.51, +98.85])",
+            "llr": "+2.950056122", "losses_on_time": "1", "crashes_or_stalls": "2", "illegal_moves": "3",
+            "result": "pass", "detail": "", "prior_runs": "121 122", "run": "run",
+        }, row)
+
+    def test_replay_void_detail_is_one_tsv_line(self):
+        (self.source / "games.pgn").write_bytes(b"Kept games")
+        plan = dict(self.plan, replay=True, source_run="122", prior_runs=["122"], ranges=[])
+        target = self.directory / "record"
+        args = argparse.Namespace(plan=json.dumps(plan), source=self.source, shards=self.directory, output=target)
+        judge = Mock(return_value=report([], 1, 'void (missing\t"game"\nat opening 1)'))
+        environment = {
+            "GITHUB_RUN_ATTEMPT": "1", "GITHUB_SERVER_URL": "https://github.com",
+            "GITHUB_REPOSITORY": "owner/fisher",
+        }
+        with patch.dict(hosted, judge=judge), patch.dict(os.environ, environment), redirect_stdout(StringIO()):
+            hosted["record_run"](args)
+        lines = (target / "record.tsv").read_text().splitlines()
+        self.assertEqual(1, len(lines))
+        [row] = list(csv.reader(lines, delimiter="\t"))
+        self.assertEqual('replay of run 122. missing "game" at opening 1', row[-3])
 
 
 if __name__ == "__main__":

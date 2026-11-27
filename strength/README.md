@@ -219,41 +219,63 @@ any games were played.
 
 ## Clocked SPRT
 
-Dispatch **Clocked SPRT** with the measured revision and the gain or no-loss
-test. An explicit opponent overrides the default, which is the merge base
-with `main` (the first parent for a revision already on `main`). Set the
-first opening to 1 for a new test. The default request is 1,000 pairs. Up to
-eight hosted runners play ranges at once, with two games at a time on
-each runner and at most 125 pairs per range. The workflow queues separately
-from the strength series. Both can use the shared hosted runner pool.
+Dispatch **Clocked SPRT** from the repository's default branch. Give the
+measured revision and the gain or no-loss test. Use a commit ID or
+`origin/<branch>` for the measured revision and opponent. A bare branch
+name does not resolve in the checkout. A commit on a throwaway branch must
+stay reachable until all replays of its games are done. A blank opponent
+uses the merge base with `main` (the first parent for a revision already
+on `main`). Set the first opening to 1 for a new test. The default request
+is 1,000 pairs.
+
+Each playing job runs two games at a time over at most 50 pairs. Up to
+eight playing jobs run at once here and eight run at once in a strength
+series. The workflows have separate queues. They share the account's
+concurrent hosted-job limit with other workflows. For standard runners
+GitHub lists 20 concurrent jobs on Free and 40 on Pro.
+[GitHub Actions job concurrency limits](https://docs.github.com/en/actions/reference/limits#job-concurrency-limits-for-github-hosted-runners)
+
+The trial of `5c5d6cf` against `8b9c254` measured about 7 runner-seconds
+per pair at two games at a time. For a revision that spends its clock,
+estimate 20 to 30 runner-seconds per pair, or about 17 to 25 minutes of
+play per 50-pair range. The playing step retains its 75-minute timeout
+and the job its 90-minute timeout.
 
 After **no verdict yet**, keep the same revisions and test, set the first
-opening to the next unplayed one, and enter the last run's numeric Actions ID
-in `previous_run`. Its artifact contains the cumulative games from opening 1.
-The plan replays that prefix before starting any playing jobs and refuses a
-continuation if the prefix has a verdict or is incomplete. Retain the run
-artifacts before they expire. Use a new dispatch to retry a void run.
-A partial Actions rerun cannot reuse playing artifacts from an earlier attempt.
-Actions reruns use separate record artifact names. `previous_run` and
-`replay_run` take games from the dispatch's first attempt.
+opening to the next unplayed one, and enter the last run's numeric Actions
+ID in `previous_run`. The plan replays the cumulative prefix from opening
+1 and refuses a continuation if it already has a verdict or is incomplete.
+The continuation was checked locally with hosted games. The first
+cross-dispatch continuation on GitHub is part of fisher-mwa.5.
 
-To read a completed run again, set `replay_run` to its Actions ID, give the
-original revisions in their original order, and request the cumulative
-pair count starting at 1. Select the test to apply. Selecting
-`opponent_view` scores the points taken by the original opponent. This
-dispatch uses the plan and record jobs only. A local replay of the same
-`games.pgn` is described in [the judge's instructions](../scripts/clocked-sprt.md).
+To replay, give the Actions ID in `replay_run`, keep the original
+revisions in their original order, set the first opening to 1, and
+request the full cumulative range originally asked for, even if
+some games are missing. Select the test to apply. Selecting
+`opponent_view` scores the points taken by the original opponent. Both
+inputs for earlier run IDs require a manual dispatch of this workflow
+from the default branch, and use its first attempt. Retain the run
+artifacts before they expire.
+[Local replay instructions](../scripts/clocked-sprt.md)
 
 The record job replays the joined games with the judge and prints the row
 for [`sprt-records.tsv`](sprt-records.tsv). Save the row in that file in a
-pull request. The workflow makes no commits. Its `sprt-record` artifact has
-the row in `record.tsv`, the judge output, the plan, the current range in
-`range.pgn`, and the cumulative games in `games.pgn`. The replay of the
-entire requested range must succeed before the judge can report a verdict.
-Missing or unreadable games give a void row. An invalid request or a judge
-refusal or error fails the job and leaves the available diagnostics in its
-log and artifact. Cancelling the entire workflow can prevent the record
-job from running.
+pull request. The workflow makes no commits. Its `sprt-record` artifact
+has the row in `record.tsv`, the judge output, the plan, the current range
+in `range.pgn`, and the cumulative games in `games.pgn`. The two initial
+rows are the fisher-mwa.4 trials played from a throwaway branch before
+this workflow merged.
+
+When the record job finishes handling a judge result, it prints a row
+for pass, fail, no verdict yet, inconclusive, or void. Missing or unreadable games give a void row.
+A failed transfer of a listed artifact fails the job without a row.
+An invalid request, judge refusal, or unforeseen error also fails the job.
+
+If the record job failed or was cancelled before printing, dispatch a
+replay of the original run. The replay can reconstruct the cumulative
+games from the saved plan, the uploaded ranges, and any saved earlier
+games. “Re-run failed jobs” would look for playing artifacts from its
+new attempt and cannot reuse those from the original attempt.
 
 | Fields | Meaning |
 |---|---|
@@ -265,5 +287,5 @@ job from running.
 | `pairs_counted`, `pair_counts` | Pairs used by the judge and their counts in order of 0, 0.5, 1, 1.5, and 2 points. |
 | `elo_difference_and_95_interval`, `llr` | Logistic Elo difference with its 95% interval, when estimable, and the log-likelihood ratio at the last pair counted. |
 | `losses_on_time`, `crashes_or_stalls`, `illegal_moves` | Counts across all games the judge read, including games beyond the deciding pair. |
-| `result`, `detail` | Pass, fail, no verdict yet, inconclusive at the pair cap, or void. A void row gives the judge's reason and leaves its observation and ending counts blank. |
+| `result`, `detail` | Pass, fail, no verdict yet, inconclusive at the pair cap, or void. A void row gives the judge's reason and leaves its observation and ending counts blank. A replay gives its source run in the detail. |
 | `prior_runs` | Space-separated Actions IDs of the runs from which this run obtained its earlier games or its replay. Open those IDs in this repository's Actions runs. |

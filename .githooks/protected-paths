@@ -14,3 +14,5 @@
 ^crates/uci/tests/support/search_history\.rs$
 ^crates/uci/tests/search_history\.rs$
 ^test-data/
+^strength/ordering-sample\.tsv$
+^strength/ordering$

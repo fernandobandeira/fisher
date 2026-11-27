@@ -1,0 +1,43 @@
+name: Ordering sample
+on:
+  workflow_dispatch:
+    inputs:
+      base:
+        description: Base revision of fisher
+        required: true
+        type: string
+      measured:
+        description: Revision to measure (leave blank to calibrate on the base)
+        type: string
+
+concurrency:
+  group: ordering-sample
+  queue: max
+
+permissions:
+  contents: read
+
+jobs:
+  measure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Measure the sample
+        env:
+          BASE: ${{ inputs.base }}
+          MEASURED: ${{ inputs.measured }}
+        shell: bash
+        run: |
+          {
+            uname -sm
+            lscpu | sed -n '/^Model name:/p'
+            if [ -n "$MEASURED" ]; then
+              strength/ordering measure -- "$BASE" "$MEASURED"
+            else
+              strength/ordering calibrate -- "$BASE"
+            fi
+          } | tee -a "$GITHUB_STEP_SUMMARY"

@@ -276,8 +276,8 @@ impl<'a> Session<'a> {
     }
 
     fn command(&mut self, command: &str) {
-        let mut words = command.split_ascii_whitespace();
-        match words.next() {
+        let mut words = command_tokens(command);
+        match recognized_command(&mut words) {
             Some("go") if self.search.is_some() => {
                 self.command_responses
                     .push_back(CommandResponse::GoRejected);
@@ -526,11 +526,10 @@ impl<'a> Session<'a> {
         let mut deferred_before_exit = self
             .deferred
             .iter()
-            .copied()
-            .take_while(|command| command.split_ascii_whitespace().next() != Some("quit"));
+            .map(|command| recognized_command(&mut command_tokens(command)))
+            .take_while(|command| *command != Some("quit"));
         if self.command_responses.contains(&CommandResponse::Ready)
-            || deferred_before_exit
-                .any(|text| text.split_ascii_whitespace().next() == Some("isready"))
+            || deferred_before_exit.any(|command| command == Some("isready"))
         {
             return Err((6, "missing readyok"));
         }
@@ -561,10 +560,35 @@ fn payload(text: &str, prefix: &str) -> bool {
         .is_some_and(|value| !value.trim().is_empty())
 }
 
+fn command_tokens(text: &str) -> impl Iterator<Item = &str> {
+    text.split(|ch: char| ch.is_ascii_whitespace() || ch == '\x0b')
+        .filter(|token| !token.is_empty())
+}
+
+fn recognized_command<'a>(words: &mut impl Iterator<Item = &'a str>) -> Option<&'a str> {
+    // An ignored command also ends the search for a command on this line.
+    words.find(|&word| {
+        matches!(
+            word,
+            "uci"
+                | "isready"
+                | "ucinewgame"
+                | "position"
+                | "go"
+                | "quit"
+                | "stop"
+                | "setoption"
+                | "debug"
+                | "ponderhit"
+                | "register"
+        )
+    })
+}
+
 // The name is case insensitive and ends at the value marker. Only a declared
 // name can cause a response, and the busy rejection takes precedence.
-fn multipv_response(
-    mut words: std::str::SplitAsciiWhitespace<'_>,
+fn multipv_response<'a>(
+    mut words: impl Iterator<Item = &'a str>,
     busy: bool,
 ) -> Option<CommandResponse> {
     if words.next() != Some("name") || !words.next()?.eq_ignore_ascii_case("MultiPV") {
@@ -587,7 +611,7 @@ fn multipv_response(
     }
 }
 
-fn position(words: std::str::SplitAsciiWhitespace<'_>) -> Option<Chess> {
+fn position<'a>(words: impl Iterator<Item = &'a str>) -> Option<Chess> {
     let mut words = words.peekable();
     let mut position = match words.next()? {
         "startpos" => Chess::default(),

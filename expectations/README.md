@@ -401,3 +401,10 @@ send that holds a special byte.
 fisher-vls staged the [sessions for kingside castling with `KK` and `H`](uci/castling-letters/README.md)
 on 2026-11-26, and fisher-4h7 activated them in pull request #114
 (`3a4ce0d`) with transcript tests that name them as `castling-letters/<name>`.
+
+## Any word in the name position of setoption
+
+fisher-38w staged the [sessions for a `setoption` whose name position holds another word](uci-setoption-name/README.md)
+on 2026-11-27, before the engine changes. They follow Stockfish 19, which
+consumes whatever token stands in the name position. No test reads them
+until fisher-38w moves them into `uci/setoption-name/` and registers them.

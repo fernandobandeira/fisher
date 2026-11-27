@@ -1,0 +1,14 @@
+# fisher-82i, 2026-11-26. Staged for fisher-b0b.
+# Token separators observed in Stockfish 19 (sf_19, edb0d9d), Homebrew arm64 bottle:
+# UCIEngine::loop reads the command token with operator>> under the C locale.
+# https://github.com/official-stockfish/Stockfish/blob/edb0d9db6731067ec50ce619ff372b463bc4dd5d/src/uci.cpp#L94-L113
+# See README.md for the probe input, its output and a hex dump of each send that holds a special byte.
+# Send the bytes 69 73 72 65 61 64 79 09 78 0A: horizontal tab separates
+# tokens, so the command is isready with the argument x. Stockfish answers
+# readyok.
+> isready\tx
+# UCI isready/readyok.
+< readyok
+# UCI quit. Exit before readyok, or a second reply, fails here.
+> quit
+! exit

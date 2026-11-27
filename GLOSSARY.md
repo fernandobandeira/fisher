@@ -127,7 +127,7 @@ The score and principal variation found by playing every legal move to a fixed d
 _Avoid_: negamax, brute force, full-width search
 
 **Bound**:
-A value that a position's score is known to be at least, or at most, when the score itself is not known. A bound is never reported or compared as a score. An SPRT bound names an Elo difference and is always written in full.
+A value that a position's score is known to be at least, or at most, when the score itself is not known. A bound is never reported or compared as a score. An SPRT bound is a different thing, an Elo difference, and its name is always written in full.
 _Avoid_: estimate, approximate score
 
 **Cutoff**:
@@ -240,16 +240,16 @@ _Avoid_: time forfeit, flag, timeout (which names only the hang timeout)
 ### Strength
 
 **Series**:
-The recorded games between two revisions of fisher under numbered conditions. They are played under a node limit and give no verdict.
+The recorded games between two revisions of fisher under numbered conditions. They are played under a node limit and judge no claim of strength.
 _Avoid_: strength test, SPRT (for the record)
 
 **SPRT**:
-The test that judges whether fisher plays stronger or does not play weaker. It plays opening pairs on a clock and gives a verdict when the results are enough to accept one of two hypotheses fixed beforehand.
+A test of one claim about a change, played against the revision the change is based on: that it plays stronger, or that it does not play weaker. It plays opening pairs under a time control and gives a verdict, pass or fail, when the results first accept one of the two hypotheses its SPRT bounds fix. A test that plays its most pairs without a verdict is inconclusive, and the claim is not accepted.
 _Avoid_: series (for the test)
 
 **SPRT bounds**:
-The two Elo differences an SPRT chooses between. Always write the name in full.
-_Avoid_: decision bounds, bounds on their own
+The two Elo differences an SPRT chooses between. They are not the two values of the log-likelihood ratio at which the test ends, which are its thresholds. Always write the name in full.
+_Avoid_: decision bounds, bounds on its own for the Elo differences
 
 ### Quality checks
 

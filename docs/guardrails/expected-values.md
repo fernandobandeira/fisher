@@ -30,17 +30,19 @@ README. The published `perft.epd` and `mate-in-two.tsv` each have one commit
 and have never changed. Individual transcripts have up to five commits,
 and `expectations/README.md` has 20.
 
-Python-chess supplied the scores and per-ply counts for
-`position-moves.uci`, with starting-position counts that match published
-perft. The bench test sums published perft counts over plies one to four,
-and the search comparison checks scores and counts against a reference
-minimax over `shakmaty` moves.
+Before pruning, python-chess supplied the scores and exhaustive per-ply
+counts for `position-moves.uci`. Its counts for the starting position
+matched published perft.
 
-The material scores apply to the current evaluation, and the exhaustive
-node totals apply to the current unpruned search. A change to evaluation
-or the addition of pruning can legitimately change the corresponding
-value, so the old expectation stops applying. The bench signature uses
-the previous revision's node count to detect changes. Fisher-op4 plans
+The production search uses cutoffs that leave some legal moves unplayed.
+`fisher bench` runs one four-ply search on each of the six published perft
+positions and reports the node count for each and the total. The bench
+test pins the measured signature for comparison with later revisions and
+uses published perft sums as upper bounds. The search comparison checks
+the score and best move against fisher's test-only plain minimax, bounds
+the node count by the number of root moves and the plain minimax count,
+and checks the principal variation by replaying it with `shakmaty` and
+checking each prefix's score against plain minimax. Strength claims use
 SPRT, a statistical test over games against the previous revision with
 decision bounds fixed before play. See [Evidence](../evidence.md).
 

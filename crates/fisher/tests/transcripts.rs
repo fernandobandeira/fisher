@@ -1739,6 +1739,14 @@ fn rejects_wrong_mate_distance() -> io::Result<()> {
             );
         }
     }
+    let delayed_mate = ["a1a2", "g8h8", "a2a8"];
+    assert!(reference_line_end(WHITE_MATE_ROOT, &delayed_mate)?.is_checkmate());
+    replay_line(WHITE_MATE_ROOT, 4, "mate 2", &delayed_mate)?;
+    assert_replay_rejection(
+        replay_line(WHITE_MATE_ROOT, 4, "mate 1", &delayed_mate),
+        4,
+        "principal variation expected 1 plies, got 3",
+    );
     Ok(())
 }
 
@@ -1793,10 +1801,19 @@ fn rejects_mate_without_checkmate() -> io::Result<()> {
     let end = reference_line_end(WHITE_MATE_ROOT, &nonmate)?;
     assert!(!end.legal_moves().is_empty());
     assert!(reference_line_end(WHITE_MATE_ROOT, &WHITE_MATE_LINE)?.is_checkmate());
+    let escape_root = "fen 6k1/6pp/8/8/8/8/8/R5K1 w - - 0 1";
+    let checked = reference_line_end(escape_root, &WHITE_MATE_LINE)?;
+    assert!(checked.is_check());
+    assert!(reference_move(&checked, "g8f7").is_some());
     for depth in 2..=4 {
         replay_line(WHITE_MATE_ROOT, depth, "mate 1", &WHITE_MATE_LINE)?;
         assert_replay_rejection(
             replay_line(WHITE_MATE_ROOT, depth, "mate 1", &nonmate),
+            depth,
+            "principal variation does not end in the reported mate",
+        );
+        assert_replay_rejection(
+            replay_line(escape_root, depth, "mate 1", &WHITE_MATE_LINE),
             depth,
             "principal variation does not end in the reported mate",
         );

@@ -6,6 +6,7 @@ use super::*;
 
 fn request(position: Position, limits: Limits) -> SearchRequest {
     SearchRequest {
+        requested_variations: std::num::NonZeroU8::MIN,
         position,
         limits,
         interrupt: Arc::new(AtomicBool::new(false)),
@@ -321,7 +322,11 @@ fn the_other_colors_clock_does_not_limit_black() -> Result<(), rules::FenError> 
         let SearchReport::FinishedDepth(report) = report else {
             unreachable!("expected a finished depth");
         };
-        assert_eq!((report.depth, report.score), (depth, score));
+        assert_eq!(report.depth, depth);
+        assert_eq!(
+            report.variations.first().map(|&(score, _)| score),
+            Some(score)
+        );
         assert!(nodes.contains(&report.nodes) && report.nodes > previous_nodes);
         previous_nodes = report.nodes;
     }

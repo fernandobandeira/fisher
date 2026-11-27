@@ -59,7 +59,9 @@ counts of all observations up to and including this one: fastchess's LLR and
 Fishtest's LLR and the state `update_SPRT` gives a fresh SPRT object
 (`accepted` passes, `rejected` fails, `-` is neither). The trace goes on past
 the observation at which a test ends. Those later values show what a judge that
-does not stop would see, and they never change the result.
+does not stop would see, and they never change the result. [How to
+compare a judge](#how-to-compare-a-judge-with-these-files) says how to read
+them.
 
 ## What the cases cover
 
@@ -73,12 +75,16 @@ does not stop would see, and they never change the result.
 | `crosses-and-returns` | 530 | pass at 122 | pass at 117 | The LLR crosses a threshold and later returns inside. |
 
 In `crosses-and-returns` the gain test's LLR reaches ln 19 at observation 122,
-returns inside at 125, and falls past -ln 19 at 359. It ends there with fail.
-The no-loss test's LLR reaches ln 19 at 117, returns inside at 126, reaches it
-again at 131, returns at 133, and falls past -ln 19 at 407. So the first
-crossing gives pass for both tests, and a judge that reads only the counts of
-the last observation would give fail for both. The first 130 observations are
-the first 130 of `decisive-pass`.
+and the test ends there with the verdict pass. The trace goes on past it: the
+LLR returns inside at 125, and observation 359 is the first at which it falls
+below -ln 19. That later crossing changes nothing. The gain verdict remains the
+pass recorded at 122. In the same way the no-loss test ends with the verdict
+pass at 117. Its continued trace returns inside at 126, reaches ln 19 again at
+131, returns at 133, and first falls below -ln 19 at 407, and its verdict
+remains the pass recorded at 117. A judge that reads only the counts of the
+last observation would give fail for both tests. The first crossing decides,
+and gives pass for both. The first 130 observations are the first 130 of
+`decisive-pass`.
 
 The cases in `counts.tsv` are: one pair of each result; small decisive samples
 and their mirror; balanced and slightly favourable samples of 1,000 pairs; a
@@ -87,34 +93,86 @@ sample with no pair of 0 or 2 points; 1, 10, 100 and 1,000 pairs all shared
 fastchess's `app/tests/sprt_test.cpp` (scored here with fisher's SPRT bounds);
 and the two pentanomial examples in Fishtest's `stat_util.py`.
 
-Every verdict here holds for any LLR within the tolerance. Before the
-observation at which a test ends, the absolute LLR is below ln 19 by more than
-the tolerance at every observation. At that observation it is past the
-threshold by more than the tolerance. In a sequence with no verdict, every
-observation stays inside by more than the tolerance. The generator below
-asserts this.
+## How to compare a judge with these files
 
-## When every pair is shared 1 to 1
+Every verdict here holds for any LLR within the tolerance, at every observation
+up to and including the one at which each test first reaches its verdict.
+Before that observation, the absolute LLR is below ln 19 by more than the
+tolerance. At that observation it is past the threshold by more than the
+tolerance. In a sequence with no verdict, every observation stays inside by
+more than the tolerance. The generator below asserts this. The closest
+observation while a verdict was still possible is `all-shared` 101 for the
+no-loss test: its LLR, 2.940303930, is 0.00413505 inside ln 19, against a
+tolerance of 0.00294030.
 
-Both sources replace a count of zero with 0.001 before they compute anything
-(fastchess's `regularize`, Fishtest's `LLRcalc.regularize`). With every pair
-shared 1 to 1, the empirical distribution keeps a mass of 0.001 on each of the
-other four results. Its variance is small but not zero, and the maximum
-likelihood estimate is defined. The LLR then moves by about 0.029 for each
-shared pair, down for the gain test and up for the no-loss test: -0.2858 after
-10 pairs, -2.9111 after 100. In `all-shared` the gain test fails and the
-no-loss test passes at observation 102. Neither source returns zero or reports
-an error.
+After a test has its verdict, the trace goes on, and there five LLRs lie within
+the tolerance of a threshold:
+
+| Sequence | Observation | Test | LLR | Distance from the threshold | Tolerance |
+|---|---:|---|---:|---|---:|
+| `equal` | 884 | no-loss | 2.943968095 | 0.000470884 inside ln 19 | 0.002943968 |
+| `decisive-pass` | 130 | no-loss | 2.942807846 | 0.001631134 inside ln 19 | 0.002942808 |
+| `crosses-and-returns` | 130 | no-loss | 2.942807846 | 0.001631134 inside ln 19 | 0.002942808 |
+| `equal` | 2567 | gain | -2.941854610 | 0.002584370 inside -ln 19 | 0.002941855 |
+| `equal` | 2568 | gain | -2.945114784 | 0.000675805 past -ln 19 | 0.002945115 |
+
+Each of them comes after the test in question already has its verdict: the
+no-loss test at 827 and 117, and the gain test at 2535. So a reader of these
+files compares:
+
+- the result of each test on a sequence, `pass`, `fail` or `none`, and the
+  observation that decides it, exactly;
+- every LLR, in `counts.tsv` and in `trace.tsv`, within its tolerance;
+- the results and states in `trace.tsv` up to and including the observation
+  that decides each test, exactly. After it, what the trace says is compared
+  as a number only, through the LLR, because a correct judge can differ from
+  the sources' result there.
+
+## Results no pair has given yet
+
+Both sources count a result that no pair has given yet as 0.001 pairs, not as
+none. The 0.001 is a pseudocount. It is a convention the two sources share, not
+a property of the likelihood. fisher adopts it, and the decision is recorded in
+D78 (`bd show fisher-r6y`) and in the spec (`bd show fisher-mwa`, "The
+verdict").
+
+Where it is applied, in both sources:
+
+1. The two ways of taking one point from a pair, one win and one loss or two
+   draws, are added together. fastchess adds `penta_WL` and `penta_DD` in
+   `SPRT::getLLR`. Fishtest receives the five counts with them already added.
+   That is why the files carry only the total.
+2. Each of the five counts that is zero is replaced by 0.001: fastchess's
+   `regularize` in `SPRT::getLLR`, Fishtest's `LLRcalc.regularize` in
+   `results_to_pdf`.
+3. Only then are the counts turned into shares, each divided by their sum. The
+   sum includes the pseudocounts, and in both sources so does the number of
+   pairs that multiplies the mean LLR for each pair. After 10 shared pairs, for
+   example, it is 10.004.
+
+What it changes. With every pair shared 1 to 1, the empirical distribution
+keeps a mass of 0.001 pairs on each of the other four results. Its variance is
+small but not zero. The LLR moves by about 0.029 for each shared pair, down for
+the gain test and up for the no-loss test: -0.2858 after 10 pairs, -2.9111
+after 100, and -2.940304 and +2.940304 after 101. Both tests end at observation
+102, the gain test with fail and the no-loss test with pass. Neither source
+returns zero or reports an error.
+
+Without the pseudocount the likelihood is still defined. The most likely
+distribution with a given score puts its mass on 1 point and on one other
+result: 2 points when that score is above one half, 0 points when it is
+below. At observation 101 the LLR would then be about
+-2.948843 for the gain test and +2.948843 for the no-loss test, and both tests
+would end there, one observation earlier. That value is 101 times
+ln(2(1 - s)), where s is the score of 10 Elo. Fishtest's own `LLRcalc.LLR` tends
+to it as the share of the four absent results goes to zero: with 1e-9 each it
+gives -2.948841. No file here uses it.
 
 The approximation that divides by the variance of the sample does not survive
-this case. Fishtest's own `LLRcalc.LLR_alt2`, given the same regularized
-counts, gives -16.57 after 10 shared pairs and -1656.06 after 100. Cases
+this case. Fishtest's own `LLRcalc.LLR_alt2`, given the same counts with
+pseudocounts, gives -16.57 after 10 shared pairs and -1656.06 after 100. Cases
 `shared-10`, `shared-100`, `shared-1000` and the sequence `all-shared` tell
 the exact LLR from it.
-
-A pair shared 1 to 1 may be one win and one loss, or two draws. Both are 1
-point. Both sources add those two counts before computing, so the files carry
-only the total.
 
 ## The sources
 
@@ -141,37 +199,57 @@ the state `accepted` or `rejected`. It is the witness for every value.
 Two differences in Fishtest's stopping rule do not change any value here:
 
 - In operation, Fishtest calls `update_SPRT` on one SPRT object after every
-  batch, and that object corrects the thresholds for overshoot as it goes. D78
-  has no such correction, and fastchess has none. The driver below gives
-  `update_SPRT` a fresh SPRT object for each set of counts, so the correction
-  stays zero and the state depends on the counts alone. Fed one pair at a time
-  into one object, Fishtest would end `decisive-fail` at 138 and 148 and
-  `all-shared` at 101 instead of 139, 149 and 102. This is reported, not
-  committed.
+  batch, and that object corrects the thresholds for overshoot from the history
+  of earlier batches. D78 has no such correction, and fastchess has none. The
+  driver below gives `update_SPRT` a fresh SPRT object for each set of counts,
+  which discards that history. A fresh object still computes a correction on
+  its first one-pair update: half the absolute LLR of that pair, about
+  0.012666 for the first all-shared pair. That happens only at observation 1
+  of each sequence, for each test (12 updates), where the absolute LLR is at
+  most 0.0293, far from either threshold. From observation 2 on, a fresh
+  object sees more than one batch at once, resets the correction, and computes
+  none. So each witness state depends on the counts alone. It is the same as
+  with the correction disabled: removing the `overshoot` entry from each fresh
+  object before `update_SPRT` gives the same state and the same LLR on all
+  7,460 (3,730 observations, two tests each). Fed one pair at a time into one
+  object, Fishtest would end `decisive-fail` at 138 and 148 and `all-shared`
+  at 101 instead of 139, 149 and 102. This is reported, not committed.
 - `update_SPRT` compares with strict inequalities, and fastchess includes
-  equality. No LLR here lies within the tolerance of a threshold, so the
-  difference never shows.
+  equality. No LLR up to and including a test's verdict lies within the
+  tolerance of a threshold, so the difference cannot change a result. After a
+  verdict, the five LLRs listed in
+  [How to compare a judge](#how-to-compare-a-judge-with-these-files) come
+  close. None equals a threshold, and the two sources give the same result at
+  every observation.
 
 ### The tolerance
 
 Both sources compute the same formula and differ only in how precisely they
 find the root of one equation. fastchess stops its ITP search when the root,
 theta, lies within an interval of width 0.002. Fishtest's `brentq` stops at
-about 2e-12. The two LLRs agree to within 1e-7 on small samples and drift apart
-slowly with the number of pairs. The difference is largest when every pair is
-shared: 0.0100 on `shared-1000`, where the LLR is -29.18. The tolerance,
-0.001 times the larger of 1 and the absolute LLR, is at least twice the
-difference between the two sources on every line of `counts.tsv` and
-`trace.tsv` (at most 34% of it). So a judge that agrees with either source
-within half the tolerance matches.
+about 2e-12. On the sets of counts with at most 60 pairs, the two LLRs differ
+by at most 1.9e-6. The largest of those is 1.89e-6, on `strong-60` for the
+no-loss test and its mirror `weak-60` for the gain test. The difference grows
+with the number of pairs, and most of all when every pair is shared: it is
+0.010042819 on `shared-1000`, where the LLR is -29.18. That is 34.4% of that
+line's own tolerance of 0.0291757. Near a threshold the tolerance is about
+0.00294. The tolerance, 0.001 times the larger of 1 and the absolute LLR, is
+at least twice the difference between the two sources on every line of
+`counts.tsv` and `trace.tsv`. So a judge that agrees with either source within
+half the tolerance matches.
 
 ## How to produce the values again
 
 Commands are for macOS or Linux with git, a C++17 compiler, `uv` and Python 3.
 `$WORK` is any empty directory outside this repository. The values here were
-taken with Apple clang 21.0.0, Python 3.15.1 with SciPy 1.18.1 and NumPy 2.5.5
-for Fishtest (Fishtest's `uv.lock` pins SciPy 1.18.1), and Python 3.9.6 for the
-generator.
+taken with this toolchain:
+
+- macOS 26.5.1 on arm64;
+- Apple clang 21.0.0 (clang-2100.1.1.101) for the fastchess driver;
+- Python 3.15.1 with SciPy 1.18.1 and NumPy 2.5.5 for Fishtest. The SciPy pin
+  is the version Fishtest's `server/uv.lock` pins. That lock pins NumPy
+  2.5.4, which gives the same three files;
+- Python 3.9.6 for the generator.
 
 Fetch the two sources at their commits:
 
@@ -200,12 +278,15 @@ c++ -O3 -std=c++17 -DNDEBUG -I"$F/src" -I"$F/third_party" -I"$F/third_party/fmt/
     "$F/src/core/globals/globals.cpp" "$F/src/core/time/time.cpp" \
     "$F/third_party/fmt/src/format.cc" -pthread
 uv venv --python 3.15 "$WORK/venv-fishtest"
-VIRTUAL_ENV="$WORK/venv-fishtest" uv pip install scipy==1.18.1
+VIRTUAL_ENV="$WORK/venv-fishtest" uv pip install scipy==1.18.1 numpy==2.5.5
 mkdir -p "$WORK/out" && cd "$WORK/drivers"
 WORK="$WORK" python3 -I generate.py "$WORK/out"
 ```
 
-The three files in `$WORK/out` are then identical to the ones here.
+With the toolchain above, the three files in `$WORK/out` are identical to the
+ones here, byte for byte. A different compiler, platform or library version may
+print different last digits of an LLR. Compare such a run within the
+tolerance, not byte for byte.
 
 ### `fastchess_sprt.cpp`
 

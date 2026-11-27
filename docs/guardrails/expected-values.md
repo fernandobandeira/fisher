@@ -30,9 +30,11 @@ README. The published `perft.epd` and `mate-in-two.tsv` each have one commit
 and have never changed. Individual transcripts have up to five commits,
 and `expectations/README.md` has 20.
 
-Before pruning, python-chess supplied the scores and exhaustive per-ply
-counts for `position-moves.uci`. Its counts for the starting position
-matched published perft.
+Python-chess supplies the exact scores in `position-moves.uci`. The
+transcript still checks depths, literal principal variations and best
+moves, depth-one node totals and depth-two totals for roots with one legal
+move exactly. The exhaustive per-ply counts describe the search before
+pruning. Those counts for the starting position matched published perft.
 
 The production search uses cutoffs that leave some legal moves unplayed.
 `fisher bench` runs one four-ply search on each of the six published perft

@@ -123,7 +123,7 @@ fn seen_from_root(score: Score, ply: u8) -> Score {
     }
 }
 
-fn score_value(score: Score) -> i32 {
+pub(super) fn score_value(score: Score) -> i32 {
     match score {
         Score::Centipawns(value) => value,
         Score::Mate { plies, winning } => {
@@ -133,7 +133,7 @@ fn score_value(score: Score) -> i32 {
     }
 }
 
-fn move_text(movement: Move) -> String {
+pub(super) fn move_text(movement: Move) -> String {
     let promotion = match movement.promotion() {
         Some(Promotion::Knight) => "n",
         Some(Promotion::Bishop) => "b",

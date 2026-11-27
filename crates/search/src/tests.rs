@@ -5,6 +5,7 @@
 
 mod comparison;
 mod plain_minimax;
+mod several_variations;
 
 #[path = "tests/support/mate_in_two.rs"]
 mod mate_in_two;

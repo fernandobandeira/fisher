@@ -147,6 +147,36 @@ fn halfmove_clock() -> io::Result<()> {
 }
 
 #[test]
+fn whitespace_no_break_space_command() -> io::Result<()> {
+    play_transcript("whitespace/no-break-space-command")
+}
+
+#[test]
+fn whitespace_tab_command() -> io::Result<()> {
+    play_transcript("whitespace/tab-command")
+}
+
+#[test]
+fn whitespace_tab_then_isready() -> io::Result<()> {
+    play_transcript("whitespace/tab-then-isready")
+}
+
+#[test]
+fn whitespace_vertical_tab_command() -> io::Result<()> {
+    play_transcript("whitespace/vertical-tab-command")
+}
+
+#[test]
+fn whitespace_vertical_tab_then_isready() -> io::Result<()> {
+    play_transcript("whitespace/vertical-tab-then-isready")
+}
+
+#[test]
+fn whitespace_no_break_space_in_fen() -> io::Result<()> {
+    play_transcript("whitespace/no-break-space-in-fen")
+}
+
+#[test]
 fn rejected_position() -> io::Result<()> {
     play_transcript("rejected-position")
 }

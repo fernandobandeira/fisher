@@ -15,6 +15,29 @@ fn ignored_commands_consume_the_rest_of_the_line() {
     }
 }
 
+#[test]
+fn multipv_requires_one_value_in_the_declared_range() {
+    for (line, value) in [
+        ("setoption name mUlTiPv value 1", NonZeroU8::new(1)),
+        ("setoption name MultiPV value 255", NonZeroU8::new(255)),
+        ("setoption name MultiPV value 0", None),
+        ("setoption name MultiPV value 256", None),
+        ("setoption name MultiPV", None),
+        ("setoption name MultiPV value", None),
+        ("setoption name MultiPV value banana", None),
+        ("setoption name MultiPV value 2 go", None),
+    ] {
+        assert_eq!(
+            parse_command(line),
+            Input::Handled(Command::SetMultiPv(value)),
+            "{line}"
+        );
+    }
+    for line in ["setoption value 3", "setoption name MultiPV Extra value 3"] {
+        assert_eq!(parse_command(line), Input::Ignored, "{line}");
+    }
+}
+
 // The fields and searchmoves example come from the April 2006 UCI specification.
 #[test]
 fn parses_go_limits_and_ordered_searchmoves() -> Result<(), &'static str> {

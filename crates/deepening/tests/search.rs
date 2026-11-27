@@ -19,6 +19,7 @@ fn reports_for(fen: &str) -> Result<Vec<SearchReport>, Box<dyn Error>> {
 
 fn reports_with_limits(position: Position, limits: Limits) -> Vec<SearchReport> {
     let request = SearchRequest {
+        requested_variations: std::num::NonZeroU8::MIN,
         position,
         limits,
         interrupt: Arc::new(AtomicBool::new(false)),
@@ -50,12 +51,12 @@ fn reports_terminal_positions_without_searching_a_depth() -> Result<(), Box<dyn 
                 [
                     SearchReport::FinishedDepth(FinishedDepth {
                         depth: 0,
-                        score: actual,
-                        principal_variation,
+                        terminal_score: Some(actual),
+                        variations,
                         ..
                     }),
                     SearchReport::BestMove(None),
-                ] if *actual == score && principal_variation.is_empty()
+                ] if *actual == score && variations.is_empty()
             ),
             "{fen}: {reports:?}"
         );
@@ -70,15 +71,18 @@ fn reports_the_finished_depth_before_the_best_move() -> Result<(), Box<dyn Error
     let (depths, best_move) = forced_move_reports(&reports)?;
     assert_eq!(depths.len(), 4);
     let report = depths.last().ok_or("missing last finished depth")?;
+    let [(score, moves)] = report.variations.as_slice() else {
+        return Err("expected one variation".into());
+    };
     assert_eq!(
-        report.score,
+        *score,
         Score::Mate {
             plies: 2,
             winning: false
         }
     );
     assert_eq!(format!("{}{}", best_move.from(), best_move.to()), "h8g8");
-    assert_eq!(report.principal_variation.first(), Some(best_move));
+    assert_eq!(moves.first(), Some(best_move));
     Ok(())
 }
 
@@ -101,6 +105,7 @@ fn interrupt_before_the_root_of_a_stalemate() -> Result<(), Box<dyn Error>> {
 fn assert_interrupted_terminal_reports(fen: &str, score: Score) -> Result<(), Box<dyn Error>> {
     // Positions and scores from expectations/uci/terminal-positions.uci.
     let request = SearchRequest {
+        requested_variations: std::num::NonZeroU8::MIN,
         position: Position::from_fen(fen)?,
         limits: Limits::default(),
         interrupt: Arc::new(AtomicBool::new(true)),
@@ -113,10 +118,10 @@ fn assert_interrupted_terminal_reports(fen: &str, score: Score) -> Result<(), Bo
         [
             SearchReport::FinishedDepth(FinishedDepth {
                 depth: 0,
-                score,
                 nodes: 0,
                 elapsed: std::time::Duration::ZERO,
-                principal_variation: Vec::new(),
+                terminal_score: Some(score),
+                variations: Vec::new(),
             }),
             SearchReport::BestMove(None),
         ]
@@ -128,6 +133,7 @@ fn assert_interrupted_terminal_reports(fen: &str, score: Score) -> Result<(), Bo
 fn infinite_search_reaches_past_the_default_depth() -> Result<(), Box<dyn Error>> {
     let interrupt = Arc::new(AtomicBool::new(false));
     let request = SearchRequest {
+        requested_variations: std::num::NonZeroU8::MIN,
         position: Position::from_fen("7k/8/5K1Q/8/8/8/8/8 b - - 0 1")?,
         limits: Limits {
             infinite: true,
@@ -233,13 +239,13 @@ fn zero_limits_return_the_first_legal_move_or_the_terminal_score() -> Result<(),
             [
                 SearchReport::FinishedDepth(FinishedDepth {
                     depth: 0,
-                    score: Score::Mate {
-                        plies: 0,
-                        winning: false
-                    },
                     nodes: 0,
                     elapsed: std::time::Duration::ZERO,
-                    principal_variation: Vec::new(),
+                    terminal_score: Some(Score::Mate {
+                        plies: 0,
+                        winning: false
+                    }),
+                    variations: Vec::new(),
                 }),
                 SearchReport::BestMove(None),
             ]

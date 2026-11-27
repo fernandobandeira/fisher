@@ -45,10 +45,10 @@ fn best_move_report(fen: &str) -> Event<'static> {
 fn finished_depth() -> Event<'static> {
     Report(SearchReport::FinishedDepth(FinishedDepth {
         depth: 1,
-        score: Score::Centipawns(-900),
         nodes: 1,
         elapsed: Duration::from_millis(1),
-        principal_variation: vec![forced_move(A)],
+        terminal_score: None,
+        variations: vec![(Score::Centipawns(-900), vec![forced_move(A)])],
     }))
 }
 
@@ -229,10 +229,10 @@ fn rule_3_finished_depths_precede_bestmove() {
     };
     let depth = Report(SearchReport::FinishedDepth(FinishedDepth {
         depth: 1,
-        score: Score::Centipawns(0),
         nodes: 20,
         elapsed: Duration::from_millis(1),
-        principal_variation: pawn_move("e4").into_iter().collect(),
+        terminal_score: None,
+        variations: vec![(Score::Centipawns(0), pawn_move("e4").into_iter().collect())],
     }));
     let info = Response("info depth 1 multipv 1 score cp 0 nodes 20 nps 20000 time 1 pv e2e4\n");
     rejects(
@@ -591,6 +591,7 @@ fn rule_10_responses_are_whole_lines() {
         Command("uci"),
         Response("id name fisher test\n"),
         Response("id author Fernando Bandeira\n"),
+        Response("option name MultiPV type spin default 1 min 1 max 255\n"),
         Response("uciok\n"),
         READY,
         READY_OK,
@@ -813,36 +814,56 @@ fn fen_clocks_follow_the_engines_existing_decimal_rules() -> io::Result<()> {
 }
 
 #[test]
-fn empty_principal_variation_omits_pv() {
-    let depth = Report(SearchReport::FinishedDepth(FinishedDepth {
+fn history_requires_every_variation_before_bestmove() {
+    let pawn_move = |target| {
+        rules::Position::starting()
+            .legal_moves()
+            .into_iter()
+            .find(|movement| movement.to().to_string() == target)
+    };
+    let best_move = pawn_move("e4");
+    let report = Report(SearchReport::FinishedDepth(FinishedDepth {
         depth: 1,
-        score: Score::Centipawns(-900),
-        nodes: 1,
+        nodes: 20,
         elapsed: Duration::from_millis(1),
-        principal_variation: Vec::new(),
+        terminal_score: None,
+        variations: vec![
+            (Score::Centipawns(0), best_move.into_iter().collect()),
+            (Score::Centipawns(0), pawn_move("d4").into_iter().collect()),
+        ],
     }));
+    let first = Response("info depth 1 multipv 1 score cp 0 nodes 20 nps 20000 time 1 pv e2e4\n");
+    let second = Response("info depth 1 multipv 2 score cp 0 nodes 20 nps 20000 time 1 pv d2d4\n");
+    let best_move = Report(SearchReport::BestMove(best_move));
+    let bestmove = Response("bestmove e2e4\n");
     accepts(&[
-        POSITION_A,
         GO,
-        depth.clone(),
-        Response("info depth 1 multipv 1 score cp -900 nodes 1 nps 1000 time 1\n"),
-        best_move_report(A),
-        MOVE_A,
+        report.clone(),
+        first.clone(),
+        second,
+        best_move.clone(),
+        bestmove.clone(),
         QUIT,
     ]);
     rejects(
         3,
-        "empty principal variation printed pv",
-        &[
-            POSITION_A,
-            GO,
-            depth,
-            Response("info depth 1 multipv 1 score cp -900 nodes 1 nps 1000 time 1 pv \n"),
-            best_move_report(A),
-            MOVE_A,
-            QUIT,
-        ],
+        "bestmove before variation 2",
+        &[GO, report, first, best_move, bestmove, QUIT],
     );
+}
+
+#[test]
+fn history_rejects_a_searched_depth_without_a_variation() {
+    for variations in [Vec::new(), vec![(Score::Centipawns(-900), Vec::new())]] {
+        let depth = Report(SearchReport::FinishedDepth(FinishedDepth {
+            depth: 1,
+            nodes: 1,
+            elapsed: Duration::from_millis(1),
+            terminal_score: None,
+            variations,
+        }));
+        rejects(3, "invalid searched depth report", &[POSITION_A, GO, depth]);
+    }
 }
 
 #[test]
@@ -973,12 +994,16 @@ fn scripted_input_drives_the_session_entry() -> io::Result<()> {
     };
     let depth = FinishedDepth {
         depth: 1,
-        score: Score::Centipawns(-900),
         nodes: 1,
         elapsed: Duration::from_millis(1),
-        principal_variation: vec![forced_move(A)],
+        terminal_score: None,
+        variations: vec![(Score::Centipawns(-900), vec![forced_move(A)])],
     };
-    let best_move = depth.principal_variation.first().copied();
+    let best_move = depth
+        .variations
+        .first()
+        .and_then(|(_, moves)| moves.first())
+        .copied();
     let mut output = Vec::new();
     std::thread::scope(|scope| -> io::Result<()> {
         let (controller, commands_for_search) = std::sync::mpsc::channel();
@@ -1432,10 +1457,10 @@ mod model {
                 match kind {
                     ReportKind::Depth => Report(SearchReport::FinishedDepth(FinishedDepth {
                         depth: 1,
-                        score: Score::Centipawns(-900),
                         nodes: 1,
                         elapsed: Duration::from_millis(1),
-                        principal_variation: vec![movement],
+                        terminal_score: None,
+                        variations: vec![(Score::Centipawns(-900), vec![movement])],
                     })),
                     ReportKind::BestMove => Report(SearchReport::BestMove(Some(movement))),
                 }

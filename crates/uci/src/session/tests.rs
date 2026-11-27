@@ -2,6 +2,8 @@
 
 use std::io::BufReader;
 
+use deepening::Score;
+
 use super::*;
 
 #[test]
@@ -66,14 +68,17 @@ fn assert_search_info_time(micros: u64, time: u64, nps: u64) -> io::Result<()> {
         &mut output,
         &FinishedDepth {
             depth: 4,
-            score: Score::Centipawns(0),
             nodes: 206_603,
             elapsed: Duration::from_micros(micros),
-            principal_variation: Position::starting()
-                .legal_moves()
-                .into_iter()
-                .take(1)
-                .collect(),
+            terminal_score: None,
+            variations: vec![(
+                Score::Centipawns(0),
+                Position::starting()
+                    .legal_moves()
+                    .into_iter()
+                    .take(1)
+                    .collect(),
+            )],
         },
     )?;
     let text = String::from_utf8(output).map_err(io::Error::other)?;
@@ -140,6 +145,7 @@ fn reader_error_during_release(command: &str) -> io::Result<()> {
     let (requests, work) = mpsc::channel();
     let mut session = Session {
         position: Position::starting(),
+        requested_variations: NonZeroU8::MIN,
         active: Active::Idle,
         deferred: VecDeque::new(),
         events,
@@ -167,6 +173,7 @@ fn reader_error_releases_a_held_move() -> io::Result<()> {
     let (requests, _work) = mpsc::channel();
     let mut session = Session {
         position: Position::starting(),
+        requested_variations: NonZeroU8::MIN,
         active: Active::Held(UciMove::Null),
         deferred: VecDeque::new(),
         events,
@@ -196,6 +203,7 @@ fn reports_failures_when_channels_disconnect() {
     let (requests, work) = mpsc::channel();
     let mut session = Session {
         position: Position::starting(),
+        requested_variations: NonZeroU8::MIN,
         active: Active::Idle,
         deferred: VecDeque::new(),
         events,
@@ -215,6 +223,7 @@ fn a_report_write_error_ends_the_command_loop() -> io::Result<()> {
     let (requests, _work) = mpsc::channel();
     let mut session = Session {
         position: Position::starting(),
+        requested_variations: NonZeroU8::MIN,
         active: Active::Idle,
         deferred: VecDeque::new(),
         events,

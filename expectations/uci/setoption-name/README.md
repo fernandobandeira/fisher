@@ -5,11 +5,9 @@ who will not change it. The owner decided on fisher-38w (2026-11-27) that
 fisher follows Stockfish 19: the token in the name position of `setoption`
 is consumed whatever it is, and the option name is read after it.
 
-No test reads this directory: the transcript runner reads `uci/`, and its
-check that every session there is played or staged does not look here. So
-nothing here can fail until fisher-38w moves the four sessions, unchanged,
-into `expectations/uci/setoption-name/` and registers each one as
-`setoption-name/<name>` in `crates/fisher/tests/transcripts.rs`.
+fisher-38w activated the four sessions in pull request #125, moving them
+unchanged into `expectations/uci/setoption-name/`. Transcript tests in
+`crates/fisher/tests/transcripts.rs` play each one as `setoption-name/<name>`.
 
 | Session | What it covers |
 |---|---|
@@ -48,11 +46,11 @@ Where Stockfish's output differs, fisher keeps its existing rules:
 - Stockfish prints `No such option: ` for the empty name of
   `missing-name-word.uci`. fisher ignores `setoption` for an undeclared name
   without output (fisher-8hc answer 4,
-  [`multipv/option-values.uci`](../uci/multipv/option-values.uci)).
+  [`multipv/option-values.uci`](../multipv/option-values.uci)).
 - Stockfish's searched lines carry `seldepth`, `hashfull` and `tbhits` and
   real scores. The sessions use fisher's spelling (fisher-r6y D41) and its
   depth-1 scores from `startpos`, all `cp 0` by material, as
-  [`multipv/settings.uci`](../uci/multipv/settings.uci) does. What the
+  [`multipv/settings.uci`](../multipv/settings.uci) does. What the
   sessions take from Stockfish is the number of variations: two after the
   three accepted commands, one after the missing name word.
 
@@ -131,8 +129,10 @@ sessions included.
 ## What the sessions do not show
 
 - **The checkers.** fisher-38w asks the engine, the transcript runner and
-  the UCI history checker to agree. These sessions drive the engine only.
-  The history checker in `crates/uci/tests/support/search_history.rs` also
-  requires the word `name` today, and nothing here exercises it.
+  the UCI history checker to agree. These sessions drive the engine through
+  the transcript runner. The history test
+  `setoption_consumes_any_token_in_the_name_position` checks the same
+  commands during a search, when a recognized option requires a busy
+  diagnostic.
 - **Names of more than one word.** MultiPV is fisher's only declared option
   and has a one-word name, so no session reads a name across several tokens.

@@ -4,6 +4,18 @@
 # Owner decision on fisher-4h7: over UCI, the file letter H grants the same
 # kingside castling right as K on this position. See README.md for the
 # source lines, the Stockfish captures and the move list below.
+# The bare command a GUI sends to set the position up, with no moves.
+> position fen 4k3/8/8/8/8/8/8/4K2R w H - 0 1
+> go depth 1
+# fisher-2aj rule 7 and the depth-1 totals in expectations/README.md: the
+# node total at depth 1 is the number of legal moves at the root. With the
+# kingside right there are 15, e1g1 among them; without it there are 14.
+# python-chess 1.11.2 and Stockfish 19 go perft 1 both count 15 for K, KK
+# and H, and 14 for -. Rule 2: no move captures, so every move leaves
+# White up a rook (cp 500). The move stays open: rule 6 picks by
+# the order of legal moves, which no expectation fixes (D48).
+< info depth 1 multipv 1 score cp 500 nodes 15 nps {nps} time {time} pv {pv}
+< bestmove {legal}
 # Stockfish accepts this position and applies e1g1 with the same
 # result as K. Without the right, e1g1 is illegal, and the owner decision
 # for a rejected position sends one diagnostic before readyok.

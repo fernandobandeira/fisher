@@ -18,6 +18,89 @@ claims of strength. Both run separately from `scripts/check`. See
 | `sprt-records.tsv` | One row per recorded clocked SPRT dispatch. |
 | `series` | Plays and validates ranges, measures speed, and joins the games for a record. |
 | `series-openings.epd` | The 2,000 positions for conditions 3 and 4, in draw order. |
+| `ordering-sample.tsv` | 300 positions from real play and the finished depths used to judge move order under D64. |
+| `ordering` | Draws the sample, compares two revisions, and calibrates the time threshold. |
+| `ordering-threshold.tsv` | The time threshold and its runner, CPU model, date and run link. A header alone means calibration is pending. |
+
+## Measuring move order (D64)
+
+The committed sample judges whether a move order saves work. A series in
+`records.tsv` records games. For D64, compare an ordering against the revision
+immediately before it. Keep it if it searches fewer nodes on the sample and its
+median time increase is at most the threshold. A time saving smaller than the
+threshold counts as no gain in time.
+
+Dispatch **Ordering sample** by hand from `main` on GitHub Actions with the
+base and measured commits. The commits must be available in the repository. One
+`ubuntu-latest` runner installs each pinned Rust channel in a fresh Rustup
+directory before building both commits in release. The script warms up each
+build on the full sample, then times six pairs of full-sample runs, switching
+which build goes first in each pair. Each build goes first three times.
+Each position starts a new UCI game, and the engine searches it with
+`go depth N` using the depth in the sample. The script times the whole sample
+using the runner's monotonic clock, excluding builds, warm-up, and UCI
+process startup and shutdown. It reports each build's total cumulative nodes
+at the specified depths, the six times and their median, and the measured
+median's percentage change relative to the base. Node counts must repeat
+exactly. The job log and summary include the results and the runner's CPU
+model. The script also prints the CPU model associated with the recorded
+threshold. Recalibrate when the measurement runs on a different CPU model
+before using its times for D64.
+
+To repeat the node measurement locally, run
+`strength/ordering measure <base-commit> <measured-commit>` from the checkout
+that contains the sample. Use the hosted run's times for D64.
+
+### Time threshold
+
+Before measuring fisher-707.4, dispatch **Ordering sample** with the base
+`97726497a43a592afe4f58cadd3c32c514f1eebf` and leave the measured revision
+blank. The workflow builds that revision twice and repeats the full
+comparison five times on the same runner. For each comparison, divide the
+absolute gap between medians by the base median. Round the largest of those
+percentages up to a whole percent. Calibration takes 70 full-sample runs,
+including 10 warm-ups, and the hosted job allows up to 300 minutes.
+
+After the workflow lands on `main`, finish fisher-707.3 before measuring
+fisher-707.4:
+
+1. Dispatch the hosted calibration and record its threshold, runner, CPU
+   model, date and run link in [`ordering-threshold.tsv`](ordering-threshold.tsv).
+2. Confirm that both hosted builds report the local total of 114,642,076
+   nodes. Keep the run link with the confirmation.
+3. Push the planted-delay and reversed-order copies of the base revision to
+   throwaway branches. Size the added delay at about twice the threshold as
+   a share of the base median, divided across the 300 searches. Dispatch
+   **Ordering sample** with the base and each throwaway revision. Record the
+   run links and check that the delay exceeds the threshold and the
+   reversed order changes the node total. Use the recorded CPU model for
+   the timing comparison.
+
+Run `python3 strength/test-ordering.py` to check the timing comparison with
+a planted first-run cost.
+
+### Reproduce the draw
+
+The sample header names the source, digest, seed, generator and depth
+revision. Reuse the joined `games.jsonl` from the conditions-3 series. To
+rejoin the original run, install the pinned Python dependencies as in
+[Play a range by hand](#play-a-range-by-hand), then run:
+
+```sh
+gh run download 45876884742 -p 'series-*' -D /tmp/fisher-ordering-ranges
+strength/series join -- d15ccc2 8b9c254 3 2026-11-26 success \
+  /tmp/fisher-ordering-ranges /tmp/fisher-ordering-joined
+strength/ordering draw /tmp/fisher-ordering-joined/games.jsonl 9772649 \
+  > /tmp/fisher-ordering-sample.tsv
+cmp strength/ordering-sample.tsv /tmp/fisher-ordering-sample.tsv
+```
+
+The join uses the played commit `d15ccc2` in the PGN tags, as described below.
+Fetch that commit from GitHub if the checkout lacks it. Replay with CPython
+3.9.6 and `chess==1.11.2` to reproduce the sample byte for byte. Each row
+records its one-based game number in the joined JSONL and its ply after the
+opening. The first row is from the first third, the next from the middle
+third, the next from the last third, and the rotation repeats.
 
 ## Taking a measurement
 

@@ -1,0 +1,469 @@
+#!/usr/bin/env python3
+"""Check the inputs rustc recorded for each Cargo workspace target."""
+
+import argparse
+import json
+import os
+from pathlib import Path
+import re
+import subprocess
+import sys
+import tempfile
+import unittest
+
+
+def cargo(root, *arguments):
+    return subprocess.check_output(
+        [os.environ.get("CARGO", "cargo"), *arguments], cwd=root, text=True
+    )
+
+
+def target_key(package, target):
+    return package, tuple(target["kind"]), target["name"], target["src_path"]
+
+
+def workspace_targets(metadata):
+    members = set(metadata["workspace_members"])
+    targets = {}
+    for package in metadata["packages"]:
+        if package["id"] not in members:
+            continue
+        directory = Path(package["manifest_path"]).parent.resolve(strict=True)
+        for target in package["targets"]:
+            key = target_key(package["id"], target)
+            targets[key] = (directory, target.get("required-features", []))
+    return targets
+
+
+def dependency_paths(artifact):
+    paths = set()
+    for filename in artifact["filenames"]:
+        path = Path(filename)
+        if artifact["target"]["kind"] == ["custom-build"]:
+            # Cargo reports its build-script-build alias in the hashed directory.
+            build_hash = path.parent.name.rsplit("-", 1)[-1]
+            stem = artifact["target"]["name"].replace("-", "_")
+            paths.add(path.with_name(f"{stem}-{build_hash}.d"))
+        elif path.suffix in {".rmeta", ".rlib", ".so", ".dylib", ".dll"}:
+            prefix = path.stem.removeprefix("lib")
+            paths.add(path.with_name(f"{prefix}.d"))
+        else:
+            raise ValueError(f"unrecognized Cargo check artifact {path}")
+    if not paths:
+        raise ValueError("Cargo check reported no artifact paths")
+    return paths
+
+
+def dep_inputs(document):
+    # rustc emits one rule per output, a blank line between rules, an
+    # empty rule for every input, then optional dependency comments.
+    # It escapes spaces as backslash-space and otherwise preserves the path.
+    inputs = None
+    outputs = set()
+    phony = set()
+    for line in document.split("\n"):
+        if not line or line.startswith(("# env-dep:", "# checksum:")):
+            continue
+        output, separator, data = line.partition(": ")
+        if separator and output and data and not phony:
+            entries = re.split(r"(?<!\\) ", data)
+            if not all(entries) or (inputs is not None and entries != inputs):
+                raise ValueError("inconsistent rustc dependency rules")
+            inputs = entries
+            outputs.add(output.replace(r"\ ", " "))
+        elif line.endswith(":") and len(line) > 1:
+            phony.add(line[:-1])
+        else:
+            raise ValueError(f"unrecognized rustc dependency rule {line!r}")
+    if not inputs or set(inputs) != phony:
+        raise ValueError("missing or inconsistent rustc dependency inputs")
+    return outputs, [entry.replace(r"\ ", " ") for entry in inputs]
+
+
+def read_inputs(root, source, dep_path):
+    try:
+        outputs, inputs = dep_inputs(dep_path.read_text(encoding="utf-8"))
+        if str(dep_path) not in outputs:
+            raise ValueError("dependency rules do not name this dep-info output")
+        canonical = [(Path(path), (root / path).resolve(strict=True)) for path in inputs]
+        if Path(source).resolve(strict=True) not in {resolved for _, resolved in canonical}:
+            raise ValueError(f"dependency rules omit the target root {source}")
+        return canonical
+    except (OSError, ValueError, RuntimeError) as error:
+        raise ValueError(f"{dep_path}: cannot read rustc dep-info ({error})") from error
+
+
+def paths_by_depth(paths):
+    return sorted(paths, key=lambda path: len(path.parts), reverse=True)
+
+
+def first_ancestor(path, directories):
+    return next((directory for directory in directories if path.is_relative_to(directory)), None)
+
+
+def input_allowed(root, package, crate, recorded, path, crate_dirs, generated):
+    shared_dirs = (root / "test-data", root / "expectations")
+    recorded = Path(os.path.abspath(root / recorded))
+    shared = first_ancestor(path, shared_dirs)
+    rust_source = any(candidate.suffix.lower() == ".rs" for candidate in (recorded, path))
+    if rust_source and (shared or first_ancestor(recorded, shared_dirs)):
+        return False
+
+    out_dir = first_ancestor(path, generated)
+    if out_dir is not None:
+        return generated[out_dir] == package
+
+    # A Cargo build directory can also contain left-over outputs from builds
+    # whose out dirs are absent from this run's JSON.
+    for directory in generated:
+        build = directory.parent.parent
+        if path.is_relative_to(build) and path.relative_to(build).parts[1:2] == ("out",):
+            return False
+
+    owner = first_ancestor(path, crate_dirs)
+    if shared and owner in (None, root):
+        return True
+    return owner == crate or (owner is None and not path.is_relative_to(root))
+
+
+def build_outputs(records):
+    outputs = {}
+    for record in records:
+        if record["reason"] != "build-script-executed":
+            continue
+        directory = Path(record["out_dir"])
+        build = directory.parent.parent
+        canonical = directory.resolve(strict=True)
+        expected = build.resolve(strict=True) / directory.relative_to(build)
+        if canonical != expected:
+            raise ValueError(f"Cargo build output {directory} resolves to {canonical}")
+        outputs[canonical] = record["package_id"]
+    return {path: outputs[path] for path in paths_by_depth(outputs)}
+
+
+def violations(root, targets, records, all_features):
+    crate_dirs = paths_by_depth({directory for directory, _ in targets.values()})
+    generated = build_outputs(records)
+    seen = set()
+    active_features = {}
+    diagnostics = set()
+    for artifact in records:
+        if artifact["reason"] != "compiler-artifact":
+            continue
+        key = target_key(artifact["package_id"], artifact["target"])
+        if key not in targets:
+            continue
+        package, kinds, name, source = key
+        active_features.setdefault(package, set()).update(artifact.get("features", []))
+        crate, _ = targets[key]
+        source_label = display_path(root, Path(source))
+        label = f"{source_label} ({'/'.join(kinds)} {name})"
+        try:
+            for dep_path in dependency_paths(artifact):
+                for recorded, path in read_inputs(root, source, dep_path):
+                    if not input_allowed(root, package, crate, recorded, path, crate_dirs, generated):
+                        diagnostics.add(
+                            f"{label}: rustc used {display_path(root, path)}. "
+                            "Use inputs from the target's package, its own build output, or shared data directories without Rust source."
+                        )
+            seen.add(key)
+        except ValueError as error:
+            diagnostics.add(f"{label}: {error}")
+    for key in targets.keys() - seen:
+        package, kinds, name, source = key
+        _, required = targets[key]
+        # Cargo skips targets with unmet required-features in the default build.
+        if not all_features and set(required) - active_features.get(package, set()):
+            continue
+        diagnostics.add(f"{source} ({'/'.join(kinds)} {name}): no usable rustc dep-info")
+    return sorted(diagnostics)
+
+
+def display_path(root, path):
+    return path.relative_to(root) if path.is_relative_to(root) else path
+
+
+def build_records(root, all_features, env=None):
+    arguments = [
+        os.environ.get("CARGO", "cargo"), "check", "--locked", "--workspace",
+        "--all-targets", "--message-format=json-render-diagnostics",
+    ]
+    if all_features:
+        arguments.append("--all-features")
+    # Render rustc diagnostics on stderr while keeping the JSON stream on stdout.
+    messages = subprocess.check_output(arguments, cwd=root, text=True, env=env)
+    return [json.loads(line) for line in messages.splitlines()]
+
+
+def check_workspace(root):
+    metadata = json.loads(cargo(root, "metadata", "--locked", "--no-deps", "--format-version=1"))
+    targets = workspace_targets(metadata)
+    failed = False
+    for all_features in (False, True):
+        config = "all features" if all_features else "default features"
+        for diagnostic in violations(root, targets, build_records(root, all_features), all_features):
+            print(f"{config}: {diagnostic}", file=sys.stderr)
+            failed = True
+    return int(failed)
+
+
+class Workspace(unittest.TestCase):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory(prefix="fisher inputs ")
+        self.addCleanup(directory.cleanup)
+        self.directory = Path(directory.name).resolve()
+        self.root = self.directory / "workspace"
+        self.write("Cargo.toml", '[workspace]\nresolver = "3"\nmembers = ["crates/*"]\n')
+        for name in ("a", "b"):
+            self.write(f"crates/{name}/Cargo.toml", f'[package]\nname = "{name}"\nversion = "0.1.0"\nedition = "2024"\n')
+        self.write("crates/b/src/lib.rs", "pub struct Copied;\n")
+        self.write("crates/a/src/lib.rs", "")
+        self.env = {**os.environ, "CARGO_TARGET_DIR": str(self.root / "target")}
+
+        # --locked uses this dependency-free workspace lockfile.
+        subprocess.run(["cargo", "generate-lockfile", "--offline"], cwd=self.root, env=self.env, check=True)
+
+    def write(self, path, text):
+        path = self.root / path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+
+    def check(self):
+        return subprocess.run(
+            [sys.executable, "-I", str(Path(__file__).resolve()), "--root", str(self.root)],
+            env=self.env, capture_output=True, text=True, check=False,
+        )
+
+    def rejects(self, result, source, target):
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertTrue(
+            any(source in line and f"rustc used {target}." in line for line in result.stderr.splitlines()),
+            f"Missing diagnostic for {source} using {target}:\n{result.stderr}",
+        )
+
+    def test_direct_and_macro_cross_crate_paths(self):
+        cases = {
+            "direct_path": '#[path = "TARGET"] mod copied;',
+            "direct_include": 'include!("TARGET");',
+            "direct_text": 'const _: &str = include_str!("TARGET");',
+            "direct_bytes": 'const _: &[u8] = include_bytes!("TARGET");',
+            "alias_include": 'use std::include as items; items!("TARGET");',
+            "alias_text": 'use std::include_str as text; const _: &str = text!("TARGET");',
+            "alias_bytes": 'use std::include_bytes as bytes; const _: &[u8] = bytes!("TARGET");',
+            "shadowed_concat": '''
+macro_rules! concat { ($($input:tt)*) => { "TARGET" }; }
+const _: &str = include_str!(concat!("own.txt"));
+''',
+            "macro_path": '''
+macro_rules! m { ($attribute:ident) => { #[$attribute = "TARGET"] pub mod stolen; }; }
+m!(path);
+''',
+            "test_profile": '#[cfg(test)] const _: &str = include_str!("TARGET");',
+        }
+        self.write("crates/a/src/own.txt", "")
+        sources = []
+        for name, source in cases.items():
+            item = name.title().replace("_", "")
+            self.write(f"crates/b/src/{name}.rs", f"pub struct {item};")
+            sources.append(source.replace("TARGET", f"../../b/src/{name}.rs"))
+        self.write("crates/a/src/lib.rs", "\n".join(sources))
+        result = self.check()
+        for name in cases:
+            with self.subTest(case=name):
+                self.rejects(result, "crates/a/src/lib.rs", f"crates/b/src/{name}.rs")
+
+    def test_custom_lib_and_test_roots(self):
+        manifest = self.root / "crates/a/Cargo.toml"
+        with manifest.open("a", encoding="utf-8") as handle:
+            handle.write('\n[lib]\npath = "custom/root.rs"\n[[test]]\nname = "custom"\npath = "custom/test.rs"\n')
+        (self.root / "crates/a/custom/inline").mkdir(parents=True)
+        for name in ("root", "test"):
+            self.write(f"crates/b/src/{name}.rs", "pub struct Copied;")
+            self.write(f"crates/a/custom/{name}.rs", f'''
+mod inline {{
+    #[path = "../../../b/src/{name}.rs"] pub mod stolen;
+}}
+''')
+        result = self.check()
+        for name in ("root", "test"):
+            with self.subTest(target=name):
+                self.rejects(result, f"crates/a/custom/{name}.rs", f"crates/b/src/{name}.rs")
+
+    def test_shared_rust_source_and_symlink_routes(self):
+        sources = []
+        rejected = []
+        if os.name == "posix":
+            (self.root / "crates/a/src/stolen.rs").symlink_to("../../b/src/lib.rs")
+            sources.append("pub mod stolen;")
+            rejected.append("crates/b/src/lib.rs")
+        for index, directory in enumerate(("test-data", "expectations")):
+            direct = f"{directory}/direct.rs"
+            self.write(direct, "pub struct Shared;")
+            sources.append(f'#[path = "../../../{direct}"] mod shared_{index};')
+            rejected.append(direct)
+            if os.name != "posix":
+                continue
+            own = f"crates/a/src/{directory}.txt"
+            sibling = f"crates/b/src/{directory}.txt"
+            shared = f"{directory}/target.rs"
+            payload = f"{directory}/payload.txt"
+            self.write(payload, "pub struct Shared;")
+            (self.root / "crates/a/src" / f"payload_{index}.rs").symlink_to(f"../../../{payload}")
+            self.write(own, f"pub struct {directory.title().replace('-', '')};")
+            self.write(sibling, "sibling data")
+            self.write(shared, "shared Rust source")
+            (self.root / directory / "shared.rs").symlink_to(f"../{own}")
+            (self.root / directory / "sibling.txt").symlink_to(f"../{sibling}")
+            (self.root / "crates/a/src" / f"{directory}-alias.txt").symlink_to(f"../../../{shared}")
+            sources.extend((
+                f'pub mod payload_{index};',
+                f'include!("../../../{directory}/shared.rs");',
+                f'const _: &str = include_str!("../../../{directory}/sibling.txt");',
+                f'const _: &str = include_str!("{directory}-alias.txt");',
+            ))
+            rejected.extend((own, sibling, shared, payload))
+        self.write("crates/a/src/lib.rs", "\n".join(sources))
+        result = self.check()
+        for target in rejected:
+            with self.subTest(target=target):
+                self.rejects(result, "crates/a/src/lib.rs", target)
+
+    def test_valid_inputs_and_cargo_target_kinds(self):
+        self.write("test-data/input file.txt", "test data")
+        self.write("expectations/values.txt", "expected values")
+        self.write("crates/a/src/own file.txt", "allowed")
+        external = self.directory / "external.txt"
+        external.write_text("external data", encoding="utf-8")
+        self.write("crates/a/src/lib.rs", f'''
+macro_rules! read {{ ($path:literal) => {{ include_str!($path) }}; }}
+const _: &str = read!("own file.txt");
+const _: &str = stringify!(include!("../../b/src/lib.rs"));
+const _: &str = include_str!("../../../test-data/input file.txt");
+const _: &[u8] = include_bytes!("../../../expectations/values.txt");
+const _: &str = include_str!({json.dumps(str(external))});
+''')
+        self.write("crates/a/src/main.rs", "fn main() {}")
+        self.write("crates/a/tests/integration.rs", "")
+        self.write("crates/a/benches/fixture.rs", "")
+        self.write("crates/a/examples/fixture.rs", "fn main() {}")
+        self.write("crates/a/build.rs", "fn main() {}")
+        manifest = self.root / "crates/b/Cargo.toml"
+        with manifest.open("a", encoding="utf-8") as handle:
+            handle.write('build = "configure.rs"\n\n[lib]\nproc-macro = true\n')
+        self.write("crates/b/configure.rs", "fn main() {}")
+        proc_macro = """
+extern crate proc_macro;
+#[proc_macro]
+pub fn example(_: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    proc_macro::TokenStream::new()
+}
+"""
+        self.write("crates/b/src/lib.rs", proc_macro)
+        result = self.check()
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+        self.write("notes.txt", "outside both crates")
+        self.write("crates/a/build.rs", 'const _: &str = include_str!("../../notes.txt"); fn main() {}')
+        self.write("crates/b/src/lib.rs", proc_macro + 'const _: &str = include_str!("../../a/src/lib.rs");')
+        result = self.check()
+        self.rejects(result, "crates/a/build.rs", "notes.txt")
+        self.rejects(result, "crates/b/src/lib.rs (proc-macro b)", "crates/a/src/lib.rs")
+
+    def test_default_and_all_features(self):
+        manifest = self.root / "crates/a/Cargo.toml"
+        with manifest.open("a", encoding="utf-8") as handle:
+            handle.write('\n[features]\nx = []\n')
+        with manifest.open("a", encoding="utf-8") as handle:
+            handle.write('\n[[bin]]\nname = "only-with-x"\npath = "src/main.rs"\nrequired-features = ["x"]\n')
+        self.write("crates/a/src/main.rs", "fn main() {}")
+        result = self.check()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.write("crates/b/src/default.rs", "pub struct DefaultFeatures;")
+        self.write("crates/b/src/all.rs", "pub struct AllFeatures;")
+        self.write("crates/a/src/lib.rs", '''
+#[cfg(not(feature = "x"))]
+#[path = "../../b/src/default.rs"] mod default_features;
+#[cfg(feature = "x")]
+#[path = "../../b/src/all.rs"] mod all_features;
+''')
+        result = self.check()
+        self.rejects(result, "default features: crates/a/src/lib.rs", "crates/b/src/default.rs")
+        self.rejects(result, "all features: crates/a/src/lib.rs", "crates/b/src/all.rs")
+
+    def test_own_generated_source_and_sibling_output(self):
+        for package in ("a", "b"):
+            self.write(f"crates/{package}/build.rs", r'''
+fn main() {
+    let out = std::path::PathBuf::from(std::env::var_os("OUT_DIR").unwrap());
+    std::fs::write(out.join("generated.rs"), "pub struct Generated;").unwrap();
+}
+''')
+        for directory in (self.root / "target", self.directory / "external target"):
+            with self.subTest(directory=directory):
+                self.env["CARGO_TARGET_DIR"] = str(directory)
+                self.write("crates/a/src/lib.rs", 'include!(concat!(env!("OUT_DIR"), "/generated.rs"));')
+                result = self.check()
+                self.assertEqual(result.returncode, 0, result.stderr)
+                records = build_records(self.root, False, self.env)
+                sibling = next(
+                    Path(record["out_dir"]) / "generated.rs"
+                    for record in records
+                    if record["reason"] == "build-script-executed"
+                    and record["package_id"].endswith("/b#0.1.0")
+                )
+                self.write("crates/a/src/lib.rs", f"include!({json.dumps(str(sibling))});")
+                self.rejects(self.check(), "crates/a/src/lib.rs", display_path(self.root, sibling))
+
+    def test_deepest_owner_with_root_package(self):
+        manifest = self.root / "Cargo.toml"
+        with manifest.open("a", encoding="utf-8") as handle:
+            handle.write('\n[package]\nname = "workspace-root"\nversion = "0.1.0"\nedition = "2024"\n')
+        self.write("src/lib.rs", 'const _: &str = include_str!("own.txt");')
+        self.write("src/own.txt", "root package input")
+        subprocess.run(["cargo", "generate-lockfile", "--offline"], cwd=self.root, env=self.env, check=True)
+        result = self.check()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.write("src/lib.rs", 'include!("../crates/b/src/lib.rs");')
+        self.write("crates/a/src/lib.rs", 'const _: &str = include_str!("../../../src/own.txt");')
+        result = self.check()
+        self.rejects(result, "src/lib.rs (lib workspace_root)", "crates/b/src/lib.rs")
+        self.rejects(result, "crates/a/src/lib.rs", "src/own.txt")
+
+    def test_compile_errors_are_reported(self):
+        self.write("crates/a/src/lib.rs", 'compile_error!("fixture rustc diagnostic");')
+        result = self.check()
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("error: fixture rustc diagnostic", result.stderr)
+
+    def test_missing_artifact_and_invalid_dep_info_fail(self):
+        source = self.root / "crates/a/src/lib.rs"
+        key = ("a", ("lib",), "a", str(source))
+        self.assertIn("no usable rustc dep-info", violations(self.root, {key: (source.parent.parent, [])}, [], True)[0])
+        target = {"kind": ["lib"], "name": "a", "src_path": str(source)}
+        artifact = {"reason": "compiler-artifact", "package_id": "a", "target": target, "filenames": [str(self.root / "liba-hash.rmeta")]}
+        dep_path = self.root / "a-hash.d"
+        for text in (None, "not dep-info", f"{dep_path}: {source}\n"):
+            with self.subTest(text=text):
+                if text is not None:
+                    dep_path.write_text(text, encoding="utf-8")
+                diagnostics = violations(self.root, {key: (source.parent.parent, [])}, [artifact], True)
+                self.assertTrue(any("cannot read rustc dep-info" in item for item in diagnostics), diagnostics)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--self-test", action="store_true")
+    parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parent.parent)
+    args = parser.parse_args()
+    if args.self_test:
+        result = unittest.TextTestRunner().run(unittest.defaultTestLoader.loadTestsFromTestCase(Workspace))
+        return int(not result.wasSuccessful())
+    try:
+        return check_workspace(args.root.resolve(strict=True))
+    except (OSError, ValueError, KeyError, RuntimeError, subprocess.CalledProcessError) as error:
+        print(f"Crate source paths: {error}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

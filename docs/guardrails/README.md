@@ -53,6 +53,7 @@ Give each capability a clear owner behind a small, deliberate interface.
 |---|---|---|---|
 | Crate dependencies | Edges outside the allowed directions | [Boundary table](../../scripts/check-crate-boundaries) | Each commit and CI run |
 | Deep modules | Direct public module declarations at the library root and alternate library entry paths | [`cargo xtask interfaces`](../../crates/xtask/src/interfaces.rs), [`lib.rs` path check](../../scripts/check-crate-boundaries), [interface rules](../../CODING_STANDARDS.md#crate-interfaces) | Each commit and CI run. Macro-generated exports and re-exports in review |
+| Crate source paths | Workspace inputs outside the target’s crate, its own build output, and the shared data exceptions | [`scripts/check-source-paths`](../../scripts/check-source-paths) and its `--self-test` fixtures | Each commit and CI run |
 | Development-only reference | Shipping the independent chess reference as an engine dependency | [`shakmaty` dependency check](../../scripts/check-crate-boundaries) | Each commit and CI run |
 
 See [crate boundaries](crate-boundaries.md) for the permitted dependencies and interface review.

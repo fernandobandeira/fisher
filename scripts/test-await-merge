@@ -2,16 +2,18 @@
 """Exercise await-merge with a stand-in gh and no network."""
 
 import json
-import os
 from pathlib import Path
+import runpy
 import subprocess
 import sys
 import tempfile
-import textwrap
+from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 
 SCRIPT = Path(__file__).resolve().with_name("await-merge")
+HANG_TIMEOUT = 120
 VIEW = ["pr", "view", "42", "--json",
         "state,mergeStateStatus,mergeable,baseRefName,headRefOid,statusCheckRollup,isDraft"]
 BASE = ["api", "repos/{owner}/{repo}/git/ref/heads/main", "--jq", ".object.sha"]
@@ -20,41 +22,40 @@ UPDATE_ERROR = {"error": "X Cannot update PR branch due to conflicts"}
 FIRST_BASE = "a" * 40
 SECOND_BASE = "b" * 40
 
-STAND_IN = """\
-    import json
-    from pathlib import Path
-    import sys
 
-    args = sys.argv[1:]
-    log = Path("calls")
-    count = len(log.read_text().splitlines()) if log.exists() else 0
-    with log.open("a") as stream:
-        stream.write(json.dumps(args) + "\\n")
-    steps = json.loads(Path("steps").read_text())
-    expected, output = steps[min(count, len(steps) - 1)]
-    if args != expected:
-        sys.exit(f"Unexpected gh call: {args!r}, expected {expected!r}")
-    if isinstance(output, dict) and "error" in output:
-        sys.exit(output["error"])
-    print(output if isinstance(output, str) else json.dumps(output))
-"""
-
-CLOCK = """\
-    import json
-    from pathlib import Path
-    import runpy
-    import sys
-    from types import SimpleNamespace
-
+def run_fixture():
+    steps = json.load(sys.stdin)
+    calls = []
     sleeps = []
-    sys.argv.pop(0)
-    main = runpy.run_path(sys.argv[0])["main"]
+
+    def run_gh(command, *, timeout, text, capture_output, check):
+        executable, *args = command
+        expected, output = steps[min(len(calls), len(steps) - 1)]
+        calls.append(args)
+        if executable != "gh" or args != expected:
+            raise AssertionError(f"Unexpected command: {command!r}, expected gh {expected!r}")
+        if not text or not capture_output:
+            raise AssertionError("Expected gh output to be captured as text")
+        # Scripted replies are instantaneous on the controlled clock.
+        if timeout <= 0:
+            raise AssertionError(f"gh called with no time remaining: {command!r}")
+        if isinstance(output, dict) and "error" in output:
+            result = subprocess.CompletedProcess(command, 1, "", output["error"] + "\n")
+        else:
+            stdout = output if isinstance(output, str) else json.dumps(output)
+            result = subprocess.CompletedProcess(command, 0, stdout + "\n", "")
+        if check:
+            result.check_returncode()
+        return result
+
+    sys.argv[:2] = [str(SCRIPT)]
+    main = runpy.run_path(str(SCRIPT))["main"]
     main.__globals__["time"] = SimpleNamespace(monotonic=lambda: sum(sleeps), sleep=sleeps.append)
     try:
-        main()
+        with patch.object(subprocess, "run", run_gh):
+            main()
     finally:
-        Path("sleeps").write_text(json.dumps(sleeps))
-"""
+        Path("trace").write_text(json.dumps((calls, sleeps)))
 
 
 def pull(state="OPEN", merge_state="BLOCKED", mergeable="MERGEABLE",
@@ -74,26 +75,20 @@ def check(name, status, conclusion="", started="2026-11-26T01:00:00Z", job=100):
 
 
 class AwaitMergeTest(unittest.TestCase):
-    def run_script(self, steps, timeout="4", interval="0.01", expected_sleeps=None):
+    def run_script(self, steps, timeout="4", interval="0.25", expected_sleeps=None):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            fake = root / "gh"
-            fake.write_text(f"#!{sys.executable}\n" + textwrap.dedent(STAND_IN))
-            fake.chmod(0o755)
-            (root / "steps").write_text(json.dumps(steps))
-            args = [sys.executable]
-            if expected_sleeps is not None:
-                args.extend(("-c", textwrap.dedent(CLOCK)))
-            args.extend((str(SCRIPT), "42", "--timeout", timeout, "--interval", interval))
             result = subprocess.run(
-                args,
-                cwd=root, env={**os.environ, "PATH": f"{root}{os.pathsep}{os.environ['PATH']}"},
-                capture_output=True, text=True,
-                timeout=5 if expected_sleeps is not None else float(timeout) + 1.5,
+                [sys.executable, str(Path(__file__).resolve()), "--run-fixture",
+                 "42", "--timeout", timeout, "--interval", interval],
+                cwd=root, input=json.dumps(steps), capture_output=True, text=True,
+                timeout=HANG_TIMEOUT,
             )
+            trace = root / "trace"
+            self.assertTrue(trace.exists(), result)
+            calls, sleeps = json.loads(trace.read_text())
             if expected_sleeps is not None:
-                self.assertEqual(json.loads((root / "sleeps").read_text()), expected_sleeps)
-            calls = [json.loads(line) for line in (root / "calls").read_text().splitlines()]
+                self.assertEqual(sleeps, expected_sleeps)
             return result, calls
 
     def assert_steps(self, steps, status, message, **options):
@@ -223,7 +218,7 @@ class AwaitMergeTest(unittest.TestCase):
                 self.assertEqual(calls, [VIEW, BASE, VIEW, BASE, UPDATE, VIEW])
 
     def test_persistent_read_error_reaches_time_limit(self):
-        result, calls = self.run_script([pull(), (VIEW, {"error": "temporary GitHub error"})], timeout="0.6")
+        result, calls = self.run_script([pull(), (VIEW, {"error": "temporary GitHub error"})], timeout="0.75")
         self.assertEqual(result.returncode, 1, result)
         self.assertIn("Warning:", result.stderr)
         self.assertIn("Timed out waiting for pull request #42", result.stderr)
@@ -289,7 +284,7 @@ class AwaitMergeTest(unittest.TestCase):
         self.assert_steps([pull(base="another-branch")], 1, "must target main")
 
     def test_timeout(self):
-        result, calls = self.run_script([pull()], timeout="0.6")
+        result, calls = self.run_script([pull()], timeout="0.5")
         self.assertEqual(result.returncode, 1, result)
         self.assertIn("Timed out waiting for pull request #42", result.stderr)
         self.assertIn("OPEN/BLOCKED at first-head", result.stderr)
@@ -298,4 +293,7 @@ class AwaitMergeTest(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main()
+    if sys.argv[1:2] == ["--run-fixture"]:
+        run_fixture()
+    else:
+        unittest.main()

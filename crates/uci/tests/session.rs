@@ -163,6 +163,34 @@ fn rejected_positions_leave_the_last_accepted_position_in_place() -> io::Result<
 }
 
 #[test]
+fn no_break_space_in_fen_keeps_the_full_position() -> io::Result<()> {
+    // The two rejected commands are from no-break-space-in-fen.uci.
+    for input in [
+        &b"position fen 7k/8/5K1Q/8/8/8/8/8 b - - 13 29\nposition fen 4k3/8/8/8/8/8/8/4K2R w K -\xc2\xa00 1\ngo\n"[..],
+        &b"position fen 7k/8/5K1Q/8/8/8/8/8 b - - 13 29\nposition fen 4k3/8/8/8/8/8/8/4K2R w K -\xc2\xa07 42\ngo\n"[..],
+    ] {
+        let output = session_output(input, |request, report| {
+            assert_eq!(
+                request.position.to_fen(),
+                "7k/8/5K1Q/8/8/8/8/8 b - - 13 29",
+                "search must receive the full previous position"
+            );
+            report(SearchReport::BestMove(legal_move(&request.position, "h8", "g8")));
+        })?;
+        let mut responses = output.lines();
+        assert!(
+            responses.next().is_some_and(|line| {
+                line.starts_with("info string ") && line.contains("invalid en passant")
+            }),
+            "{output:?}"
+        );
+        assert_eq!(responses.next(), Some("bestmove h8g8"));
+        assert_eq!(responses.next(), None);
+    }
+    Ok(())
+}
+
+#[test]
 fn terminal_search_reports_omit_search_statistics_and_a_move() -> io::Result<()> {
     // The owner-approved responses in terminal-positions.uci.
     for (position, expected) in [

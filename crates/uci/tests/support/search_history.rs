@@ -242,7 +242,7 @@ impl<'a> Session<'a> {
     }
 
     fn command(&mut self, command: &str) {
-        let mut words = command.split_ascii_whitespace();
+        let mut words = command_tokens(command);
         match words.next() {
             Some("go") if self.search.is_some() => {
                 self.command_responses
@@ -479,10 +479,9 @@ impl<'a> Session<'a> {
             .deferred
             .iter()
             .copied()
-            .take_while(|command| command.split_ascii_whitespace().next() != Some("quit"));
+            .take_while(|command| command_tokens(command).next() != Some("quit"));
         if self.command_responses.contains(&CommandResponse::Ready)
-            || deferred_before_exit
-                .any(|text| text.split_ascii_whitespace().next() == Some("isready"))
+            || deferred_before_exit.any(|text| command_tokens(text).next() == Some("isready"))
         {
             return Err((6, "missing readyok"));
         }
@@ -513,7 +512,12 @@ fn payload(text: &str, prefix: &str) -> bool {
         .is_some_and(|value| !value.trim().is_empty())
 }
 
-fn position(words: std::str::SplitAsciiWhitespace<'_>) -> Option<Chess> {
+fn command_tokens(text: &str) -> impl Iterator<Item = &str> {
+    text.split(|ch: char| ch.is_ascii_whitespace() || ch == '\x0b')
+        .filter(|token| !token.is_empty())
+}
+
+fn position<'a>(words: impl Iterator<Item = &'a str>) -> Option<Chess> {
     let mut words = words.peekable();
     let mut position = match words.next()? {
         "startpos" => Chess::default(),

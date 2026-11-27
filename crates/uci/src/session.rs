@@ -18,7 +18,7 @@ use crate::{
     Response, SearchScore, UciMove,
     command::{
         Command, GoParameters, Input, PositionCommand, PositionSource, PositionSyntaxError,
-        parse_command,
+        command_tokens, parse_command,
     },
 };
 
@@ -329,14 +329,7 @@ fn nodes_per_second(nodes: u64, time_ms: u64) -> u64 {
 fn setup_position(command: PositionCommand) -> Result<Position, String> {
     let mut position = match command.source {
         PositionSource::Startpos => Position::starting(),
-        PositionSource::Fen(mut fen) => {
-            match fen.split_whitespace().count() {
-                4 => fen.push_str(" 0 1"),
-                5 => fen.push_str(" 1"),
-                _ => {}
-            }
-            Position::from_fen(&fen).map_err(|cause| format!("invalid FEN: {cause}"))?
-        }
+        PositionSource::Fen(fen) => parse_uci_fen(fen)?,
     };
     for uci_move in command.moves {
         let UciMove::Normal {
@@ -353,6 +346,28 @@ fn setup_position(command: PositionCommand) -> Result<Position, String> {
             .play();
     }
     Ok(position)
+}
+
+fn parse_uci_fen(mut fen: String) -> Result<Position, String> {
+    // The standalone FEN reader splits on Unicode whitespace. Reject any
+    // such whitespace inside a UCI field before handing the FEN to it.
+    if let Some((index, _)) = command_tokens(&fen)
+        .enumerate()
+        .find(|(_, field)| field.contains(char::is_whitespace))
+    {
+        let cause = if index == 3 {
+            "invalid en passant square"
+        } else {
+            "unexpected whitespace inside a FEN field"
+        };
+        return Err(format!("invalid FEN: {cause}"));
+    }
+    match command_tokens(&fen).count() {
+        4 => fen.push_str(" 0 1"),
+        5 => fen.push_str(" 1"),
+        _ => {}
+    }
+    Position::from_fen(&fen).map_err(|cause| format!("invalid FEN: {cause}"))
 }
 
 fn read_input(mut input: impl BufRead, sender: &mpsc::Sender<Event>) -> io::Result<()> {

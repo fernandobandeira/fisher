@@ -1,4 +1,4 @@
-use std::{fmt, iter::Peekable, str::SplitWhitespace};
+use std::{fmt, iter::Peekable};
 
 use crate::UciMove;
 
@@ -103,10 +103,16 @@ pub(super) struct GoParameters {
     pub(super) infinite: bool,
 }
 
+/// Stockfish reads UCI tokens with the C locale, which includes vertical tab.
+pub(super) fn command_tokens(text: &str) -> impl Iterator<Item = &str> {
+    text.split(|ch: char| ch.is_ascii_whitespace() || ch == '\x0b')
+        .filter(|token| !token.is_empty())
+}
+
 /// Reads one line sent by the GUI. An unknown prefix does not hide a command.
 #[must_use]
 pub(super) fn parse_command(line: &str) -> Input {
-    let mut tokens = line.split_whitespace();
+    let mut tokens = command_tokens(line);
     while let Some(token) = tokens.next() {
         match token {
             UCI => return Input::Handled(Command::Uci),
@@ -126,7 +132,9 @@ pub(super) fn parse_command(line: &str) -> Input {
     Input::Unknown
 }
 
-fn parse_position(tokens: SplitWhitespace<'_>) -> Result<PositionCommand, PositionSyntaxError> {
+fn parse_position<'a>(
+    tokens: impl Iterator<Item = &'a str>,
+) -> Result<PositionCommand, PositionSyntaxError> {
     let mut tokens = tokens.peekable();
     let source = match tokens.next() {
         Some(STARTPOS) => PositionSource::Startpos,
@@ -148,8 +156,8 @@ fn parse_position(tokens: SplitWhitespace<'_>) -> Result<PositionCommand, Positi
     Ok(PositionCommand { source, moves })
 }
 
-fn read_fen_until_moves(
-    tokens: &mut Peekable<SplitWhitespace<'_>>,
+fn read_fen_until_moves<'a>(
+    tokens: &mut Peekable<impl Iterator<Item = &'a str>>,
 ) -> Result<String, PositionSyntaxError> {
     let mut fields = Vec::new();
     while let Some(field) = tokens.next_if(|token| *token != MOVES) {
@@ -161,7 +169,7 @@ fn read_fen_until_moves(
     Ok(fields.join(" "))
 }
 
-fn parse_go(tokens: SplitWhitespace<'_>) -> GoParameters {
+fn parse_go<'a>(tokens: impl Iterator<Item = &'a str>) -> GoParameters {
     let mut tokens = tokens.peekable();
     let mut parameters = GoParameters::default();
     while let Some(token) = tokens.next() {
@@ -199,7 +207,10 @@ fn parse_go(tokens: SplitWhitespace<'_>) -> GoParameters {
     parameters
 }
 
-fn read_number(tokens: &mut Peekable<SplitWhitespace<'_>>, is_clock: bool) -> Option<u64> {
+fn read_number<'a>(
+    tokens: &mut Peekable<impl Iterator<Item = &'a str>>,
+    is_clock: bool,
+) -> Option<u64> {
     let token = tokens.peek()?;
     let negative_clock = is_clock
         && token.strip_prefix('-').is_some_and(|digits| {

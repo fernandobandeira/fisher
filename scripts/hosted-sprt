@@ -1,0 +1,350 @@
+#!/usr/bin/env python3
+"""Plan a hosted SPRT dispatch and turn its kept games into a record."""
+
+import argparse
+import csv
+from datetime import datetime, timezone
+from pathlib import Path
+import json
+import os
+import re
+import subprocess
+import sys
+
+sys.dont_write_bytecode = True
+
+from clocked_sprt import ROOT, TIME_CONTROL, pgn_records, revision
+from sprt_statistic import MAX_PAIRS, SPRT_BOUNDS
+
+
+JUDGE = ROOT / "scripts/clocked-sprt"
+RECORD = ROOT / "strength/sprt-records.tsv"
+RESULTS = {"pass", "fail", "inconclusive", "no verdict yet"}
+ENDINGS = ("loss on time", "crash or stall", "illegal move")
+FEN = re.compile(r'^\[FEN "([^"\n]+)"\]$', re.MULTILINE)
+RUN_ID = re.compile(r"[1-9][0-9]*")
+WORKFLOW = ".github/workflows/clocked-sprt.yml"
+MAX_RANGE_PAIRS = 50
+
+
+def github_json(*args):
+    return json.loads(subprocess.check_output(["gh", "api", *args], text=True))
+
+
+def require_source_run(repository, run, default_branch):
+    if not RUN_ID.fullmatch(run):
+        raise ValueError("Use the numeric Actions run ID for kept games.")
+    info = github_json(f"repos/{repository}/actions/runs/{run}")
+    if (
+        str(info["id"]) != run
+        or info["repository"]["full_name"] != repository
+        or (info.get("head_repository") or {}).get("full_name") != repository
+        or info["path"] != WORKFLOW
+        or info["event"] != "workflow_dispatch"
+        or info["head_branch"] != default_branch
+        or subprocess.run(
+            ["git", "merge-base", "--is-ancestor", info["head_sha"], f"origin/{default_branch}"],
+            cwd=ROOT,
+        ).returncode != 0
+    ):
+        raise ValueError(f"Run {run} must be a {WORKFLOW} dispatch from {repository}'s default branch.")
+
+
+def artifact_names(repository, run):
+    pages = github_json(
+        "--paginate", "--slurp", f"repos/{repository}/actions/runs/{run}/artifacts?per_page=100",
+    )
+    artifacts = [artifact for page in pages for artifact in page["artifacts"]]
+    distinct_ids = {artifact["id"] for artifact in artifacts}
+    totals = {page["total_count"] for page in pages}
+    if totals != {len(distinct_ids)}:
+        raise ValueError(f"Inconsistent artifact inventory for run {run}: "
+                         f"GitHub reported totals {sorted(totals)}, found {len(distinct_ids)} distinct IDs.")
+    return {artifact["name"] for artifact in artifacts}
+
+
+def download_artifacts(repository, run, names, directory):
+    if not names:
+        return
+    # gh extracts one explicitly named artifact directly into its destination.
+    target = directory / names[0] if len(names) == 1 else directory
+    options = [option for name in names for option in ("--name", name)]
+    try:
+        subprocess.run(
+            ["gh", "run", "download", run, "--repo", repository, "--dir", target, *options],
+            check=True,
+        )
+    except subprocess.CalledProcessError as error:
+        raise ValueError(f"Artifact transfer failed for run {run}: {', '.join(names)}.") from error
+    for name in names:
+        path = directory / name
+        if not path.is_dir() or not any(path.iterdir()):
+            raise ValueError(f"GitHub lists artifact {name} for run {run}, but it did not arrive.")
+
+
+def range_artifacts(plan, attempt, listed):
+    return [
+        name for shard in plan["ranges"]
+        if (name := f"sprt-{attempt}-{shard['first']}") in listed
+    ]
+
+
+def collect_artifacts(plan, repository, attempt, directory, listed):
+    names = range_artifacts(plan, attempt, listed)
+    if not plan["replay"] and attempt != "1" and not names:
+        raise ValueError(f"Attempt {attempt} has no playing artifacts. Dispatch a replay of run {plan['run']}.")
+    source_name = f"sprt-source-{attempt}"
+    if plan["source_run"]:
+        if source_name not in listed:
+            raise ValueError(f"GitHub did not list the required source artifact {source_name}.")
+        names.append(source_name)
+    download_artifacts(repository, plan["run"], names, directory)
+
+
+def fetch_source(repository, run, default_branch, directory):
+    require_source_run(repository, run, default_branch)
+    listed = artifact_names(repository, run)
+    source = directory / "sprt-record"
+    if "sprt-record" in listed:
+        download_artifacts(repository, run, ["sprt-record"], directory)
+        if (source / "record.tsv").is_file():
+            return
+
+    if "sprt-plan-1" not in listed:
+        raise ValueError(f"Run {run} has no record or kept plan to replay.")
+    download_artifacts(repository, run, ["sprt-plan-1"], directory)
+    plan_path = directory / "sprt-plan-1/plan.json"
+    plan = json.loads(plan_path.read_text())
+    if plan["run"] != run:
+        raise ValueError("The downloaded plan is from a different run.")
+    collect_artifacts(plan, repository, "1", directory, listed)
+    prior = (directory / "sprt-source-1/games.pgn").read_bytes() if plan["source_run"] else b""
+    games = prior if plan["replay"] else prior + b"\n\n" + join_ranges(directory, plan["ranges"], "1")
+    source.mkdir(exist_ok=True)
+    (source / "plan.json").write_bytes(plan_path.read_bytes())
+    (source / "games.pgn").write_bytes(games)
+
+
+def ranges(first, count):
+    # At most eight simultaneous runners. Large dispatches use successive
+    # groups of ranges, with at most MAX_RANGE_PAIRS pairs per playing job.
+    shards = max(min(count, 8), (count + MAX_RANGE_PAIRS - 1) // MAX_RANGE_PAIRS)
+    size, extra = divmod(count, shards)
+    for index in range(shards):
+        pairs = size + (index < extra)
+        yield {"first": first, "count": pairs}
+        first += pairs
+
+
+def judge(plan, pgn, first, count, directory, previous=None):
+    command = [JUDGE, "--pgn", pgn]
+    if previous is not None:
+        command.extend(["--previous-pgn", previous])
+    if plan["opponent_view"]:
+        command.append("--opponent-view")
+    return subprocess.run(
+        [*command, "--", plan["measured"], plan["opponent"], plan["test"],
+         str(first), str(count), directory],
+        capture_output=True, text=True,
+    )
+
+
+def prior_runs(plan, source, directory):
+    if not plan["source_run"]:
+        return []
+    previous = json.loads((source / "plan.json").read_text())
+    if previous["run"] != plan["source_run"]:
+        raise ValueError("The downloaded record is from a different run.")
+    for field in ("measured", "opponent"):
+        if previous[field] != plan[field]:
+            raise ValueError("The source record must have the same original engine revisions.")
+    if plan["replay"]:
+        if plan["first"] != 1 or plan["count"] != previous["first"] + previous["count"] - 1:
+            raise ValueError("Replay must cover the full requested range of the source run from opening 1.")
+    else:
+        if previous["replay"] or previous["test"] != plan["test"]:
+            raise ValueError("Continue the original playing run with the same test.")
+        if previous["first"] + previous["count"] != plan["first"]:
+            raise ValueError("Continue from the opening immediately after the source run.")
+        report = judge(plan, source / "games.pgn", 1, plan["first"] - 1, directory)
+        print(report.stdout, end="", file=sys.stderr)
+        print(report.stderr, end="", file=sys.stderr)
+        if report.returncode != 0 or "Result: no verdict yet" not in report.stdout.splitlines():
+            raise ValueError("Continuation requires all earlier games and a judge result of no verdict yet.")
+    return list(dict.fromkeys([*previous["prior_runs"], plan["source_run"]]))
+
+
+def plan_run(args):
+    if not 1 <= args.first <= args.first + args.count - 1 <= MAX_PAIRS:
+        raise ValueError(f"The range must be within openings 1 through {MAX_PAIRS}.")
+    if args.replay_run and (args.previous_run or args.first != 1):
+        raise ValueError("Replay starts at opening 1 and takes one source run.")
+    if not args.replay_run and bool(args.previous_run) != (args.first > 1):
+        raise ValueError("A continuation requires a first opening above 1 and a previous run.")
+    if args.opponent_view and not args.replay_run:
+        raise ValueError("Reading from the opponent's side requires a replay run.")
+    source_run = args.replay_run or args.previous_run
+    if source_run and not RUN_ID.fullmatch(source_run):
+        raise ValueError("Use the numeric Actions run ID for kept games.")
+
+    measured = revision(args.measured)
+    opponent = revision(args.opponent) if args.opponent else subprocess.check_output(
+        ["git", "merge-base", measured, "origin/main"], cwd=ROOT, text=True,
+    ).strip()
+    if not args.opponent and opponent == measured:
+        # A revision already on main has no branch point after its own parent.
+        opponent = revision(f"{measured}^1")
+    plan = {
+        "measured": measured, "opponent": opponent, "test": args.test,
+        "first": args.first, "count": args.count, "opponent_view": args.opponent_view,
+        "source_run": source_run, "replay": bool(args.replay_run),
+        "ranges": [] if args.replay_run else list(ranges(args.first, args.count)),
+        "run": os.environ["GITHUB_RUN_ID"],
+        "date": datetime.now(timezone.utc).date().isoformat(),
+    }
+    plan["prior_runs"] = prior_runs(plan, args.source, args.source.with_name("prefix-check"))
+    print(f"plan={json.dumps(plan, separators=(',', ':'))}")
+    # The play job is skipped for replay. Supply a valid matrix even then.
+    matrix = {"include": plan["ranges"] or [{"first": 1, "count": 0}]}
+    print(f"matrix={json.dumps(matrix, separators=(',', ':'))}")
+
+
+def ordered_games(games, openings):
+    raw = games.read_bytes() if games.is_file() else b""
+    if not raw or not openings.is_file():
+        return raw
+    try:
+        order = {fen: index for index, fen in enumerate(openings.read_text().splitlines())}
+        with games.open(encoding="utf-8") as stream:
+            records = list(pgn_records(stream))
+        records.sort(key=lambda record: order[FEN.search(record)[1]])
+    except (OSError, ValueError, KeyError, TypeError):
+        # Keep damaged PGNs for the judge to diagnose.
+        return raw
+    return "\n".join(records).encode()
+
+
+def join_ranges(directory, shards, attempt):
+    blocks = []
+    for shard in shards:
+        artifact = directory / f"sprt-{attempt}-{shard['first']}"
+        blocks.append(ordered_games(artifact / "games.pgn", artifact / "openings.epd"))
+    return b"\n\n".join(blocks)
+
+
+def report_fields(report):
+    result = re.search(r"^Result: (.*)\n?\Z", report.stdout, re.MULTILINE | re.DOTALL)
+    result = result[1].rstrip("\r\n") if result else ""
+    lines = dict(line.split(": ", 1) for line in report.stdout.splitlines() if ": " in line)
+    if report.returncode == 1 and result.startswith("void (") and result.endswith(")"):
+        return [""] * 7 + ["void", " ".join(result[6:-1].split())]
+    if report.returncode != 0:
+        raise ValueError(f"The judge did not report a result (status {report.returncode}).")
+    if result not in RESULTS:
+        raise ValueError("The judge returned an unrecognized result.")
+    endings = [
+        int(lines[f"Games ending by {ending} among all games read"]) for ending in ENDINGS
+    ]
+    return [
+        lines["Pairs counted"],
+        lines["Pair counts (0, 0.5, 1, 1.5, 2 points)"],
+        lines["Elo difference"], lines["Log-likelihood ratio"], *endings, result, "",
+    ]
+
+
+def write_record(plan, fields, output, run_url):
+    low, high = SPRT_BOUNDS[plan["test"]]
+    measured, opponent = plan["measured"], plan["opponent"]
+    row = [
+        plan["date"], measured, opponent, plan["test"], low, high, TIME_CONTROL,
+        f"{measured}:{opponent}", "sha256-seed-colon-position",
+        "opponent" if plan["opponent_view"] else "measured",
+        plan["first"], plan["count"], *fields,
+        " ".join(plan["prior_runs"]), run_url,
+    ]
+    header = RECORD.read_text().splitlines()[0].split("\t")
+    if len(row) != len(header):
+        raise ValueError("The SPRT record fields do not match its header.")
+    with output.open("w", encoding="utf-8", newline="") as stream:
+        csv.writer(stream, delimiter="\t", lineterminator="\n").writerow(row)
+    print(output.read_text(), end="")
+
+
+def record_run(args):
+    plan = json.loads(args.plan)
+    args.output.mkdir()
+    out = args.output
+    (out / "plan.json").write_text(json.dumps(plan, indent=2) + "\n")
+    prior = args.source / "games.pgn"
+    attempt = os.environ["GITHUB_RUN_ATTEMPT"]
+    if plan["replay"]:
+        current = prior.read_bytes()
+    else:
+        current = join_ranges(args.shards, plan["ranges"], attempt)
+    (out / "range.pgn").write_bytes(current)
+    if plan["first"] > 1:
+        previous = prior.read_bytes()
+        (out / "games.pgn").write_bytes(previous + b"\n\n" + current)
+    else:
+        (out / "games.pgn").write_bytes(current)
+
+    report = judge(plan, out / "range.pgn", plan["first"], plan["count"], out / "judge",
+                   prior if plan["first"] > 1 else None)
+    (out / "judge.txt").write_text(report.stdout + report.stderr)
+    print(report.stdout, end="")
+    print(report.stderr, end="", file=sys.stderr)
+    url = f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{plan['run']}"
+    if attempt != "1":
+        url += f"/attempts/{attempt}"
+    fields = report_fields(report)
+    if plan["replay"]:
+        replay_detail = f"replay of run {plan['source_run']}"
+        fields[-1] = f"{replay_detail}. {fields[-1]}" if fields[-1] else replay_detail
+    write_record(plan, fields, out / "record.tsv", url)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    commands = parser.add_subparsers(dest="command", required=True)
+    plan = commands.add_parser("plan")
+    plan.add_argument("measured")
+    plan.add_argument("opponent")
+    plan.add_argument("test", choices=SPRT_BOUNDS)
+    plan.add_argument("first", type=int)
+    plan.add_argument("count", type=int)
+    plan.add_argument("previous_run")
+    plan.add_argument("replay_run")
+    plan.add_argument("opponent_view", choices=("true", "false"))
+    plan.add_argument("source", type=Path)
+    source = commands.add_parser("fetch-source")
+    source.add_argument("run")
+    source.add_argument("default_branch")
+    source.add_argument("directory", type=Path)
+    collect = commands.add_parser("collect")
+    collect.add_argument("plan")
+    collect.add_argument("directory", type=Path)
+    record = commands.add_parser("record")
+    record.add_argument("plan")
+    record.add_argument("source", type=Path)
+    record.add_argument("shards", type=Path)
+    record.add_argument("output", type=Path)
+    args = parser.parse_args()
+    if args.command == "plan":
+        args.opponent_view = args.opponent_view == "true"
+        plan_run(args)
+    elif args.command == "fetch-source":
+        fetch_source(os.environ["GITHUB_REPOSITORY"], args.run, args.default_branch, args.directory)
+    elif args.command == "collect":
+        plan = json.loads(args.plan)
+        repository = os.environ["GITHUB_REPOSITORY"]
+        collect_artifacts(plan, repository, os.environ["GITHUB_RUN_ATTEMPT"], args.directory,
+                          artifact_names(repository, plan["run"]))
+    else:
+        record_run(args)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (OSError, ValueError, subprocess.CalledProcessError) as error:
+        sys.exit(str(error))

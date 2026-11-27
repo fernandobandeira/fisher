@@ -1,0 +1,177 @@
+name: Clocked SPRT
+on:
+  workflow_dispatch:
+    inputs:
+      measured:
+        description: Measured revision of fisher
+        required: true
+        type: string
+      test:
+        description: Test to apply
+        required: true
+        type: choice
+        options: [gain, no-loss]
+      opponent:
+        description: Opponent revision (defaults to the merge base with main)
+        type: string
+      first:
+        description: First opening in this range
+        default: 1
+        type: number
+      pairs:
+        description: Number of pairs in this range
+        default: 1000
+        type: number
+      previous_run:
+        description: Actions run ID of the last range, for a continuation
+        type: string
+      replay_run:
+        description: Actions run ID to replay from opening 1 without playing
+        type: string
+      opponent_view:
+        description: Score a replay from the original opponent's side
+        type: boolean
+        default: false
+
+concurrency:
+  group: clocked-sprt
+  queue: max
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  plan:
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      plan: ${{ steps.plan.outputs.plan }}
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify the earlier dispatch and download its games
+        if: inputs.previous_run != '' || inputs.replay_run != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN: ${{ inputs.previous_run || inputs.replay_run }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: scripts/hosted-sprt fetch-source -- "$SOURCE_RUN" "$DEFAULT_BRANCH" "$RUNNER_TEMP/earlier"
+      - name: Plan ranges and check any previous games
+        id: plan
+        env:
+          MEASURED: ${{ inputs.measured }}
+          OPPONENT: ${{ inputs.opponent }}
+          TEST: ${{ inputs.test }}
+          FIRST: ${{ inputs.first }}
+          PAIRS: ${{ inputs.pairs }}
+          PREVIOUS_RUN: ${{ inputs.previous_run }}
+          REPLAY_RUN: ${{ inputs.replay_run }}
+          OPPONENT_VIEW: ${{ inputs.opponent_view }}
+        run: |
+          scripts/hosted-sprt plan -- "$MEASURED" "$OPPONENT" "$TEST" "$FIRST" "$PAIRS" \
+            "$PREVIOUS_RUN" "$REPLAY_RUN" "$OPPONENT_VIEW" "$RUNNER_TEMP/earlier/sprt-record" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: inputs.previous_run != '' || inputs.replay_run != ''
+        with:
+          name: sprt-source-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/earlier/sprt-record/games.pgn
+          if-no-files-found: error
+      - name: Save the requested range for recovery
+        env:
+          PLAN: ${{ steps.plan.outputs.plan }}
+        run: printf '%s\n' "$PLAN" > "$RUNNER_TEMP/plan.json"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: sprt-plan-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/plan.json
+          if-no-files-found: error
+
+  play:
+    name: Play ${{ matrix.count }} pairs from opening ${{ matrix.first }}
+    needs: plan
+    if: fromJSON(needs.plan.outputs.plan).replay == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install fastchess
+        run: |
+          lscpu | sed -n '/^Model name:/p'
+          scripts/install-fastchess "$RUNNER_TEMP/fastchess"
+          printf '%s\n' "$RUNNER_TEMP" >> "$GITHUB_PATH"
+      - name: Install the release Rust toolchains
+        timeout-minutes: 5
+        env:
+          MEASURED: ${{ fromJSON(needs.plan.outputs.plan).measured }}
+          OPPONENT: ${{ fromJSON(needs.plan.outputs.plan).opponent }}
+        run: |
+          export RUSTUP_HOME
+          RUSTUP_HOME=$(mktemp -d "$RUNNER_TEMP/sprt-rustup.XXXXXX")
+          for revision in "$MEASURED" "$OPPONENT"; do
+            channel=$(git show "$revision:rust-toolchain.toml" |
+              python3 -c 'import sys, tomllib; print(tomllib.loads(sys.stdin.read())["toolchain"]["channel"])')
+            rustup toolchain install "$channel" --profile minimal --no-self-update
+          done
+          printf 'RUSTUP_HOME=%s\n' "$RUSTUP_HOME" >> "$GITHUB_ENV"
+      - name: Play range
+        timeout-minutes: 75
+        env:
+          MEASURED: ${{ fromJSON(needs.plan.outputs.plan).measured }}
+          OPPONENT: ${{ fromJSON(needs.plan.outputs.plan).opponent }}
+          TEST: ${{ fromJSON(needs.plan.outputs.plan).test }}
+          FIRST: ${{ matrix.first }}
+          COUNT: ${{ matrix.count }}
+        run: |
+          scripts/clocked-sprt --concurrency 2 -- "$MEASURED" "$OPPONENT" "$TEST" \
+            "$FIRST" "$COUNT" "$RUNNER_TEMP/sprt"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        timeout-minutes: 3
+        with:
+          name: sprt-${{ github.run_attempt }}-${{ matrix.first }}
+          path: |
+            ${{ runner.temp }}/sprt/games.pgn
+            ${{ runner.temp }}/sprt/openings.epd
+            ${{ runner.temp }}/sprt/fastchess.log
+          if-no-files-found: ignore
+
+  record:
+    needs: [plan, play]
+    if: always() && needs.plan.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: List and download uploaded games
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PLAN: ${{ needs.plan.outputs.plan }}
+        run: scripts/hosted-sprt collect -- "$PLAN" "$RUNNER_TEMP/ranges"
+      - name: Read kept games and print the record
+        env:
+          PLAN: ${{ needs.plan.outputs.plan }}
+        run: |
+          scripts/hosted-sprt record -- "$PLAN" "$RUNNER_TEMP/ranges/sprt-source-$GITHUB_RUN_ATTEMPT" \
+            "$RUNNER_TEMP/ranges" "$RUNNER_TEMP/joined" | tee -a "$GITHUB_STEP_SUMMARY"
+        shell: bash
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: ${{ github.run_attempt == '1' && 'sprt-record' || format('sprt-record-{0}', github.run_attempt) }}
+          path: ${{ runner.temp }}/joined/
+          if-no-files-found: ignore

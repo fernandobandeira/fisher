@@ -43,6 +43,12 @@ Tier a change by how far it reaches, how easily a mistake in it would be noticed
 | **Behaviour** | Search, evaluation, time management | The human reads the claims table and plays or watches a game. Not the code. |
 | **Commitment** | A crate's public interface; how a position or a move is represented; what the engine says over UCI; a file format; a new dependency; `unsafe`; anything under a protected path | The human approves before merge. An ADR if it is hard to reverse. |
 
+## Testing a claim of strength
+
+When a ticket claims the change plays stronger, name the gain test in its claims table. When it claims the change does not play weaker, name the no-loss test. The ticket fixes the test before play.
+
+Before merge, dispatch **Clocked SPRT** by hand from `main`. Play the changed revision against the revision on `main` it is based on. Put the result and the link to the run in the claims table. Save every printed row in `strength/sprt-records.tsv`. See [Clocked SPRT](../strength/README.md#clocked-sprt).
+
 ## Recording the bench signature
 
 Run `fisher bench` for a change to search, evaluation or time management. Put `Bench: <total>` in the commit message and record the total and the revision in the Result column of the [claims table](evidence.md#the-claims-table). No hook enforces this yet; a hook is a guard and would be proposed on its own.

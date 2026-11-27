@@ -289,6 +289,38 @@ position's total of 79 nodes at depth 2 and move the node limits that sat
 on a total of the search without cutoffs. The staging README records the
 derivations and the changes to each schedule.
 
+### MultiPV
+
+fisher-8hc.4 stages the [MultiPV sessions](uci/multipv/) before
+fisher-8hc.5 activates them. The current runner selects sessions by name
+directly in `uci/`. The staged handshake succeeds the active handshake.
+
+During a search, fisher rejects `setoption` for a declared option
+(`MultiPV`) with `setoption rejected: waiting for stop` and leaves the
+setting unchanged (D46). It silently ignores `setoption` for undeclared
+names whether or not a search is running (fisher-8hc, answer 4).
+
+The searched lines of one finished depth are consecutive. Their literal
+`multipv` numbers start at 1 and increase by one without gaps. No two
+variations start with the same root move. Every line carries the same
+depth, nodes, time and nps, sampled since the `go`. A terminal position's
+depth-0 response has no `multipv`.
+
+When fisher-8hc.5 activates these sessions, the runner checks these
+properties at every finished depth it reads and replays each variation
+under D5. It matches `bestmove` to the root move of variation 1 of the last
+finished depth. The scores are best first under D13. Equal scores keep
+legal move order under D48 and the 2026-11-27 comment on fisher-8hc. The
+sessions leave the choice of tied root moves open.
+
+The searched records keep the [allowance forms](#searched-moves) and put
+each expected variation number in its literal `multipv` slot. A setting
+of 1 retains literal node totals where published perft fixes them.
+A setting above 1 uses `{nodes}`. The infinite search in
+[`setoption-during-search.uci`](uci/multipv/setoption-during-search.uci)
+uses a root with one legal move, so its repeated records use the
+existing `multipv 1` spelling.
+
 ## Published perft
 
 [`perft.epd`](perft.epd) holds one position per data line. Split at semicolons.

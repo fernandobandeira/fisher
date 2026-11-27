@@ -1,0 +1,80 @@
+# Staged by fisher-8hc.4 on 2026-11-26.
+# UCI setoption (April 2006): https://backscattering.de/chess/uci/#gui-setoption.
+# Searched info spelling: fisher-r6y D41 and Stockfish sf_19 (edb0d9d),
+# UCIEngine::on_update_full and SearchManager::output_pv, read 2026-11-24.
+# D12, D13 and fisher-8hc answers 5 and 6 (2026-11-24) set the requested
+# counts, numbering and bestmove. Ties leave the moves open (D5, D48 and
+# the 2026-11-27 comment on fisher-8hc).
+# Enumeration: python-chess 1.11.2 (https://pypi.org/project/chess/1.11.2/).
+# Published depth-1 perft in expectations/perft.epd and python-chess
+# give 20 root moves from startpos. None captures or promotes, so every
+# depth-1 score is cp 0 by material (fisher-2aj rules 2 and 3).
+# fisher-8hc answer 4 (2026-11-24) requires a diagnostic and no change
+# for each bad value, and silence and no change for an undeclared name.
+# 0 and 256 are one outside D12's inclusive range in each direction.
+# Forty nines also exceed 2^128 - 1, the largest Rust primitive integer.
+
+> position startpos
+> setoption name MultiPV value 3
+
+> setoption name MultiPV value 0
+> isready
+< info string {message:MultiPV}
+< readyok
+> go depth 1
+< info depth 1 multipv 1 score cp 0 nodes {nodes} nps {nps} time {time} pv {pv}
+< info depth 1 multipv 2 score cp 0 nodes {nodes} nps {nps} time {time} pv {pv}
+< info depth 1 multipv 3 score cp 0 nodes {nodes} nps {nps} time {time} pv {pv}
+< bestmove {legal}
+
+> setoption name MultiPV value 256
+> isready
+< info string {message:MultiPV}
+< readyok
+> go depth 1
+< info depth 1 multipv 1 score cp 0 nodes {nodes} nps {nps} time {time} pv {pv}
+< info depth 1 multipv 2 score cp 0 nodes {nodes} nps {nps} time {time} pv {pv}
+< info depth 1 multipv 3 score cp 0 nodes {nodes} nps {nps} time {time} pv {pv}
+< bestmove {legal}
+
+> setoption name MultiPV value 9999999999999999999999999999999999999999
+> isready
+< info string {message:MultiPV}
+< readyok
+> go depth 1
+< info depth 1 multipv 1 score cp 0 nodes {nodes} nps {nps} time {time} pv {pv}
+< info depth 1 multipv 2 score cp 0 nodes {nodes} nps {nps} time {time} pv {pv}
+< info depth 1 multipv 3 score cp 0 nodes {nodes} nps {nps} time {time} pv {pv}
+< bestmove {legal}
+
+> setoption name MultiPV
+> isready
+< info string {message:MultiPV}
+< readyok
+> go depth 1
+< info depth 1 multipv 1 score cp 0 nodes {nodes} nps {nps} time {time} pv {pv}
+< info depth 1 multipv 2 score cp 0 nodes {nodes} nps {nps} time {time} pv {pv}
+< info depth 1 multipv 3 score cp 0 nodes {nodes} nps {nps} time {time} pv {pv}
+< bestmove {legal}
+
+> setoption name MultiPV value banana
+> isready
+< info string {message:MultiPV}
+< readyok
+> go depth 1
+< info depth 1 multipv 1 score cp 0 nodes {nodes} nps {nps} time {time} pv {pv}
+< info depth 1 multipv 2 score cp 0 nodes {nodes} nps {nps} time {time} pv {pv}
+< info depth 1 multipv 3 score cp 0 nodes {nodes} nps {nps} time {time} pv {pv}
+< bestmove {legal}
+
+# Consume the whole command. The value go would start a search on its own.
+> setoption name Undeclared value go
+> isready
+< readyok
+> go depth 1
+< info depth 1 multipv 1 score cp 0 nodes {nodes} nps {nps} time {time} pv {pv}
+< info depth 1 multipv 2 score cp 0 nodes {nodes} nps {nps} time {time} pv {pv}
+< info depth 1 multipv 3 score cp 0 nodes {nodes} nps {nps} time {time} pv {pv}
+< bestmove {legal}
+> quit
+! exit

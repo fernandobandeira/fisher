@@ -22,16 +22,19 @@ verify_checkout() {
     if [ "$(git -C "$db" config --local --get-all remote.origin.url)" != "$rustsec_url" ]; then
         fail "origin must be exactly $rustsec_url ($db)."
     fi
-    if git -C "$db" config --local --includes --get-regexp '^url\..*\.(insteadof|pushinsteadof)$' >/dev/null; then
-        fail "repository-local origin rewrites are forbidden ($db)."
-    elif [ "$?" -ne 1 ]; then
-        fail "cannot check for repository-local origin rewrites ($db)."
+    # An unscoped config query follows includes and reports where each rewrite came from.
+    rewrite_scopes=$(git -C "$db" config --show-scope --name-only \
+        --get-regexp '^url\..*\.(insteadof|pushinsteadof)$') ||
+        [ "$?" -eq 1 ] || fail "cannot check origin rewrites ($db)."
+    if printf '%s\n' "$rewrite_scopes" | grep -Eq '^(local|worktree|command)[[:space:]]'; then
+        fail "local, worktree and command-scope origin rewrites are forbidden ($db)."
     fi
     effective_url=$(git -C "$db" remote get-url --all origin) || fail "cannot read effective origin ($db)."
     case "${effective_url%.git}" in
         "$rustsec_url"|git@github.com:RustSec/advisory-db|ssh://git@github.com/RustSec/advisory-db) ;;
         *) fail "effective origin must point to $rustsec_url ($db)." ;;
     esac
+    snapshot_head=$(git -C "$db" rev-parse --verify HEAD) || fail "cannot read HEAD ($db)."
     # Reject index flags that can hide missing or modified files from status.
     tracked=$(git -C "$db" ls-files -v) || fail "cannot read the index ($db)."
     if printf '%s\n' "$tracked" | grep -q '^[a-zS] '; then
@@ -42,13 +45,15 @@ verify_checkout() {
         fail "cannot inspect the working tree ($db)."
     [ -z "$changes" ] || fail "working tree differs from HEAD ($db)."
     git -C "$db" fsck --no-dangling || fail "Git object validation failed ($db)."
+    [ "$(git -C "$db" rev-parse --verify HEAD)" = "$snapshot_head" ] ||
+        fail "HEAD changed during checkout verification ($db)."
 }
 
 record_refresh() {
     now=$(date +%s)
     marker_tmp=$(mktemp "$marker.XXXXXX")
     trap 'rm -f "$marker_tmp"' 0
-    printf '%s\n' "$now" > "$marker_tmp"
+    printf '%s %s\n' "$now" "$snapshot_head" > "$marker_tmp"
     [ ! -d "$marker" ] || fail "refresh marker path is a directory ($marker)."
     mv -f "$marker_tmp" "$marker"
 }
@@ -71,13 +76,13 @@ case "${1:-}" in
     failure)
         verify_checkout
         # A failed git fetch can still update the mtime of .git/FETCH_HEAD.
-        snapshot_time=$(git -C "$db" show -s --format=%ct HEAD)
-        snapshot_date=$(git -C "$db" show -s --format=%cI HEAD)
+        snapshot_time=$(git -C "$db" show -s --format=%ct "$snapshot_head")
+        snapshot_date=$(git -C "$db" show -s --format=%cI "$snapshot_head")
         now=$(date +%s)
         fallback_time=$snapshot_time
         if [ -f "$marker" ] &&
-            refresh_time=$(LC_ALL=C awk '
-                NR == 1 && /^[1-9][0-9]*$/ { stamp = $0 }
+            refresh_time=$(LC_ALL=C awk -v head="$snapshot_head" '
+                NR == 1 && /^[1-9][0-9]* [0-9a-f]+$/ && (":" $2) == (":" head) { stamp = $1 }
                 END { if (NR == 1 && stamp != "") print stamp }
             ' "$marker" 2>/dev/null) &&
             [ -n "$refresh_time" ] &&
@@ -90,6 +95,12 @@ case "${1:-}" in
             fail "cached snapshot dated $snapshot_date is outside the 7-day fallback window."
         fi
         printf 'RustSec refresh unavailable. Using cached advisory database dated %s.\n' "$snapshot_date" >&2
+        if [ "$fallback_time" != "$snapshot_time" ]; then
+            refresh_date=$(date -u -d "@$refresh_time" '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null ||
+                date -u -r "$refresh_time" '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null ||
+                printf '%s (Unix seconds)' "$refresh_time")
+            printf 'Last verified refresh of this snapshot: %s.\n' "$refresh_date" >&2
+        fi
         ;;
     *)
         fail 'expected refresh, success or failure.'

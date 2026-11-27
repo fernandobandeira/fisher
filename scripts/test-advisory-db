@@ -16,30 +16,68 @@ DAY = 24 * 60 * 60
 
 
 class AdvisoryDb(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        workspace = tempfile.TemporaryDirectory()
+        cls.addClassCleanup(workspace.cleanup)
+        cls.upstream = Path(workspace.name) / "upstream"
+        cls.git_env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+        cls.git_env.update(
+            GIT_CONFIG_GLOBAL=os.devnull,
+            GIT_CONFIG_NOSYSTEM="1",
+            GIT_TEMPLATE_DIR="",
+            GIT_ALLOW_PROTOCOL="file",
+        )
+
+        def git(*args, **env):
+            return subprocess.run(
+                ["git", *args], cwd=workspace.name, env={**cls.git_env, **env},
+                check=True, text=True, capture_output=True,
+            ).stdout.strip()
+
+        git("init", "-q", str(cls.upstream))
+        git("-C", str(cls.upstream), "remote", "add", "origin", URL)
+        cls.commits = {}
+        cls.stale_cache = Path(workspace.name) / "stale-cache"
+        for age in (30, 8, 1):
+            (cls.upstream / "advisory.md").write_text(f"fixture advisory {age}\n")
+            git("-C", str(cls.upstream), "add", "advisory.md")
+            commit_date = f"@{NOW - age * DAY} +0000"
+            git(
+                "-C", str(cls.upstream), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                "commit", "-qm", "Advisory snapshot", GIT_AUTHOR_DATE=commit_date, GIT_COMMITTER_DATE=commit_date,
+            )
+            cls.commits[age] = git("-C", str(cls.upstream), "rev-parse", "HEAD")
+            if age == 8:
+                shutil.copytree(cls.upstream, cls.stale_cache)
+
     def setUp(self):
         workspace = tempfile.TemporaryDirectory()
         self.addCleanup(workspace.cleanup)
         self.root = Path(workspace.name)
         self.db = self.root / "cargo-home/advisory-dbs/advisory-db-3157b0e258782691"
         self.marker = self.db.with_suffix(".last-refresh")
-        self.upstream = self.root / "upstream"
         self.global_config = self.root / "gitconfig"
-        self.env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+        self.env = self.git_env.copy()
         for key in ("CI", "CARGO_NET_OFFLINE", "FISHER_ADVISORY_DB_REFRESH_RESULT"):
             self.env.pop(key, None)
         self.env.update(
             PATH=f"{self.root / 'bin'}{os.pathsep}{self.env['PATH']}",
             CARGO_HOME=str(self.db.parent.parent),
             GIT_CONFIG_GLOBAL=str(self.global_config),
-            GIT_CONFIG_NOSYSTEM="1",
-            GIT_TEMPLATE_DIR="",
-            GIT_ALLOW_PROTOCOL="file",
             FIXTURE_DB=str(self.db),
             FIXTURE_UPSTREAM=str(self.upstream),
             FIXTURE_LOG=str(self.root / "fetch.log"),
             FIXTURE_DIRTY="",
+            FIXTURE_DATE=shutil.which("date"),
         )
-        self.executable("bin/date", f'#!/bin/sh\n[ "$*" = +%s ] && echo {NOW}\n')
+        self.executable("bin/date", f"""#!/bin/sh
+if [ "$*" = +%s ]; then
+    echo {NOW}
+else
+    exec "$FIXTURE_DATE" "$@"
+fi
+""")
         self.executable("bin/cargo", r"""#!/bin/sh
 set -eu
 case "$*" in
@@ -47,7 +85,7 @@ case "$*" in
     "deny --locked fetch db")
         echo fetch >> "$FIXTURE_LOG"
         if [ -d "$FIXTURE_DB" ]; then
-            git -C "$FIXTURE_DB" fetch "$FIXTURE_UPSTREAM" HEAD
+            git -C "$FIXTURE_DB" fetch "$FIXTURE_UPSTREAM" "$FIXTURE_HEAD"
         else
             git clone "$FIXTURE_UPSTREAM" "$FIXTURE_DB"
         fi
@@ -82,18 +120,12 @@ esac
             check=True, text=True, capture_output=True,
         )
 
-    def cache(self, age_days):
-        self.git("init", "-q", str(self.upstream))
-        (self.upstream / "advisory.md").write_text("fixture advisory\n")
-        self.git("-C", str(self.upstream), "add", "advisory.md")
-        commit_date = f"@{NOW - age_days * DAY} +0000"
-        self.git(
-            "-C", str(self.upstream), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
-            "commit", "-qm", "Advisory snapshot", GIT_AUTHOR_DATE=commit_date, GIT_COMMITTER_DATE=commit_date,
-        )
-        self.db.parent.mkdir(parents=True)
-        self.git("clone", "-q", str(self.upstream), str(self.db))
-        self.git("-C", str(self.db), "remote", "set-url", "origin", URL)
+    def cache(self, age_days=1):
+        shutil.copytree(self.stale_cache if age_days == 8 else self.upstream, self.db)
+        self.env["FIXTURE_HEAD"] = self.commits[age_days]
+
+    def refuse_fetch(self):
+        self.env["FIXTURE_UPSTREAM"] = str(self.root / "unavailable")
 
     def run_gate(self, *args, exit_code=0, message=None, **env):
         result = subprocess.run(
@@ -109,32 +141,40 @@ esac
         self.cache(age_days=8)
         self.run_gate("scripts/check-advisory-db", "refresh")
         self.assertFalse((self.db / self.marker.name).exists())
-        self.upstream.rename(self.root / "unavailable")
+        self.assertEqual(self.marker.read_text(), f"{NOW} {self.commits[8]}\n")
+        self.refuse_fetch()
         self.run_gate("scripts/check-advisory-db", "refresh", exit_code=128)
-        self.run_gate("scripts/check-advisory-db", "failure", message="Using cached advisory database")
-        self.assertEqual(self.marker.read_text(), f"{NOW}\n")
+        self.run_gate("scripts/check-advisory-db", "failure",
+                      message="Last verified refresh of this snapshot: 2027-01-15T08:00:00Z")
+
+    def test_refresh_marker_cannot_vouch_for_an_earlier_head(self):
+        self.cache()
+        self.run_gate("scripts/check-advisory-db", "refresh")
+        self.git("-C", str(self.db), "reset", "--hard", self.commits[30])
+        self.run_gate("scripts/check-advisory-db", "failure", exit_code=1, message="outside the 7-day")
 
     def test_refused_fetch_cannot_extend_stale_snapshot(self):
         self.cache(age_days=8)
-        fetch_head = self.db / ".git/FETCH_HEAD"
-        fetch_head.write_text("previous fetch\n")
-        self.upstream.rename(self.root / "unavailable")
+        self.refuse_fetch()
         self.run_gate("scripts/check-advisory-db", "refresh", exit_code=128)
-        self.assertEqual(fetch_head.read_bytes(), b"")
+        # A recently touched FETCH_HEAD cannot make this checkout fresh.
+        (self.db / ".git/FETCH_HEAD").touch()
         self.assertFalse(self.marker.exists())
         self.run_gate("scripts/check-advisory-db", "failure", exit_code=1, message="outside the 7-day")
 
     def test_refused_fetch_without_cache_fails_check(self):
+        self.refuse_fetch()
         self.run_gate("scripts/check", exit_code=1, message="no usable cached copy")
         self.assertEqual((self.root / "fetch.log").read_text(), "fetch\n")
         self.assertFalse(self.marker.exists())
 
     def test_refused_fetch_leaves_existing_marker_unchanged(self):
         self.cache(age_days=8)
-        self.marker.write_text(f"{NOW - 8 * DAY}\n")
-        self.upstream.rename(self.root / "unavailable")
+        previous_marker = f"{NOW - 8 * DAY} {self.commits[8]}\n"
+        self.marker.write_text(previous_marker)
+        self.refuse_fetch()
         self.run_gate("scripts/check-advisory-db", "refresh", exit_code=128)
-        self.assertEqual(self.marker.read_text(), f"{NOW - 8 * DAY}\n")
+        self.assertEqual(self.marker.read_text(), previous_marker)
         self.run_gate("scripts/check-advisory-db", "failure", exit_code=1, message="outside the 7-day")
 
     def test_failed_post_fetch_verification_cannot_write_marker(self):
@@ -145,33 +185,34 @@ esac
 
     def test_invalid_markers_cannot_extend_stale_snapshot(self):
         self.cache(age_days=8)
-        for marker in (f"{NOW + 1}\n", "tomorrow\n", f"{NOW}\n\n", f"{NOW}\n0\n", "9" * 80 + "\n"):
+        head = self.commits[8]
+        for marker in (f"{NOW + 1} {head}\n", f"{NOW} {head}\n\n", "9" * 80 + f" {head}\n", f"{NOW}\n"):
             with self.subTest(marker=marker):
                 self.marker.write_text(marker)
                 self.run_gate("scripts/check-advisory-db", "failure", exit_code=1, message="outside the 7-day")
 
     def test_recent_snapshot_works_with_missing_or_older_marker(self):
-        self.cache(age_days=1)
+        self.cache()
         self.run_gate("scripts/check-advisory-db", "failure", message="Using cached advisory database")
-        self.marker.write_text(f"{NOW - 8 * DAY}\n")
+        self.marker.write_text(f"{NOW - 8 * DAY} {self.commits[1]}\n")
         self.run_gate("scripts/check-advisory-db", "failure", message="Using cached advisory database")
 
     def test_global_ssh_rewrite(self):
-        self.cache(age_days=1)
+        self.cache()
         for base in ("git@github.com:", "ssh://git@github.com/"):
             with self.subTest(base=base):
                 self.global_config.write_text(f'[url "{base}"]\n\tinsteadOf = https://github.com/\n')
-                self.run_gate("scripts/check-advisory-db", "refresh")
+                self.run_gate("scripts/check-advisory-db", "success")
         self.global_config.write_text(f'[url "ssh://git@github.com/RustSec/advisory-db.git"]\n\tinsteadOf = {URL}\n')
-        self.run_gate("scripts/check-advisory-db", "refresh")
+        self.run_gate("scripts/check-advisory-db", "success")
 
     def test_unapproved_effective_origin(self):
-        self.cache(age_days=1)
+        self.cache()
         self.global_config.write_text('[url "https://example.invalid/"]\n\tinsteadOf = https://github.com/\n')
         self.run_gate("scripts/check-advisory-db", "failure", exit_code=1, message="origin")
 
     def test_repository_local_rewrite_is_rejected(self):
-        self.cache(age_days=1)
+        self.cache()
         for key in ("insteadOf", "pushInsteadOf"):
             with self.subTest(key=key):
                 # An identity rewrite leaves get-url unchanged, so checking only
@@ -181,15 +222,44 @@ esac
                 self.run_gate("scripts/check-advisory-db", "failure", exit_code=1, message="origin")
                 self.git("-C", str(self.db), "config", "--local", "--unset", setting)
 
+    def test_repository_local_include_rewrite_is_rejected(self):
+        self.cache()
+        included = self.root / "included.gitconfig"
+        included.write_text(f'[url "{URL}"]\n\tpushInsteadOf = {URL}\n')
+        self.git("-C", str(self.db), "config", "--local", "include.path", str(included))
+        self.run_gate("scripts/check-advisory-db", "success", exit_code=1, message="origin rewrites are forbidden")
+
+    def test_worktree_rewrite_is_rejected(self):
+        self.cache()
+        self.git("-C", str(self.db), "config", "--local", "extensions.worktreeConfig", "true")
+        self.git("-C", str(self.db), "config", "--worktree", f"url.{URL}.insteadOf", URL)
+        self.run_gate("scripts/check-advisory-db", "success", exit_code=1, message="origin rewrites are forbidden")
+
+    def test_command_scope_rewrites_are_rejected(self):
+        self.cache()
+        setting = f"url.{URL}.pushInsteadOf"
+        for env in (
+            {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": setting, "GIT_CONFIG_VALUE_0": URL},
+            {"GIT_CONFIG_PARAMETERS": f"'{setting}={URL}'"},
+        ):
+            with self.subTest(env=env):
+                self.run_gate("scripts/check-advisory-db", "success", exit_code=1,
+                              message="origin rewrites are forbidden", **env)
+
+    def test_configured_ssh_origin_is_rejected(self):
+        self.cache()
+        self.git("-C", str(self.db), "remote", "set-url", "origin", "git@github.com:RustSec/advisory-db")
+        self.run_gate("scripts/check-advisory-db", "success", exit_code=1, message="origin must be exactly")
+
     def test_foreign_origin(self):
-        self.cache(age_days=1)
+        self.cache()
         self.git("-C", str(self.db), "remote", "set-url", "origin", "https://example.invalid/RustSec/advisory-db")
         for mode in ("refresh", "failure"):
             self.run_gate("scripts/check-advisory-db", mode, exit_code=1, message="origin")
         self.assertFalse((self.root / "fetch.log").exists())
 
     def test_partial_snapshot(self):
-        self.cache(age_days=1)
+        self.cache()
         (self.db / "advisory.md").unlink()
         for mode in ("refresh", "failure"):
             self.run_gate("scripts/check-advisory-db", mode, exit_code=1, message="working tree differs from HEAD")
@@ -197,7 +267,7 @@ esac
 
     def test_local_check_ignores_ci_refresh_result(self):
         self.cache(age_days=8)
-        self.upstream.rename(self.root / "unavailable")
+        self.refuse_fetch()
         self.run_gate("scripts/check", exit_code=1, message="outside the 7-day",
                       FISHER_ADVISORY_DB_REFRESH_RESULT="success")
         self.assertEqual((self.root / "fetch.log").read_text(), "fetch\n")

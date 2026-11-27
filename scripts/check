@@ -44,6 +44,7 @@ check 'Crate boundary fixtures' 'scripts/check-crate-boundaries --self-test' \
 check 'Guard-Change fixtures' 'scripts/check-guard-change --self-test' \
     scripts/check-guard-change --self-test
 check 'Await merge fixtures' 'scripts/test-await-merge' scripts/test-await-merge
+check 'Advisory database fixtures' 'scripts/test-advisory-db' scripts/test-advisory-db
 check 'Clocked SPRT fixtures' 'scripts/test-clocked-sprt' scripts/test-clocked-sprt
 check 'Hosted SPRT fixtures' 'scripts/test-hosted-sprt' scripts/test-hosted-sprt
 check 'Crate boundaries' 'scripts/check-crate-boundaries' scripts/check-crate-boundaries
@@ -58,7 +59,10 @@ check 'Locked dependencies' 'cargo fetch --locked' cargo fetch --locked
 # Git hooks export paths for Fisher's checkout. The advisory database is a separate repository.
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_PREFIX \
     GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_SHALLOW_FILE
-advisory_refresh=${FISHER_ADVISORY_DB_REFRESH_RESULT:-}
+advisory_refresh=
+if [ "${CI:-}" = true ]; then
+    advisory_refresh=${FISHER_ADVISORY_DB_REFRESH_RESULT:-}
+fi
 if [ -z "$advisory_refresh" ]; then
     if [ "${CARGO_NET_OFFLINE:-false}" != true ] && scripts/check-advisory-db refresh; then
         advisory_refresh=success

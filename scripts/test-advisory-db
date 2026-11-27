@@ -1,0 +1,213 @@
+#!/usr/bin/env python3
+"""Exercise the RustSec gate with local Git repositories and a stand-in cargo."""
+
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import tempfile
+import unittest
+
+
+ROOT = Path(__file__).resolve().parent.parent
+URL = "https://github.com/RustSec/advisory-db"
+NOW = 1_800_000_000
+DAY = 24 * 60 * 60
+
+
+class AdvisoryDb(unittest.TestCase):
+    def setUp(self):
+        workspace = tempfile.TemporaryDirectory()
+        self.addCleanup(workspace.cleanup)
+        self.root = Path(workspace.name)
+        self.db = self.root / "cargo-home/advisory-dbs/advisory-db-3157b0e258782691"
+        self.marker = self.db.with_suffix(".last-refresh")
+        self.upstream = self.root / "upstream"
+        self.global_config = self.root / "gitconfig"
+        self.env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+        for key in ("CI", "CARGO_NET_OFFLINE", "FISHER_ADVISORY_DB_REFRESH_RESULT"):
+            self.env.pop(key, None)
+        self.env.update(
+            PATH=f"{self.root / 'bin'}{os.pathsep}{self.env['PATH']}",
+            CARGO_HOME=str(self.db.parent.parent),
+            GIT_CONFIG_GLOBAL=str(self.global_config),
+            GIT_CONFIG_NOSYSTEM="1",
+            GIT_TEMPLATE_DIR="",
+            GIT_ALLOW_PROTOCOL="file",
+            FIXTURE_DB=str(self.db),
+            FIXTURE_UPSTREAM=str(self.upstream),
+            FIXTURE_LOG=str(self.root / "fetch.log"),
+            FIXTURE_DIRTY="",
+        )
+        self.executable("bin/date", f'#!/bin/sh\n[ "$*" = +%s ] && echo {NOW}\n')
+        self.executable("bin/cargo", r"""#!/bin/sh
+set -eu
+case "$*" in
+    "deny --version") echo "cargo-deny 0.22.0" ;;
+    "deny --locked fetch db")
+        echo fetch >> "$FIXTURE_LOG"
+        if [ -d "$FIXTURE_DB" ]; then
+            git -C "$FIXTURE_DB" fetch "$FIXTURE_UPSTREAM" HEAD
+        else
+            git clone "$FIXTURE_UPSTREAM" "$FIXTURE_DB"
+        fi
+        if [ -n "$FIXTURE_DIRTY" ]; then
+            touch "$FIXTURE_DB/untracked"
+        fi
+        ;;
+    fmt\ *|clippy\ *|test\ *|xtask\ *|"fetch --locked") ;;
+    "deny --locked --offline check -D warnings advisories sources") ;;
+    *) echo "Unexpected cargo call: $*" >&2; exit 1 ;;
+esac
+""")
+        # Run the real check entry point in isolation from its unrelated checks.
+        for script in (ROOT / "scripts").iterdir():
+            if script.is_file() and os.access(script, os.X_OK):
+                self.executable(f"scripts/{script.name}", "#!/bin/sh\nexit 0\n")
+        for name in ("scripts/check", "scripts/check-advisory-db", "deny.toml"):
+            shutil.copy2(ROOT / name, self.root / name)
+        manifest = self.root / "crates/example/Cargo.toml"
+        manifest.parent.mkdir(parents=True)
+        manifest.write_text("[lints]\nworkspace = true\n")
+
+    def executable(self, path, contents):
+        path = self.root / path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(contents)
+        path.chmod(0o755)
+
+    def git(self, *args, **env):
+        subprocess.run(
+            ["git", *args], cwd=self.root, env={**self.env, **env},
+            check=True, text=True, capture_output=True,
+        )
+
+    def cache(self, age_days):
+        self.git("init", "-q", str(self.upstream))
+        (self.upstream / "advisory.md").write_text("fixture advisory\n")
+        self.git("-C", str(self.upstream), "add", "advisory.md")
+        commit_date = f"@{NOW - age_days * DAY} +0000"
+        self.git(
+            "-C", str(self.upstream), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+            "commit", "-qm", "Advisory snapshot", GIT_AUTHOR_DATE=commit_date, GIT_COMMITTER_DATE=commit_date,
+        )
+        self.db.parent.mkdir(parents=True)
+        self.git("clone", "-q", str(self.upstream), str(self.db))
+        self.git("-C", str(self.db), "remote", "set-url", "origin", URL)
+
+    def run_gate(self, *args, exit_code=0, message=None, **env):
+        result = subprocess.run(
+            [str(self.root / args[0]), *args[1:]], cwd=self.root,
+            env={**self.env, **env}, text=True, capture_output=True,
+        )
+        output = result.stdout + result.stderr
+        self.assertEqual(result.returncode, exit_code, output)
+        if message is not None:
+            self.assertIn(message, output)
+
+    def test_quiet_week_uses_last_successful_refresh(self):
+        self.cache(age_days=8)
+        self.run_gate("scripts/check-advisory-db", "refresh")
+        self.assertFalse((self.db / self.marker.name).exists())
+        self.upstream.rename(self.root / "unavailable")
+        self.run_gate("scripts/check-advisory-db", "refresh", exit_code=128)
+        self.run_gate("scripts/check-advisory-db", "failure", message="Using cached advisory database")
+        self.assertEqual(self.marker.read_text(), f"{NOW}\n")
+
+    def test_refused_fetch_cannot_extend_stale_snapshot(self):
+        self.cache(age_days=8)
+        fetch_head = self.db / ".git/FETCH_HEAD"
+        fetch_head.write_text("previous fetch\n")
+        self.upstream.rename(self.root / "unavailable")
+        self.run_gate("scripts/check-advisory-db", "refresh", exit_code=128)
+        self.assertEqual(fetch_head.read_bytes(), b"")
+        self.assertFalse(self.marker.exists())
+        self.run_gate("scripts/check-advisory-db", "failure", exit_code=1, message="outside the 7-day")
+
+    def test_refused_fetch_without_cache_fails_check(self):
+        self.run_gate("scripts/check", exit_code=1, message="no usable cached copy")
+        self.assertEqual((self.root / "fetch.log").read_text(), "fetch\n")
+        self.assertFalse(self.marker.exists())
+
+    def test_refused_fetch_leaves_existing_marker_unchanged(self):
+        self.cache(age_days=8)
+        self.marker.write_text(f"{NOW - 8 * DAY}\n")
+        self.upstream.rename(self.root / "unavailable")
+        self.run_gate("scripts/check-advisory-db", "refresh", exit_code=128)
+        self.assertEqual(self.marker.read_text(), f"{NOW - 8 * DAY}\n")
+        self.run_gate("scripts/check-advisory-db", "failure", exit_code=1, message="outside the 7-day")
+
+    def test_failed_post_fetch_verification_cannot_write_marker(self):
+        self.cache(age_days=8)
+        self.run_gate("scripts/check-advisory-db", "refresh", exit_code=1,
+                      message="working tree differs from HEAD", FIXTURE_DIRTY="true")
+        self.assertFalse(self.marker.exists())
+
+    def test_invalid_markers_cannot_extend_stale_snapshot(self):
+        self.cache(age_days=8)
+        for marker in (f"{NOW + 1}\n", "tomorrow\n", f"{NOW}\n\n", f"{NOW}\n0\n", "9" * 80 + "\n"):
+            with self.subTest(marker=marker):
+                self.marker.write_text(marker)
+                self.run_gate("scripts/check-advisory-db", "failure", exit_code=1, message="outside the 7-day")
+
+    def test_recent_snapshot_works_with_missing_or_older_marker(self):
+        self.cache(age_days=1)
+        self.run_gate("scripts/check-advisory-db", "failure", message="Using cached advisory database")
+        self.marker.write_text(f"{NOW - 8 * DAY}\n")
+        self.run_gate("scripts/check-advisory-db", "failure", message="Using cached advisory database")
+
+    def test_global_ssh_rewrite(self):
+        self.cache(age_days=1)
+        for base in ("git@github.com:", "ssh://git@github.com/"):
+            with self.subTest(base=base):
+                self.global_config.write_text(f'[url "{base}"]\n\tinsteadOf = https://github.com/\n')
+                self.run_gate("scripts/check-advisory-db", "refresh")
+        self.global_config.write_text(f'[url "ssh://git@github.com/RustSec/advisory-db.git"]\n\tinsteadOf = {URL}\n')
+        self.run_gate("scripts/check-advisory-db", "refresh")
+
+    def test_unapproved_effective_origin(self):
+        self.cache(age_days=1)
+        self.global_config.write_text('[url "https://example.invalid/"]\n\tinsteadOf = https://github.com/\n')
+        self.run_gate("scripts/check-advisory-db", "failure", exit_code=1, message="origin")
+
+    def test_repository_local_rewrite_is_rejected(self):
+        self.cache(age_days=1)
+        for key in ("insteadOf", "pushInsteadOf"):
+            with self.subTest(key=key):
+                # An identity rewrite leaves get-url unchanged, so checking only
+                # the effective URL cannot detect it.
+                setting = f"url.{URL}.{key}"
+                self.git("-C", str(self.db), "config", "--local", setting, URL)
+                self.run_gate("scripts/check-advisory-db", "failure", exit_code=1, message="origin")
+                self.git("-C", str(self.db), "config", "--local", "--unset", setting)
+
+    def test_foreign_origin(self):
+        self.cache(age_days=1)
+        self.git("-C", str(self.db), "remote", "set-url", "origin", "https://example.invalid/RustSec/advisory-db")
+        for mode in ("refresh", "failure"):
+            self.run_gate("scripts/check-advisory-db", mode, exit_code=1, message="origin")
+        self.assertFalse((self.root / "fetch.log").exists())
+
+    def test_partial_snapshot(self):
+        self.cache(age_days=1)
+        (self.db / "advisory.md").unlink()
+        for mode in ("refresh", "failure"):
+            self.run_gate("scripts/check-advisory-db", mode, exit_code=1, message="working tree differs from HEAD")
+        self.assertFalse((self.root / "fetch.log").exists())
+
+    def test_local_check_ignores_ci_refresh_result(self):
+        self.cache(age_days=8)
+        self.upstream.rename(self.root / "unavailable")
+        self.run_gate("scripts/check", exit_code=1, message="outside the 7-day",
+                      FISHER_ADVISORY_DB_REFRESH_RESULT="success")
+        self.assertEqual((self.root / "fetch.log").read_text(), "fetch\n")
+
+    def test_ci_check_uses_refresh_result(self):
+        self.cache(age_days=8)
+        self.run_gate("scripts/check", message="Dependency advisories and sources passed",
+                      CI="true", FISHER_ADVISORY_DB_REFRESH_RESULT="success")
+        self.assertFalse((self.root / "fetch.log").exists())
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

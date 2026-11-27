@@ -12,7 +12,13 @@ cargo install cargo-deny --version 0.22.0 --locked             # check dependenc
 scripts/check                                                 # run the local checks
 ```
 
-The crate boundary check uses Python 3.8 or newer. The pre-commit hook runs the local gate. If the RustSec refresh fails, the gate reports the date of the cached snapshot and uses it if its checkout is intact and its commit is at most seven days old. Set `CARGO_NET_OFFLINE=true` to check with a usable snapshot and cached Cargo dependencies. CI runs the local checks, mutation and coverage on pull requests, pushes to `main`, and weekly. The weekly run requires a successful RustSec refresh. CI also checks commit messages for `Guard-Change:` on pull requests and pushes to `main`. Rust comes from [rustup](https://rustup.rs). The version is pinned in `rust-toolchain.toml`.
+The scripts use Python 3.8 or newer for the crate boundary check and fixtures. The pre-commit hook runs the local gate. Rust comes from [rustup](https://rustup.rs). The version is pinned in `rust-toolchain.toml`.
+
+If the RustSec refresh fails, the gate reports the date of the cached snapshot and uses it if its checkout is intact and the later of its HEAD commit time and last successful refresh is at most seven days old. The gate records the refresh time beside the checkout in Cargo's `advisory-dbs` directory after verifying the refreshed checkout. Missing, malformed or future-dated markers fall back to the commit time. The checkout must configure the exact RustSec HTTPS origin. A global Git rewrite to the same repository over SSH is accepted.
+
+Set `CARGO_NET_OFFLINE=true` to check with a usable snapshot and cached Cargo dependencies. CI uses `FISHER_ADVISORY_DB_REFRESH_RESULT` (`success` or `failure`) to pass the outcome of its separate refresh step to `scripts/check`. The gate reads this variable only when `CI=true`. Local runs attempt their own refresh unless offline mode is set.
+
+CI runs the local checks, mutation and coverage on pull requests, pushes to `main`, and weekly. The weekly run requires a successful RustSec refresh. CI also checks commit messages for `Guard-Change:` on pull requests and pushes to `main`.
 
 A separate weekly workflow runs the approved deep perft, all 100 published mates, comparisons against plain minimax and one plain-minimax four-ply node-count test. Run `scripts/check-published-suite` locally to run the same suite.
 

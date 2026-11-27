@@ -2,18 +2,25 @@
 """Compare the judge to the committed arithmetic and exercise kept PGNs."""
 
 import csv
+from contextlib import redirect_stdout
 from io import StringIO
+from math import log
 import random
 import sys
 import unittest
+from unittest.mock import patch
 
 sys.dont_write_bytecode = True
 
-from clocked_sprt import ROOT, TIME_CONTROL, draw_openings, engine_names, judge, read_pairs
-from sprt_statistic import SPRT_BOUNDS, decide, log_likelihood_ratio, trace
+from clocked_sprt import (
+    ROOT, TIME_CONTROL, Pair, draw_openings, engine_names, fastchess_runner,
+    fetch_openings, judge, print_result, read_pairs, read_record,
+)
+from sprt_statistic import ALPHA, BETA, MAX_PAIRS, SPRT_BOUNDS, decide, log_likelihood_ratio, trace, verdict
 
 
 EXPECTATIONS = ROOT / "expectations/sprt-arithmetic"
+FIXTURES = ROOT / "scripts/clocked-sprt-fixtures"
 POINTS = ("0", "0.5", "1", "1.5", "2")
 FASTCHESS = {"CONTINUE": None, "H1": "pass", "H0": "fail"}
 FISHTEST = {"-": None, "accepted": "pass", "rejected": "fail"}
@@ -32,6 +39,16 @@ def observations():
 
 
 class Arithmetic(unittest.TestCase):
+    def test_fixed_numbers(self):
+        self.assertEqual({"gain": (0, 10), "no-loss": (-10, 0)}, SPRT_BOUNDS)
+        self.assertEqual((0.05, 0.05), (ALPHA, BETA))
+        self.assertEqual("10+0.1", TIME_CONTROL)
+        self.assertEqual(10_000, MAX_PAIRS)
+
+    def test_thresholds_include_equality(self):
+        self.assertEqual("pass", verdict(log(19)))
+        self.assertEqual("fail", verdict(-log(19)))
+
     def test_counts(self):
         for row in rows("counts.tsv"):
             counts = [int(row[f"points_{points}"]) for points in POINTS]
@@ -74,17 +91,81 @@ class Arithmetic(unittest.TestCase):
                 decided = observation.verdict is not None
 
 
-def pgn_game(fen, white, black, result, ending="normal"):
+def pgn_game(fen, white, black, result):
     # The fixture supplies fastchess result records. No engine plays games here.
     return (
         f'[Event "Fastchess Tournament"]\n[White "{white}"]\n[Black "{black}"]\n'
-        f'[FEN "{fen}"]\n[Result "{result}"]\n[Termination "{ending}"]\n'
-        f'[TimeControl "{TIME_CONTROL}"]\n[PlyCount "1"]\n\n'
+        f'[FEN "{fen}"]\n[Result "{result}"]\n[Termination "normal"]\n'
+        '[TimeControl "10+0.1"]\n[PlyCount "1"]\n\n'
         f'4. a2a3 {{+0.20/4 0.001s}} {result}\n\n'
     )
 
 
+def report(pairs, **options):
+    output = StringIO()
+    with redirect_stdout(output):
+        print_result(pairs, "gain", **options)
+    return output.getvalue().splitlines()
+
+
+class Reporting(unittest.TestCase):
+    def test_pair_cap(self):
+        # For all-won or all-lost pairs the gain hypotheses give equal
+        # likelihood at a win share near 50.72%. The running share here is
+        # rounded down by less than one win at every prefix.
+        pairs = [
+            Pair(4 * ((n * 5072) // 10_000 - ((n - 1) * 5072) // 10_000), ("normal", "normal"))
+            for n in range(1, 10_001)
+        ]
+        for count, result in ((9_999, "no verdict yet"), (10_000, "inconclusive")):
+            with self.subTest(count=count):
+                output = report(pairs[:count])
+                self.assertIn(f"Pairs counted: {count}", output)
+                self.assertEqual(f"Result: {result}", output[-1])
+
+    def test_interval_with_zero_variance(self):
+        output = report([Pair(4, ("normal", "normal"))] * 2)
+        self.assertIn("Elo difference: +inf (95% interval cannot be estimated from these pairs)", output)
+        self.assertEqual("Result: no verdict yet", output[-1])
+
+    def test_ending_counts_stop_at_the_deciding_observation(self):
+        scores = [POINTS.index(row["points"]) for row in observations()["crosses-and-returns"]]
+        pairs = [Pair(score, ("normal", "normal")) for score in scores]
+        # The reference gain test passes at observation 122.
+        for index in (121, 122):
+            pairs[index] = Pair(scores[index], ("normal", "loss on time"))
+        output = report(pairs)
+        self.assertIn("Pairs counted: 122", output)
+        self.assertIn("Games ending by loss on time among pairs counted: 1", output)
+        self.assertIn("Games ending by loss on time among all games read: 2", output)
+
+
+class Preflight(unittest.TestCase):
+    def test_series_openings_are_verified_before_download(self):
+        with patch("pathlib.Path.read_bytes", return_value=b"changed\n"), patch("clocked_sprt.urlopen") as download:
+            with self.assertRaisesRegex(ValueError, "series-openings.epd SHA-256 mismatch"):
+                fetch_openings("seed")
+            download.assert_not_called()
+
+    def test_fastchess_version_is_checked(self):
+        with patch("clocked_sprt.shutil.which", return_value="/unused/fastchess"), patch(
+            "clocked_sprt.subprocess.check_output"
+        ) as version:
+            version.return_value = "fastchess alpha 1.8.3 compiled for ubuntu-latest 20261107-d7b47e8 (CI)\n"
+            fastchess_runner()
+            version.return_value = "fastchess alpha 1.8.3 compiled for ubuntu-latest 20261107-1111111 (CI)\n"
+            with self.assertRaisesRegex(ValueError, "Expected fastchess alpha 1.8.3"):
+                fastchess_runner()
+
+
 class KeptGames(unittest.TestCase):
+    measured, opponent = "a" * 40, "b" * 40
+    fixture_openings = ["rnbqkb1r/pp1pppp1/5n2/2p4p/2P1P2P/8/PP1P1PP1/RNBQKBNR w KQkq - 0 4"]
+
+    def read_fixture(self, name):
+        with (FIXTURES / f"{name}.pgn").open(encoding="utf-8") as pgn:
+            return read_pairs(pgn, self.fixture_openings, 1, self.measured, self.opponent)
+
     def test_draw_repeats_excludes_series(self):
         book = ["one", "two", "three"]
         draw = draw_openings(book, ["two"], "seed")
@@ -109,32 +190,39 @@ class KeptGames(unittest.TestCase):
                 if shuffled:
                     random.Random(0).shuffle(games)
                 pgn = StringIO("".join(games))
-                from_pgn, endings = read_pairs(pgn, openings, 1, measured, opponent)
-                self.assertEqual(scores, from_pgn)
-                self.assertEqual({"normal": len(games)}, endings)
-                observation, result = judge(from_pgn, "gain")
+                pairs = read_pairs(pgn, openings, 1, measured, opponent)
+                self.assertEqual([Pair(score, ("normal", "normal")) for score in scores], pairs)
+                observation, result = judge((pair.points_in_halves for pair in pairs), "gain")
                 self.assertEqual(("pass", 122), (result, observation.number))
         pgn = StringIO("".join(games[:-1]))
         with self.assertRaisesRegex(ValueError, "Missing game at opening"):
             read_pairs(pgn, openings, 1, measured, opponent)
 
     def test_abnormal_endings_count_as_losses(self):
-        measured, opponent = "a" * 40, "b" * 40
-        white, black = engine_names(measured, opponent)
-        fen = "rnbqkb1r/pp1pppp1/5n2/2p4p/2P1P2P/8/PP1P1PP1/RNBQKBNR w KQkq - 0 4"
-        for tag, ending in (
-            ("time forfeit", "loss on time"),
-            ("illegal move", "illegal move"),
-            ("abandoned", "crash or stall"),
+        for fixture, ending in (
+            ("illegal-first", "illegal move"),
+            ("illegal-later", "illegal move"),
+            ("loss-on-time", "loss on time"),
+            ("crash", "crash or stall"),
         ):
-            with self.subTest(ending=ending):
-                pgn = StringIO(
-                    pgn_game(fen, white, black, "0-1", tag)
-                    + pgn_game(fen, black, white, "1-0", tag)
-                )
-                scores, endings = read_pairs(pgn, [fen], 1, measured, opponent)
-                self.assertEqual([0], scores)
-                self.assertEqual({ending: 2}, endings)
+            with self.subTest(fixture=fixture):
+                self.assertEqual([Pair(4, (ending, ending))], self.read_fixture(fixture))
+
+    def test_opponent_view(self):
+        pairs = self.read_fixture("illegal-first")
+        self.assertIn("Pair counts (0, 0.5, 1, 1.5, 2 points): [0, 0, 0, 0, 1]", report(pairs))
+        self.assertIn(
+            "Pair counts (0, 0.5, 1, 1.5, 2 points): [1, 0, 0, 0, 0]",
+            report(pairs, opponent_view=True),
+        )
+
+    def test_illegal_move_still_requires_complete_record(self):
+        games = (FIXTURES / "illegal-later.pgn").read_text(encoding="utf-8")
+        game = games[:games.index('\n[Event ', 1)]
+        with self.assertRaisesRegex(ValueError, "incomplete or invalid UCI movetext"):
+            read_record(game.replace("a7a6", ""))
+        with self.assertRaisesRegex(ValueError, "missing or inconsistent result"):
+            read_record(game.rstrip().removesuffix("0-1"))
 
 
 if __name__ == "__main__":

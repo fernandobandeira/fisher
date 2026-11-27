@@ -93,9 +93,11 @@ def elo(score):
 
 
 def elo_interval(counts):
-    """Return logistic Elo and the interval from the pair scores, as in the series."""
+    """Return logistic Elo and a 95% interval when the pair scores vary."""
     total = sum(counts)
     mean = sum(count * score for count, score in zip(counts, SCORES)) / total
     variance = sum(count * (score - mean) ** 2 for count, score in zip(counts, SCORES)) / total
+    if variance == 0:
+        return elo(mean), None
     margin = 1.959963984540054 * sqrt(variance / total)
-    return elo(mean), elo(mean - margin), elo(mean + margin)
+    return elo(mean), (elo(mean - margin), elo(mean + margin))

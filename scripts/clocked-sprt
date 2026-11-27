@@ -10,8 +10,11 @@ from zipfile import BadZipFile
 
 sys.dont_write_bytecode = True
 
-from clocked_sprt import TIME_CONTROL, fetch_openings, judge, opening_bytes, play, read_pairs, revision
-from sprt_statistic import MAX_PAIRS, SPRT_BOUNDS, elo_interval
+from clocked_sprt import (
+    TIME_CONTROL, UnreadableGames, fetch_openings, judge_pairs, opening_bytes,
+    play, print_result, read_range, revision,
+)
+from sprt_statistic import MAX_PAIRS, SPRT_BOUNDS
 
 
 def main():
@@ -25,6 +28,7 @@ def main():
     parser.add_argument("--concurrency", type=int, default=1, help="games at a time (default: 1)")
     parser.add_argument("--pgn", type=Path, help="replay a kept PGN for this range without playing")
     parser.add_argument("--previous-pgn", type=Path, help="kept PGN for openings 1 through FIRST - 1")
+    parser.add_argument("--opponent-view", action="store_true", help="score kept PGNs from the opponent's side")
     args = parser.parse_args()
 
     end = args.first + args.count - 1
@@ -34,6 +38,8 @@ def main():
         parser.error("concurrency must be positive")
     if args.previous_pgn and args.first == 1:
         parser.error("--previous-pgn requires a first opening greater than 1")
+    if args.opponent_view and args.pgn is None:
+        parser.error("--opponent-view requires --pgn")
 
     measured, opponent = revision(args.measured), revision(args.opponent)
     seed = f"{measured}:{opponent}"
@@ -46,42 +52,34 @@ def main():
     print(f"Opening order SHA-256: {order_sha256}")
     low, high = SPRT_BOUNDS[args.test]
     print(f"Test: {args.test} (SPRT bounds {low} and {high} Elo)")
+    if args.opponent_view:
+        print(f"Reading from the opponent's side of the test played as measured {measured} against opponent {opponent}")
     print(f"Time control: {TIME_CONTROL}")
     print(f"Range: {args.first}–{end} ({args.count} pairs)", flush=True)
 
-    scores, endings = [], {}
+    previous = []
     if args.previous_pgn:
-        with args.previous_pgn.open(encoding="utf-8") as previous:
-            scores, endings = read_pairs(previous, openings[:args.first - 1], 1, measured, opponent)
-        if args.pgn is None and judge(scores, args.test)[0].verdict:
+        previous = read_range(args.previous_pgn, openings[:args.first - 1], 1, measured, opponent)
+        if args.pgn is None and judge_pairs(previous, args.test)[0].verdict:
             raise ValueError("The previous openings already gave a verdict. Replay the kept PGN.")
     selected = openings[args.first - 1:end]
-    if args.pgn is None:
-        play(out, measured, opponent, selected, args.concurrency)
-    with (args.pgn or out / "games.pgn").open(encoding="utf-8") as pgn:
-        current, current_endings = read_pairs(pgn, selected, args.first, measured, opponent)
-    for ending in ("loss on time", "crash or stall", "illegal move"):
-        print(f"Games ending by {ending}: {endings.get(ending, 0) + current_endings[ending]}")
-
+    status = 0 if args.pgn else play(out, measured, opponent, selected, args.concurrency)
+    current = read_range(args.pgn or out / "games.pgn", selected, args.first, measured, opponent)
+    if status:
+        raise ValueError(f"fastchess exited with status {status}. See fastchess.log.")
     have_prefix = args.first == 1 or args.previous_pgn is not None
-    observation, result = judge(scores + current if have_prefix else (), args.test)
-    print(f"Pairs counted: {observation.number}")
-    print(f"Pair counts (0, 0.5, 1, 1.5, 2 points): {list(observation.counts)}")
-    if observation.number:
-        difference, lower, upper = elo_interval(observation.counts)
-        print(f"Elo difference: {difference:+.2f} (95% interval [{lower:+.2f}, {upper:+.2f}])")
-    else:
-        print("Elo difference: unavailable until the earlier openings are supplied")
-    print(f"Log-likelihood ratio: {observation.llr:+.9f}")
-    print(f"Result: {result}")
+    print_result(previous + current, args.test, have_prefix, args.opponent_view)
 
 
 if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        print("Result: void (interrupted)")
+        print("Interrupted", file=sys.stderr)
         sys.exit(130)
-    except (OSError, ValueError, BadZipFile, subprocess.SubprocessError) as error:
+    except UnreadableGames as error:
         print(f"Result: void ({error})")
         sys.exit(1)
+    except (OSError, ValueError, BadZipFile, subprocess.SubprocessError) as error:
+        print(f"Refused: {error}", file=sys.stderr)
+        sys.exit(2)

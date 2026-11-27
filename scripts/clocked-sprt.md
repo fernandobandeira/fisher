@@ -1,8 +1,9 @@
 # Play or replay a clocked SPRT
 
 Put fastchess v1.8.3-alpha (`d7b47e8`) on `PATH` with
-[`install-fastchess`](install-fastchess). Use a checkout containing both commits,
-the Rust toolchains requested by those commits, and Python 3.9 or later.
+[`install-fastchess`](install-fastchess). The command checks the version
+before building either engine. Use a checkout containing both commits, the
+Rust toolchains requested by those commits, and Python 3.9 or later.
 
 ```sh
 scripts/clocked-sprt --concurrency 2 -- 5c5d6cf 8b9c254 gain 1 20 /tmp/fisher-sprt
@@ -16,13 +17,15 @@ seconds plus 0.1 a move, with no score or move-count adjudication, tablebase
 adjudication or resignation. The directory keeps the binaries, opening
 order, requested openings, fastchess log and PGN.
 
-The command plays and validates every game in the requested range. It reports
-losses on time, crashes or stalls, and illegal moves over those games and any
-earlier games supplied. Each such ending counts as the loss fastchess gives.
-An incomplete range is void and exits with status 1.
+The command plays and validates every game in the requested range. A loss on
+time, crash or stall, or illegal move counts as the loss fastchess gives. It
+prints counts for the pairs used by the judge and for all games read, including
+any supplied earlier games. Missing or unreadable games give `Result: void`
+and exit status 1. A refusal such as a pin mismatch or a verdict in the earlier
+games prints `Refused: …` to standard error and exits with status 2.
 
 Replay a range by supplying its original fastchess PGN and a fresh directory.
-Replay downloads the same pinned opening book and reads the PGN results
+Replay downloads the same pinned published openings and reads the PGN results
 without starting fastchess or either engine.
 
 ```sh
@@ -30,10 +33,15 @@ scripts/clocked-sprt --pgn /tmp/fisher-sprt/games.pgn -- \
   5c5d6cf 8b9c254 gain 1 20 /tmp/fisher-sprt-replay
 ```
 
+Add `--opponent-view` when replaying to score the points the original opponent
+took. Keep the revision arguments in the order used to play the games. The
+output identifies this reading and names both original roles. This option
+requires `--pgn` and applies to `--previous-pgn` when supplied.
+
 The judge counts pairs in drawn order from opening 1. It stops counting at
 the first threshold reached and reports the pair counts, logistic Elo with
-its 95% interval, and log-likelihood ratio at that observation. The games
-after it are kept. With neither threshold reached, a prefix shorter than
+its 95% interval when the pair scores vary, and log-likelihood ratio at that
+observation. The games after it are kept. With neither threshold reached, a prefix shorter than
 10,000 pairs gives no verdict yet. A full prefix gives inconclusive.
 
 For a later range, use `--previous-pgn` with all the games before its first
@@ -48,8 +56,9 @@ Verify archive SHA-256
 `68fe2691e0876d0de54fffb68c797e752138d5ed363beab2ac6ca34be68ee9f3`
 and extracted `noob_3moves.epd` SHA-256
 `2011193b4854e9a8cfdc05312ca2dbaffa6ceae3abbdee20e2ead2a18a603347`.
-Remove the lines in [`series-openings.epd`](../strength/series-openings.epd)
-to leave 148,932 positions.
+Verify [`series-openings.epd`](../strength/series-openings.epd) against
+`df2c41c8b88e220050d5de4462b4838f6eaff1a809f4d6f159860624fee7555a`.
+Remove its lines to leave 148,932 positions.
 
 Use the full lowercase measured commit, a colon, and the full lowercase
 opponent commit as the seed. For each remaining line, remove its line feed
@@ -59,5 +68,6 @@ ties. Keep the first 10,000 lines, each followed by one line feed, including
 the last. Their bytes are the opening order. A range takes the requested
 lines from that order by their one-based line numbers.
 
-The time control and opening-book pins live in [`clocked_sprt.py`](clocked_sprt.py).
+The time control and pins for fastchess and the opening positions live in
+[`clocked_sprt.py`](clocked_sprt.py).
 The SPRT bounds, error rates and pair cap live in [`sprt_statistic.py`](sprt_statistic.py).

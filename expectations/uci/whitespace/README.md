@@ -47,10 +47,16 @@ existing rules, as fisher-b0b requires:
   cause and leaves the previous position in place
   ([`rejected-position.uci`](../rejected-position.uci)). The cause here is
   the en passant field, which fisher's existing FEN validation rejects when it
-  is neither `-` nor a square. No committed expectation or recorded owner
-  decision fixes the words of the diagnostic for this cause, so the session
-  uses the plain matcher `info string {message}`, as `rejected-position.uci`
-  does for a cause with no fixed fragment. Stockfish accepts the malformed FEN
+  is neither `-` nor a square. The session matches the fragment
+  `info string {message:invalid en passant}` in both rejection replies. Two
+  committed sources fix it. `rejected-position.uci` matches each of its
+  causes with a fragment of the rules crate's message (for example
+  `eight files`), so the UCI diagnostic carries that message.
+  [`crates/rules/tests/positions.rs`](../../../crates/rules/tests/positions.rs)
+  requires the fragment `invalid en passant` in the rules crate's error for a
+  bad en passant field. Nothing committed fixes the words after it, so the
+  longer `invalid en passant square` that fisher prints today is not
+  required. Stockfish accepts the malformed FEN
   instead: its clock display shows `0 1` whatever follows the
   no-break space, because the clock extraction fails silently. That display is
   an observation of how Stockfish handles this malformed FEN, not a value
@@ -205,7 +211,8 @@ not kept. A session either passes, or fails at the reply or exit named.
 |---|---|---|---|---|---|---|
 | fisher 0.1.0 at `064a672` | Fails: extra `readyok` | Passes | Passes | Passes | Passes | Fails: no diagnostic |
 | Scripted, Stockfish's separators and fisher's rules | Passes | Passes | Passes | Passes | Passes | Passes |
-| Scripted, as above with other diagnostic words | Passes | Passes | Passes | Passes | Passes | Passes |
+| Scripted, as above with the diagnostic `invalid en passant field, which must be '-' or a square` | Passes | Passes | Passes | Passes | Passes | Passes |
+| Scripted, as above with an empty `info string`, or with the diagnostic sent twice | Passes | Passes | Passes | Passes | Passes | Fails |
 | Scripted, splits at U+00A0 | Fails | Passes | Passes | Passes | Passes | Fails |
 | Scripted, tab not a separator | Passes | Fails: no `readyok` | Fails: no `readyok` | Passes | Passes | Passes |
 | Scripted, tab ends the command | Passes | Passes | Fails: extra `readyok` | Passes | Passes | Passes |
@@ -233,4 +240,7 @@ not kept. A session either passes, or fails at the reply or exit named.
   depends on the halfmove clock or the fullmove number: at `064a672` only
   `rules` and unit tests read them. fisher-b0b should therefore compare the
   full position passed to the search, counters included, with the previous
-  position after each rejection.
+  position after each rejection. The staged previous position has counters
+  `0 1`, so a test that reuses it would miss an engine that resets the
+  counters to `0 1`. fisher-b0b's test must start from a position whose
+  counters differ from both `0 1` and the rejected command's `7 42`.

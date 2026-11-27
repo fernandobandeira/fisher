@@ -1,7 +1,9 @@
 # Whitespace between the tokens of a command
 
-Staged by fisher-82i on 2026-11-26. The sessions stay staged until
-fisher-b0b adds transcript tests that name them as `whitespace/<name>`.
+Staged by fisher-82i on 2026-11-26 and activated by fisher-b0b in pull
+request #109, merged as `2d517cf`. Transcript tests in
+`crates/fisher/tests/transcripts.rs` play each session by naming it as
+`whitespace/<name>`.
 
 | Session | What it covers |
 |---|---|
@@ -228,18 +230,26 @@ not kept. A session either passes, or fails at the reply or exit named.
   literal terminal replies, so the runner never consults its tracked
   position. The history checker in `crates/uci/tests/` is outside these
   sessions altogether. fisher-b0b is about the engine and both checkers
-  agreeing, so on activation it must add a test that fails if either checker
-  is left on its old splitting, using the same bytes as these sessions: the
-  no-break space in a command and in the FEN, and the tab and vertical-tab
-  controls. These sessions do not supply that test.
+  agreeing, so it added tests of each checker's splitting with the same
+  bytes as these sessions: the no-break space in a command and in the FEN,
+  and the tab and vertical-tab controls. For the transcript runner they are
+  `the_runner_uses_stockfish_whitespace` and
+  `the_runner_keeps_the_position_after_a_joined_en_passant_field` in
+  `crates/fisher/tests/transcripts.rs`. For the history checker they are
+  `readiness_uses_stockfish_whitespace` and
+  `a_joined_en_passant_field_is_rejected_by_the_history_checker` in
+  `crates/uci/tests/search_history.rs`. These sessions do not supply those
+  tests.
 - **The exact position kept.** Checkmate shows that the previous position is
   still searched, not that it is unchanged. An engine that rejects the
   command but writes the new counters (`7 42`, or `0 1`) into the previous
   position gives the same replies. Under the committed rules no UCI reply
   depends on the halfmove clock or the fullmove number: at `064a672` only
-  `rules` and unit tests read them. fisher-b0b should therefore compare the
-  full position passed to the search, counters included, with the previous
-  position after each rejection. The staged previous position has counters
+  `rules` and unit tests read them. fisher-b0b therefore compares the full
+  position passed to the search, counters included, with the previous
+  position after each rejection, in
+  `no_break_space_in_fen_keeps_the_full_position` in
+  `crates/uci/tests/session.rs`. The staged previous position has counters
   `0 1`, so a test that reuses it would miss an engine that resets the
-  counters to `0 1`. fisher-b0b's test must start from a position whose
-  counters differ from both `0 1` and the rejected command's `7 42`.
+  counters to `0 1`. That test starts from `7k/8/5K1Q/8/8/8/8/8 b - - 13 29`,
+  whose counters differ from both `0 1` and the rejected command's `7 42`.

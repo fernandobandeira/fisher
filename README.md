@@ -12,7 +12,7 @@ cargo install cargo-deny --version 0.22.0 --locked             # check dependenc
 scripts/check                                                 # run the local checks
 ```
 
-The crate boundary check uses Python 3.8 or newer. The pre-commit hook runs the local gate and needs network access to refresh RustSec and Cargo registry data. If the refresh fails, restore connectivity and rerun `scripts/check`. CI runs the local checks, mutation and coverage on pull requests, pushes to `main`, and weekly. It also checks commit messages for `Guard-Change:` on pull requests and pushes to `main`. Rust comes from [rustup](https://rustup.rs). The version is pinned in `rust-toolchain.toml`.
+The crate boundary check uses Python 3.8 or newer. The pre-commit hook runs the local gate. If the RustSec refresh fails, the gate reports the date of the cached snapshot and uses it if its checkout is intact and its commit is at most seven days old. Set `CARGO_NET_OFFLINE=true` to check with a usable snapshot and cached Cargo dependencies. CI runs the local checks, mutation and coverage on pull requests, pushes to `main`, and weekly. The weekly run requires a successful RustSec refresh. CI also checks commit messages for `Guard-Change:` on pull requests and pushes to `main`. Rust comes from [rustup](https://rustup.rs). The version is pinned in `rust-toolchain.toml`.
 
 A separate weekly workflow runs the approved deep perft, all 100 published mates, comparisons against plain minimax and one plain-minimax four-ply node-count test. Run `scripts/check-published-suite` locally to run the same suite.
 

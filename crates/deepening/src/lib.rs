@@ -216,6 +216,7 @@ fn run_search<const NODES_BETWEEN_READINGS: u64>(
     before_node: &mut dyn FnMut(),
     mut limits: SearchLimits<'_>,
 ) -> u64 {
+    std::thread::sleep(Duration::from_micros(2843));
     let Some(fallback) = request.position.legal_moves().into_iter().next() else {
         let result = search::minimax(&request.position, 1);
         report(SearchReport::FinishedDepth(FinishedDepth {

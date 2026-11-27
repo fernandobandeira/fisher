@@ -670,6 +670,121 @@ fn invalid_idle_position_is_reported() {
 }
 
 #[test]
+fn readiness_uses_stockfish_whitespace() {
+    accepts(&[Command("isready\u{a0}x"), QUIT]);
+    for command in [
+        "isready\tx",
+        "isready\tisready",
+        "isready\x0bx",
+        "isready\x0bisready",
+    ] {
+        accepts(&[Command(command), READY_OK, QUIT]);
+    }
+}
+
+#[test]
+fn deferred_readiness_uses_stockfish_whitespace() {
+    rejects(
+        6,
+        "a deferred isready with a vertical tab requires readyok",
+        &[GO, STOP, Command("isready\x0bx"), QUIT],
+    );
+    rejects(
+        8,
+        "a deferred quit with a vertical tab hides later readiness",
+        &[GO, STOP, Command("quit\x0bx"), Command("isready\tx")],
+    );
+}
+
+#[test]
+fn readiness_after_an_unknown_prefix() {
+    let ready = Command("stop\u{a0}x isready");
+    rejects(
+        6,
+        "missing readyok after an unknown prefix",
+        &[ready.clone(), QUIT],
+    );
+    accepts(&[ready, READY_OK, QUIT]);
+    for ignored in ["setoption", "debug", "ponderhit", "register", "ucinewgame"] {
+        let command = format!("stop\u{a0}x {ignored} isready");
+        accepts(&[Command(&command), QUIT]);
+    }
+}
+
+#[test]
+fn deferred_readiness_after_an_unknown_prefix() {
+    let ready = Command("stop\u{a0}x isready");
+    rejects(
+        6,
+        "missing deferred readiness behind stop",
+        &[POSITION_A, GO, STOP, ready.clone(), QUIT],
+    );
+    rejects(
+        6,
+        "missing deferred readyok after bestmove",
+        &[
+            POSITION_A,
+            GO,
+            STOP,
+            ready.clone(),
+            best_move_report(A),
+            MOVE_A,
+            QUIT,
+        ],
+    );
+    accepts(&[
+        POSITION_A,
+        GO,
+        STOP,
+        ready,
+        best_move_report(A),
+        MOVE_A,
+        READY_OK,
+        QUIT,
+    ]);
+}
+
+#[test]
+fn deferred_quit_after_an_unknown_prefix() {
+    let quit = Command("stop\u{a0}x quit");
+    rejects(
+        8,
+        "missing bestmove when a deferred quit hides later readiness",
+        &[POSITION_A, GO, STOP, quit.clone(), READY],
+    );
+    let mut history = vec![
+        POSITION_A,
+        GO,
+        STOP,
+        quit,
+        READY,
+        best_move_report(A),
+        MOVE_A,
+    ];
+    accepts(&history);
+    history.push(READY_OK);
+    rejects(9, "unsolicited readyok after a deferred quit", &history);
+}
+
+#[test]
+fn a_joined_en_passant_field_is_rejected_by_the_history_checker() {
+    for command in [
+        "position fen 4k3/8/8/8/8/8/8/4K2R w K -\u{a0}0 1",
+        "position fen 4k3/8/8/8/8/8/8/4K2R w K -\u{a0}7 42",
+    ] {
+        accepts(&[
+            POSITION_A,
+            Command(command),
+            Response("info string position rejected: invalid FEN: invalid en passant square\n"),
+            GO,
+            best_move_report(A),
+            MOVE_A,
+            QUIT,
+        ]);
+    }
+}
+
+#[test]
 fn readiness_on_either_side_of_finite_bestmove() {
     accepts(&[
         POSITION_A,
@@ -820,6 +935,35 @@ const UNKNOWN_OPTION: Event<'_> = Command("setoption name Path value stop");
 const REJECT_SETOPTION: Event<'_> = Response("info string setoption rejected: waiting for stop\n");
 const INVALID_MULTIPV: Event<'_> =
     Response("info string setoption rejected: MultiPV requires an integer from 1 to 255\n");
+
+#[test]
+fn multipv_setoption_uses_stockfish_whitespace() {
+    for command in [
+        "setoption name MultiPV value 2",
+        "setoption name MultiPV value\t2",
+        "setoption name MultiPV value\x0b2",
+    ] {
+        // While searching the checker must recognize the option and
+        // require the busy diagnostic. While idle a good value is silent.
+        accepts(&[
+            POSITION_A,
+            GO,
+            Command(command),
+            REJECT_SETOPTION,
+            best_move_report(A),
+            MOVE_A,
+            QUIT,
+        ]);
+        accepts(&[Command(command), READY, READY_OK, QUIT]);
+    }
+    let malformed = Command("setoption name MultiPV value \u{a0}2");
+    accepts(&[malformed.clone(), INVALID_MULTIPV, READY, READY_OK, QUIT]);
+    rejects(
+        7,
+        "the joined value requires a diagnostic",
+        &[malformed, READY, READY_OK, QUIT],
+    );
+}
 
 #[test]
 fn setoption_diagnostics_require_the_matching_command_and_state() {

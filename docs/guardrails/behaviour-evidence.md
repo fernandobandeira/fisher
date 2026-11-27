@@ -9,11 +9,15 @@ This page explains what each check can show about the engine.
 - **Bench signature.** A refactor has a stable observation the owner can check.
 - **Strength record.** The owner can trace an improvement claim to a match.
 
-The first ten published mates run in `scripts/check`. The weekly published suite runs all 100 in release mode. Run [`scripts/check-published-suite`](../../scripts/check-published-suite) to repeat the suite locally.
+The first ten published mates run in `scripts/check`. The weekly published suite runs in release mode and checks deep perft counts, all 100 published mates, and plain minimax's four-ply node counts against sums of published perft counts. Run [`scripts/check-published-suite`](../../scripts/check-published-suite) to repeat the suite locally.
 
-The weekly published suite is independent of the merge gates. A failed comparison means `main` disagrees with a published value. GitHub notifies the account that last changed the workflow schedule if that account has Actions notifications enabled. No other action is taken on failure.
+Alpha-beta pruning retired the production search's exhaustive four-ply node-count comparison.
 
-Alpha-beta pruning retired the production search's exhaustive four-ply node-count comparison. The weekly published suite still checks that plain minimax's four-ply node counts match the published perft sums.
+The suite also compares fisher's search with its test-only plain minimax on the six perft positions, the last position of each seeded walk, and all 100 published mate positions. It compares scores and best moves and checks bounds on the node count. Plain minimax checks that the score from the root's perspective holds after each move of the principal variation. A disagreement with plain minimax can occur even when the published checks pass. Independently, shakmaty replays the principal variation to verify that each move is legal and that the ending supports the reported score. On the mate positions, the suite also checks that the best move is the published move.
+
+On the same positions, the suite checks that the interruptible search returns the same result as the ordinary search, including the node count, when its callback always returns `false`. This comparison can fail even when the ordinary search agrees with both the published values and plain minimax.
+
+The weekly published suite is independent of the merge gates. GitHub notifies the account that last changed the workflow schedule if that account has Actions notifications enabled. No other action is taken on failure.
 
 ## Real-clock match
 

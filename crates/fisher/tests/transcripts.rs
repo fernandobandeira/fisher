@@ -111,10 +111,7 @@ mod transcript_documents {
     fn every_transcript_is_played_or_staged() -> io::Result<()> {
         let mut documents = BTreeSet::new();
         collect_transcript_paths(&transcript_directory(), Path::new(""), &mut documents)?;
-        let played: BTreeSet<_> = PLAYED_TRANSCRIPTS
-            .iter()
-            .map(|name| transcript_path(name))
-            .collect();
+        let played = registered_transcript_paths();
         let staged: BTreeMap<_, _> = STAGED_TRANSCRIPTS
             .iter()
             .map(|(name, ticket)| (transcript_path(name), ticket))
@@ -149,23 +146,56 @@ mod transcript_documents {
         Ok(())
     }
 
+    fn registered_transcript_paths() -> BTreeSet<PathBuf> {
+        let mut played = BTreeSet::new();
+        for name in PLAYED_TRANSCRIPTS {
+            assert!(
+                played.insert(transcript_path(name)),
+                "{name}.uci is registered for playback more than once. Keep a single playback registration."
+            );
+        }
+        played
+    }
+
     fn collect_transcript_paths(
         root: &Path,
         directory: &Path,
         documents: &mut BTreeSet<PathBuf>,
     ) -> io::Result<()> {
-        for entry in fs::read_dir(root.join(directory))? {
-            let entry = entry?;
+        let mut entries = fs::read_dir(root.join(directory))?.collect::<io::Result<Vec<_>>>()?;
+        entries.sort_by_key(fs::DirEntry::file_name);
+        for entry in entries {
             let kind = entry.file_type()?;
             let path = directory.join(entry.file_name());
+            assert!(
+                !kind.is_symlink(),
+                "{} is a symbolic link. Replace it with the document itself or a directory containing the documents.",
+                path.display()
+            );
             if kind.is_dir() {
                 collect_transcript_paths(root, &path, documents)?;
-            } else if kind.is_file() && path.extension().is_some_and(|extension| extension == "uci")
-            {
+            } else if kind.is_file() && is_transcript_path(&path) {
                 documents.insert(path);
             }
         }
         Ok(())
+    }
+
+    fn is_transcript_path(path: &Path) -> bool {
+        // Only lowercase .uci names are transcript documents. Ignore other
+        // extensions (such as .md for README notes), but reject case variants of .uci.
+        let Some(extension) = path.extension() else {
+            return false;
+        };
+        if !extension.eq_ignore_ascii_case("uci") {
+            return false;
+        }
+        assert!(
+            extension == "uci",
+            "{} has a non-lowercase UCI extension. Rename it to use .uci.",
+            path.display()
+        );
+        true
     }
 
     fn transcript_directory() -> PathBuf {

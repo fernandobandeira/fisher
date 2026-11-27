@@ -13,7 +13,7 @@ The first ten published mates run in `scripts/check`. The weekly published suite
 
 The weekly published suite is independent of the merge gates. A failed comparison means `main` disagrees with a published value. GitHub notifies the account that last changed the workflow schedule if that account has Actions notifications enabled. No other action is taken on failure.
 
-When fisher-4yn.2 adds pruning, retire the engine's four-ply node count comparison, which assumes the search visits every move. Keep the four-ply node count of the plain minimax in the tests of `search`: it shows that the expected scores come from a search that skips nothing.
+Alpha-beta pruning retired the production search's exhaustive four-ply node-count comparison. The weekly published suite still checks that plain minimax's four-ply node counts match the published perft sums.
 
 ## Real-clock match
 

@@ -1,0 +1,13 @@
+# Source: fastchess alpha 1.8.3, https://github.com/Disservin/fastchess at d7b47e8dec6b564aaf4cbb2922ab37e6c6761e75, app/src/matchmaking/sprt/sprt.cpp
+# Witness: Fishtest, https://github.com/official-stockfish/fishtest at ea59d0c793613882480198bf5402401054046ad7, server/fishtest/stats/LLRcalc.py and stat_util.py
+# Taken: 2026-11-26, by the commands in README.md
+# Test: generalized SPRT over opening pairs, SPRT bounds in logistic Elo, alpha = beta = 0.05; gain test 0 and 10, no-loss test -10 and 0
+# Thresholds: a test ends at the first observation where the LLR reaches ln 19 (pass) or falls to -ln 19 (fail)
+# Fields: sequence (its observations are in trace.tsv); number of observations; for the gain test and the no-loss test: the observation at which the test ends, or - if it does not end; its result: the verdict pass or fail, or none when no threshold is reached by the last observation
+sequence	observations	gain_ends_at	gain_result	no_loss_ends_at	no_loss_result
+decisive-pass	160	122	pass	117	pass
+decisive-fail	180	139	fail	149	fail
+no-verdict	60	-	none	-	none
+equal	2600	2535	fail	827	pass
+all-shared	200	102	fail	102	pass
+crosses-and-returns	530	122	pass	117	pass

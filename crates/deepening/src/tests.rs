@@ -12,6 +12,7 @@ fn interrupt_inside_the_depth_discards_it() -> std::io::Result<()> {
     let (resume, may_resume) = mpsc::channel();
     let interrupt = Arc::new(AtomicBool::new(false));
     let request = SearchRequest {
+        requested_variations: std::num::NonZeroU8::MIN,
         position: puzzle().map_err(io::Error::other)?,
         limits: Limits {
             depth: Some(2),
@@ -72,6 +73,7 @@ fn reports_totals_from_the_start_of_go() -> std::io::Result<()> {
 
     let started = Instant::now();
     let request = SearchRequest {
+        requested_variations: std::num::NonZeroU8::MIN,
         position: Position::starting(),
         limits: Limits {
             infinite: true,
@@ -110,9 +112,12 @@ fn reports_totals_from_the_start_of_go() -> std::io::Result<()> {
         assert_eq!(report.depth, depth);
         assert_eq!(report.nodes, nodes);
         assert_eq!(report.elapsed, Duration::from_millis(millis));
-        assert_eq!(report.score, Score::Centipawns(0));
+        assert_eq!(
+            report.variations.first().map(|&(score, _)| score),
+            Some(Score::Centipawns(0))
+        );
     }
-    assert_eq!(second.principal_variation.first().copied(), *best_move);
+    assert_eq!(principal_root_move(second), *best_move);
     Ok(())
 }
 
@@ -120,6 +125,7 @@ fn reports_totals_from_the_start_of_go() -> std::io::Result<()> {
 fn puzzle_keeps_the_last_finished_depth() -> Result<(), Box<dyn std::error::Error>> {
     for (interrupt_at, expected_move) in [(Some(60), "g5g2"), (None, "c5f2")] {
         let request = SearchRequest {
+            requested_variations: std::num::NonZeroU8::MIN,
             position: puzzle()?,
             limits: Limits {
                 depth: Some(2),
@@ -177,13 +183,11 @@ fn assert_puzzle_depths(
         };
         assert_eq!(report.depth, depth);
         assert!(nodes.contains(&report.nodes), "depth {depth}: {report:?}");
-        assert_eq!(report.score, Score::Centipawns(score));
-        let variation: Vec<_> = report
-            .principal_variation
-            .iter()
-            .copied()
-            .map(move_name)
-            .collect();
+        let [(actual_score, moves)] = report.variations.as_slice() else {
+            return Err("expected one variation".into());
+        };
+        assert_eq!(*actual_score, Score::Centipawns(score));
+        let variation: Vec<_> = moves.iter().copied().map(move_name).collect();
         assert_eq!(variation, pv);
     }
     Ok(())
@@ -200,6 +204,7 @@ fn infinite_search_reaches_the_production_depth_cap() -> Result<(), Box<dyn std:
     assert_eq!(after_move.legal_moves(), Vec::<Move>::new());
 
     let request = SearchRequest {
+        requested_variations: std::num::NonZeroU8::MIN,
         position,
         limits: Limits {
             infinite: true,
@@ -342,13 +347,13 @@ fn zero_depth_reports_a_terminal_root() -> Result<(), rules::FenError> {
         [
             SearchReport::FinishedDepth(FinishedDepth {
                 depth: 0,
-                score: Score::Mate {
-                    plies: 0,
-                    winning: false,
-                },
                 nodes: 0,
                 elapsed: Duration::ZERO,
-                principal_variation: Vec::new(),
+                terminal_score: Some(Score::Mate {
+                    plies: 0,
+                    winning: false,
+                }),
+                variations: Vec::new(),
             }),
             SearchReport::BestMove(None),
         ]
@@ -358,6 +363,7 @@ fn zero_depth_reports_a_terminal_root() -> Result<(), rules::FenError> {
 
 fn run_with_limits(position: Position, limits: Limits, depth_cap: u8) -> (u64, Vec<SearchReport>) {
     let request = SearchRequest {
+        requested_variations: std::num::NonZeroU8::MIN,
         position,
         limits,
         interrupt: Arc::new(AtomicBool::new(false)),
@@ -387,10 +393,21 @@ fn assert_reports(reports: &[SearchReport], totals: &[u64], position: Position) 
         };
         assert_eq!(report.depth, depth);
         assert_eq!(report.nodes, *nodes);
-        assert_eq!(report.score, Score::Centipawns(0));
-        expected_move = report.principal_variation.first().copied();
+        assert_eq!(
+            report.variations.first().map(|&(score, _)| score),
+            Some(Score::Centipawns(0))
+        );
+        expected_move = principal_root_move(report);
     }
     assert_eq!(*best_move, expected_move);
+}
+
+fn principal_root_move(depth: &FinishedDepth) -> Option<Move> {
+    depth
+        .variations
+        .first()
+        .and_then(|(_, moves)| moves.first())
+        .copied()
 }
 
 mod clocks;

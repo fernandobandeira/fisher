@@ -1,0 +1,87 @@
+#!/usr/bin/env python3
+"""Play or replay a clocked SPRT range between two commits of fisher."""
+
+import argparse
+from hashlib import sha256
+from pathlib import Path
+import subprocess
+import sys
+from zipfile import BadZipFile
+
+sys.dont_write_bytecode = True
+
+from clocked_sprt import TIME_CONTROL, fetch_openings, judge, opening_bytes, play, read_pairs, revision
+from sprt_statistic import MAX_PAIRS, SPRT_BOUNDS, elo_interval
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("measured")
+    parser.add_argument("opponent")
+    parser.add_argument("test", choices=SPRT_BOUNDS)
+    parser.add_argument("first", type=int, help="first opening, starting at 1")
+    parser.add_argument("count", type=int, help="number of pairs")
+    parser.add_argument("directory", type=Path, help="new directory for the evidence")
+    parser.add_argument("--concurrency", type=int, default=1, help="games at a time (default: 1)")
+    parser.add_argument("--pgn", type=Path, help="replay a kept PGN for this range without playing")
+    parser.add_argument("--previous-pgn", type=Path, help="kept PGN for openings 1 through FIRST - 1")
+    args = parser.parse_args()
+
+    end = args.first + args.count - 1
+    if args.first < 1 or args.count < 1 or end > MAX_PAIRS:
+        parser.error(f"the range must be within openings 1 through {MAX_PAIRS}")
+    if args.concurrency < 1:
+        parser.error("concurrency must be positive")
+    if args.previous_pgn and args.first == 1:
+        parser.error("--previous-pgn requires a first opening greater than 1")
+
+    measured, opponent = revision(args.measured), revision(args.opponent)
+    seed = f"{measured}:{opponent}"
+    openings = fetch_openings(seed)
+    out = args.directory.resolve()
+    out.mkdir()
+    order_sha256 = sha256(opening_bytes(openings)).hexdigest()
+    (out / "opening-order.epd").write_bytes(opening_bytes(openings))
+    print(f"Seed: {seed}")
+    print(f"Opening order SHA-256: {order_sha256}")
+    low, high = SPRT_BOUNDS[args.test]
+    print(f"Test: {args.test} (SPRT bounds {low} and {high} Elo)")
+    print(f"Time control: {TIME_CONTROL}")
+    print(f"Range: {args.first}–{end} ({args.count} pairs)", flush=True)
+
+    scores, endings = [], {}
+    if args.previous_pgn:
+        with args.previous_pgn.open(encoding="utf-8") as previous:
+            scores, endings = read_pairs(previous, openings[:args.first - 1], 1, measured, opponent)
+        if args.pgn is None and judge(scores, args.test)[0].verdict:
+            raise ValueError("The previous openings already gave a verdict. Replay the kept PGN.")
+    selected = openings[args.first - 1:end]
+    if args.pgn is None:
+        play(out, measured, opponent, selected, args.concurrency)
+    with (args.pgn or out / "games.pgn").open(encoding="utf-8") as pgn:
+        current, current_endings = read_pairs(pgn, selected, args.first, measured, opponent)
+    for ending in ("loss on time", "crash or stall", "illegal move"):
+        print(f"Games ending by {ending}: {endings.get(ending, 0) + current_endings[ending]}")
+
+    have_prefix = args.first == 1 or args.previous_pgn is not None
+    observation, result = judge(scores + current if have_prefix else (), args.test)
+    print(f"Pairs counted: {observation.number}")
+    print(f"Pair counts (0, 0.5, 1, 1.5, 2 points): {list(observation.counts)}")
+    if observation.number:
+        difference, lower, upper = elo_interval(observation.counts)
+        print(f"Elo difference: {difference:+.2f} (95% interval [{lower:+.2f}, {upper:+.2f}])")
+    else:
+        print("Elo difference: unavailable until the earlier openings are supplied")
+    print(f"Log-likelihood ratio: {observation.llr:+.9f}")
+    print(f"Result: {result}")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("Result: void (interrupted)")
+        sys.exit(130)
+    except (OSError, ValueError, BadZipFile, subprocess.SubprocessError) as error:
+        print(f"Result: void ({error})")
+        sys.exit(1)

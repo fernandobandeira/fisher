@@ -1,0 +1,141 @@
+#!/usr/bin/env python3
+"""Compare the judge to the committed arithmetic and exercise kept PGNs."""
+
+import csv
+from io import StringIO
+import random
+import sys
+import unittest
+
+sys.dont_write_bytecode = True
+
+from clocked_sprt import ROOT, TIME_CONTROL, draw_openings, engine_names, judge, read_pairs
+from sprt_statistic import SPRT_BOUNDS, decide, log_likelihood_ratio, trace
+
+
+EXPECTATIONS = ROOT / "expectations/sprt-arithmetic"
+POINTS = ("0", "0.5", "1", "1.5", "2")
+FASTCHESS = {"CONTINUE": None, "H1": "pass", "H0": "fail"}
+FISHTEST = {"-": None, "accepted": "pass", "rejected": "fail"}
+
+
+def rows(name):
+    with (EXPECTATIONS / name).open(encoding="utf-8", newline="") as stream:
+        yield from csv.DictReader((line for line in stream if not line.startswith("#")), delimiter="\t")
+
+
+def observations():
+    sequences = {}
+    for row in rows("trace.tsv"):
+        sequences.setdefault(row["sequence"], []).append(row)
+    return sequences
+
+
+class Arithmetic(unittest.TestCase):
+    def test_counts(self):
+        for row in rows("counts.tsv"):
+            counts = [int(row[f"points_{points}"]) for points in POINTS]
+            for test in SPRT_BOUNDS:
+                column = test.replace("-", "_")
+                with self.subTest(case=row["case"], test=test):
+                    self.assertAlmostEqual(
+                        float(row[f"{column}_llr"]), log_likelihood_ratio(counts, test),
+                        delta=float(row[f"{column}_tolerance"]),
+                    )
+
+    def test_sequences(self):
+        sequences = observations()
+        for summary in rows("sequences.tsv"):
+            name = summary["sequence"]
+            sequence = sequences[name]
+            self.assertEqual(int(summary["observations"]), len(sequence))
+            scores = [POINTS.index(row["points"]) for row in sequence]
+            for test in SPRT_BOUNDS:
+                column = test.replace("-", "_")
+                with self.subTest(sequence=name, test=test):
+                    self.check_trace(name, test, column, sequence, scores)
+                    observation = decide(trace(scores, test))
+                    ends_at = str(observation.number) if observation.verdict else "-"
+                    self.assertEqual(summary[f"{column}_ends_at"], ends_at)
+                    self.assertEqual(summary[f"{column}_result"], observation.verdict or "none")
+
+    def check_trace(self, name, test, column, sequence, scores):
+        decided = False
+        for row, observation in zip(sequence, trace(scores, test)):
+            label = f"{name}, {test}, observation {row['observation']}"
+            self.assertEqual(int(row["observation"]), observation.number, label)
+            expected = float(row[f"{column}_llr"])
+            self.assertAlmostEqual(
+                expected, observation.llr, delta=0.001 * max(1.0, abs(expected)), msg=label,
+            )
+            if not decided:
+                self.assertEqual(FASTCHESS[row[f"{column}_result_fastchess"]], observation.verdict, label)
+                self.assertEqual(FISHTEST[row[f"{column}_state_fishtest"]], observation.verdict, label)
+                decided = observation.verdict is not None
+
+
+def pgn_game(fen, white, black, result, ending="normal"):
+    # The fixture supplies fastchess result records. No engine plays games here.
+    return (
+        f'[Event "Fastchess Tournament"]\n[White "{white}"]\n[Black "{black}"]\n'
+        f'[FEN "{fen}"]\n[Result "{result}"]\n[Termination "{ending}"]\n'
+        f'[TimeControl "{TIME_CONTROL}"]\n[PlyCount "1"]\n\n'
+        f'4. a2a3 {{+0.20/4 0.001s}} {result}\n\n'
+    )
+
+
+class KeptGames(unittest.TestCase):
+    def test_draw_repeats_excludes_series(self):
+        book = ["one", "two", "three"]
+        draw = draw_openings(book, ["two"], "seed")
+        self.assertCountEqual(["one", "three"], draw)
+        self.assertEqual(draw, draw_openings(reversed(book), ["two"], "seed"))
+
+    def test_shuffled_games_and_missing_game(self):
+        scores = [POINTS.index(row["points"]) for row in observations()["crosses-and-returns"]]
+        openings = (ROOT / "strength/series-openings.epd").read_text(encoding="utf-8").splitlines()[:len(scores)]
+        measured, opponent = "a" * 40, "b" * 40
+        white, black = engine_names(measured, opponent)
+        results = ("0-1", "1/2-1/2", "1-0")
+        games = []
+        for fen, points in zip(openings, scores):
+            white_points = min(points, 2)
+            black_points = points - white_points
+            games.append(pgn_game(fen, white, black, results[white_points]))
+            games.append(pgn_game(fen, black, white, results[2 - black_points]))
+
+        for shuffled in (False, True):
+            with self.subTest(shuffled=shuffled):
+                if shuffled:
+                    random.Random(0).shuffle(games)
+                pgn = StringIO("".join(games))
+                from_pgn, endings = read_pairs(pgn, openings, 1, measured, opponent)
+                self.assertEqual(scores, from_pgn)
+                self.assertEqual({"normal": len(games)}, endings)
+                observation, result = judge(from_pgn, "gain")
+                self.assertEqual(("pass", 122), (result, observation.number))
+        pgn = StringIO("".join(games[:-1]))
+        with self.assertRaisesRegex(ValueError, "Missing game at opening"):
+            read_pairs(pgn, openings, 1, measured, opponent)
+
+    def test_abnormal_endings_count_as_losses(self):
+        measured, opponent = "a" * 40, "b" * 40
+        white, black = engine_names(measured, opponent)
+        fen = "rnbqkb1r/pp1pppp1/5n2/2p4p/2P1P2P/8/PP1P1PP1/RNBQKBNR w KQkq - 0 4"
+        for tag, ending in (
+            ("time forfeit", "loss on time"),
+            ("illegal move", "illegal move"),
+            ("abandoned", "crash or stall"),
+        ):
+            with self.subTest(ending=ending):
+                pgn = StringIO(
+                    pgn_game(fen, white, black, "0-1", tag)
+                    + pgn_game(fen, black, white, "1-0", tag)
+                )
+                scores, endings = read_pairs(pgn, [fen], 1, measured, opponent)
+                self.assertEqual([0], scores)
+                self.assertEqual({ending: 2}, endings)
+
+
+if __name__ == "__main__":
+    unittest.main()

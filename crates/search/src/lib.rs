@@ -214,7 +214,7 @@ fn search<E>(
     }
 
     let mut best_score = -i32::MAX;
-    let stopped = moves.into_iter().try_for_each(|movement| {
+    let stopped = moves.into_iter().rev().try_for_each(|movement| {
         let reply = search_move(
             movement,
             ply + 1,

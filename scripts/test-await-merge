@@ -24,6 +24,16 @@ UPDATE_ERROR = {"error": "X Cannot update PR branch due to conflicts"}
 FIRST_BASE = "a" * 40
 SECOND_BASE = "b" * 40
 
+STAND_IN = """\
+    import json
+    from pathlib import Path
+    import sys
+
+    with Path("calls").open("a") as log:
+        log.write(json.dumps(sys.argv[1:]) + "\\n")
+    print(Path("response").read_text())
+"""
+
 EXPIRED_CLOCK = """\
     import itertools
     import runpy
@@ -81,6 +91,9 @@ def run_fixture():
     try:
         with patch.object(subprocess, "run", run_gh):
             main()
+    except AssertionError as error:
+        print(error, file=sys.stderr)
+        sys.exit(3)
     finally:
         Path("trace").write_text(json.dumps((calls, sleeps, timeouts)))
 
@@ -144,6 +157,27 @@ class AwaitMergeTest(unittest.TestCase):
 
     def test_already_merged(self):
         self.assert_steps([pull(state="MERGED", merge_state="UNKNOWN")], 0, "merged")
+
+    def test_already_merged_as_process(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            gh = root / "gh"
+            gh.write_text(f"#!{sys.executable}\n" + textwrap.dedent(STAND_IN))
+            gh.chmod(0o755)
+            _, response = pull(state="MERGED", merge_state="UNKNOWN")
+            (root / "response").write_text(json.dumps(response))
+
+            result = subprocess.run(
+                [sys.executable, str(SCRIPT), "42"],
+                cwd=root, env={**os.environ, "PATH": directory},
+                capture_output=True, text=True, timeout=HANG_TIMEOUT,
+            )
+
+            self.assertEqual(result.returncode, 0, result)
+            self.assertEqual(result.stdout, "Pull request #42 merged.\n")
+            self.assertEqual(result.stderr, "")
+            calls = [json.loads(line) for line in (root / "calls").read_text().splitlines()]
+            self.assertEqual(calls, [VIEW])
 
     def test_rejects_nonpositive_pull_request_number(self):
         with tempfile.TemporaryDirectory() as directory:

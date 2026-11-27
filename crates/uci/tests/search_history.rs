@@ -785,6 +785,53 @@ fn a_joined_en_passant_field_is_rejected_by_the_history_checker() {
 }
 
 #[test]
+fn kingside_castling_spellings_agree_with_the_history_checker() -> io::Result<()> {
+    // Stockfish 19 printed these positions for all three fields in fisher-4h7.
+    for field in ["K", "KK", "H"] {
+        let bare = format!("position fen 4k3/8/8/8/8/8/8/4K2R w {field} - 0 1");
+        for (command, expected_fen, from, to) in [
+            (bare.clone(), "4k3/8/8/8/8/8/8/4K2R w K - 0 1", "e1", "g1"),
+            (
+                format!("{bare} moves e1g1"),
+                "4k3/8/8/8/8/8/8/5RK1 b - - 1 1",
+                "e8",
+                "d8",
+            ),
+        ] {
+            let expected = rules::Position::from_fen(expected_fen).map_err(io::Error::other)?;
+            let movement = rules::Square::parse(from)
+                .zip(rules::Square::parse(to))
+                .and_then(|(from, to)| expected.legal_move(from, to, None))
+                .ok_or_else(|| {
+                    io::Error::other("expected a legal move in the reference position")
+                })?;
+            let input = format!("{command}\ngo\nquit\n");
+            let mut output = Vec::new();
+            let searched = command.clone();
+            uci::run_session(
+                io::Cursor::new(input),
+                &mut output,
+                "test",
+                move |request, send| {
+                    assert_eq!(request.position.to_fen(), expected_fen, "{searched}");
+                    send(SearchReport::BestMove(Some(movement)));
+                },
+            )?;
+            let text = std::str::from_utf8(&output).map_err(io::Error::other)?;
+            let mut history = vec![
+                Command(&command),
+                GO,
+                QUIT,
+                Report(SearchReport::BestMove(Some(movement))),
+            ];
+            history.extend(text.split_inclusive('\n').map(Response));
+            accepts(&history);
+        }
+    }
+    Ok(())
+}
+
+#[test]
 fn readiness_on_either_side_of_finite_bestmove() {
     accepts(&[
         POSITION_A,

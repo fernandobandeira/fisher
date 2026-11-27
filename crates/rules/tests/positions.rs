@@ -139,6 +139,7 @@ fn rejected_fens_identify_the_problem() {
         ("4k3/8/8/8/8/8/8/4K3 x - - 0 1", "side to move"),
         ("4k3/8/8/8/8/8/8/4K3 w X - 0 1", "K, Q, k, q"),
         ("4k3/8/8/8/8/8/8/4K2R w KK - 0 1", "duplicates"),
+        ("4k3/8/8/8/8/8/8/4K2R w H - 0 1", "K, Q, k, q"),
         ("4k3/8/8/8/8/8/8/4K3 w - z6 0 1", "invalid en passant"),
         ("4k3/8/8/8/8/8/8/4K3 w - a3 0 1", "wrong rank"),
         ("4k3/3p4/8/3p4/8/8/8/4K3 w - d6 0 1", "en passant"),

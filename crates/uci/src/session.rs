@@ -411,6 +411,15 @@ fn parse_uci_fen(mut fen: String) -> Result<Position, String> {
     // UCI rejoins the fields with ASCII spaces. Keep any Unicode whitespace
     // inside its field by passing an invalid FEN character in its place.
     let fen = fen.replace(|ch: char| !ch.is_ascii() && ch.is_whitespace(), "\u{fffd}");
+    let mut fields = fen.splitn(4, ' ');
+    if let (Some(pieces), Some(color), Some("KK" | "H"), Some(rest)) =
+        (fields.next(), fields.next(), fields.next(), fields.next())
+        && let Ok(position) = Position::from_fen(&format!("{pieces} {color} K {rest}"))
+    {
+        return Ok(position);
+    }
+    // The rules reader checks the home squares under K. If the translated FEN
+    // is invalid, report the diagnostic for the original FEN.
     Position::from_fen(&fen).map_err(|cause| format!("invalid FEN: {cause}"))
 }
 

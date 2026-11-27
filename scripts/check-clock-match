@@ -51,12 +51,9 @@ GAME_FINISHED = "game_finished"
 TOURNAMENT_FINISHED = "tournament_finished"
 EVENT_KINDS = PASSIVE_EVENTS | {GAME_ABORTED, GAME_FINISHED, TOURNAMENT_FINISHED}
 RESULT_MARKER = re.compile(rf"(?:^|\s)({RESULT})$")
-PGN_HEADERS = re.compile(r"(?:\[[^\n]*\]\n|[ \t]*\n|[%;][^\n]*\n)*")
+PGN_HEADERS = re.compile(r"(?:\[[^\n]*\]\n|[ \t]*\n)*")
 RESULT_HEADER = re.compile(r'(?m)^\[Result[ \t]+"([^"\n]*)"\][ \t]*$')
-PGN_TOKENS = re.compile(
-    r"(?m)\{[^}]*\}|^%[^\n]*|;[^\n]*|[{}()]|"
-    r"(?P<annotation>\d+\.(?:\.\.)?|\$\d+|[!?]{1,2})|[^\s{}();!?$]+|\S"
-)
+PGN_TOKENS = re.compile(r"(?P<comment>\{[^}]*\})|[^\s{}]+|[{}]")
 # These are the console shapes reviewed for the pinned fastchess release.
 # Review the list when deliberately changing the pin. Everything else fails.
 CONSOLE = tuple(map(re.compile, (
@@ -125,10 +122,14 @@ def valid_diagnostics(lines):
     info, position, moves = (shape.fullmatch(line) for shape, line in zip(DIAGNOSTICS, lines))
     if not (info and position and moves):
         return False
+    fen = position[1]
+    if not fen.isascii():
+        return False
     try:
-        return chess.Board(position[1]).is_valid()
+        board = chess.Board(fen)
     except ValueError:
         return False
+    return board.is_valid() and board.fen(en_passant="fen") == fen
 
 
 def unexpected_output(report, raw):
@@ -225,43 +226,32 @@ def pgn_mainline(record, result):
     if RESULT_HEADER.findall(headers[0]) != [result] or not marker or marker[1] != result:
         return None
 
-    # The replay library tolerates unfinished comments, extra result markers
-    # and unrecognized tokens. Read the original mainline to check all three.
-    depth = 0
-    markers = []
-    moves = []
+    # The pinned PGN writer emits move numbers, SAN, brace comments and a
+    # final result. Keep every other token for comparison with legal replay.
+    tokens = []
     for match in PGN_TOKENS.finditer(record, headers.end()):
-        token = match[0]
-        if token in ("{", "}"):
-            return None
-        if token == "(":
-            depth += 1
-        elif token == ")":
-            if not depth:
-                return None
-            depth -= 1
-        elif not depth and token[0] not in "{%;" and not match["annotation"]:
-            if token in ("1-0", "0-1", "1/2-1/2", "*"):
-                markers.append((token, match.start()))
-            else:
-                moves.append(token)
-    if depth == 0 and markers == [(result, marker.start(1))]:
-        return moves
+        if match.start() == marker.start(1) and match[0] == result:
+            return tokens
+        if not match["comment"]:
+            tokens.append(match[0])
 
 
-def matches_mainline(game, tokens):
+def matches_mainline(game, tokens, plies):
     moves = list(game.mainline_moves())
-    if len(moves) != len(tokens):
+    if len(moves) != plies:
         return False
     position = game.board()
-    try:
-        for token, move in zip(tokens, moves):
-            if position.parse_san(token) != move or not position.is_legal(move):
-                return False
-            position.push(move)
-    except ValueError:
-        return False
-    return True
+    expected = []
+    for index, move in enumerate(moves):
+        if not position.is_legal(move):
+            return False
+        if position.turn == chess.WHITE:
+            expected.append(f"{position.fullmove_number}.")
+        elif index == 0:
+            expected.append(f"{position.fullmove_number}...")
+        expected.append(position.san(move))
+        position.push(move)
+    return tokens == expected
 
 
 def replay_pgn(path, events):
@@ -291,8 +281,9 @@ def replay_pgn(path, events):
         game_ids.add(number)
         result = game.headers["Result"]
         tokens = pgn_mainline(record, result)
+        plies, finish_result = events.get(number, (None, None))
         if (tokens is not None and not stream.read().strip()
-                and events.get(number) == (len(tokens), result) and matches_mainline(game, tokens)):
+                and finish_result == result and matches_mainline(game, tokens, plies)):
             continue
         replay_errors += 1
     return game_ids, terminations, replay_errors

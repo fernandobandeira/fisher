@@ -100,6 +100,15 @@ class ClockMatchTests(unittest.TestCase):
                 verdict, _ = self.verify_match(warning, info, "Position; fen / w - - 0 1", moves)
                 self.assertEqual(verdict, 1, "invalid FEN passed the match")
 
+    def test_warning_positions_require_canonical_fen(self):
+        info, position, moves = DIAGNOSTICS
+        prefix = position.rsplit(" ", 2)[0]
+        for warning in (REPETITION, FIFTY_MOVE):
+            for fields in ("0 0", "0 ４", "0 04", "0", "0 4 extra", "0 4 "):
+                with self.subTest(warning=warning, fields=fields):
+                    verdict, _ = self.verify_match(warning, info, f"{prefix} {fields}", moves)
+                    self.assertEqual(verdict, 1, f"noncanonical FEN passed: {fields!r}")
+
     def test_warnings_reject_colour_escapes(self):
         # Logger::print at d7b47e8 writes these groups verbatim, and neither
         # archived match contains ESC. The red/reset pair from compliance.hpp
@@ -172,6 +181,21 @@ class ClockMatchTests(unittest.TestCase):
         verdict, summary = self.verify_match(pgn=PGN.replace("Na3 e5", "Na3 e5 Qz9"))
         self.assertEqual(verdict, 1, "Qz9 was skipped during replay")
         self.assertIn("PGN replay or record errors: 1\n", summary)
+
+    def test_pgn_rejects_tokens_not_written_by_fastchess(self):
+        for movetext in (
+            "4. Na3 %garbage e5 1/2-1/2",
+            "4. Na3 stray e5 1/2-1/2",
+            "4. Na3 e5 0-1 1/2-1/2",
+            "%garbage\n4. Na3 e5 1/2-1/2",
+            "4. Na3 $1 e5 1/2-1/2",
+            "4. Na3 (4. Nf3) e5 1/2-1/2",
+        ):
+            with self.subTest(movetext=movetext):
+                pgn = PGN.replace("4. Na3 e5 1/2-1/2", movetext)
+                verdict, summary = self.verify_match(pgn=pgn)
+                self.assertEqual(verdict, 1, f"unwritten PGN form passed: {movetext!r}")
+                self.assertIn("PGN replay or record errors: 1\n", summary)
 
     def test_empty_history_requires_its_space(self):
         for history, unexpected in (("Moves; ", 0), ("Moves;", 1), ("Moves;  ", 1)):
@@ -296,8 +320,7 @@ sys.stdin.buffer.read(1)
     def test_pgn_requires_explicit_header_and_one_top_level_result(self):
         cases = {
             "complete": (PGN, 0),
-            "closed comment and variation": (
-                PGN.replace("Na3 e5", "Na3 {comment 0-1} (4. Nf3) e5"), 0),
+            "closed comment": (PGN.replace("Na3 e5", "Na3 {comment 0-1} e5"), 0),
             "missing Result header": (PGN.replace('[Result "1/2-1/2"]\n', ""), 1),
             "result inside unfinished comment": (PGN.replace("e5 1/2-1/2", "e5 { 1/2-1/2"), 1),
             "unfinished comment after result": (PGN.rstrip() + " { trailing comment\n1/2-1/2", 1),
@@ -350,11 +373,28 @@ sys.stdin.buffer.read(1)
         self.assertEqual(terminations["interrupted"], 2)
         self.assertEqual(terminations["time_forfeit"], 0)
 
+    def assert_event_inventory(self, page, recognized):
+        section = page.split("### Recognized JSON events\n\n", 1)[1]
+        inventory = section.split("\n\n", 1)[0]
+        documented = set(re.findall(r"`([^`\n]+)`", inventory))
+        self.assertEqual(documented, recognized)
+
     def test_evidence_page_lists_recognized_events(self):
         page = (ROOT / "docs/guardrails/behaviour-evidence.md").read_text()
-        section = page.split("## Real-clock match", 1)[1]
-        documented = set(re.findall(r"`(move|[a-z]+_[a-z]+)`", section))
-        self.assertEqual(documented, MATCH.EVENT_KINDS)
+        self.assert_event_inventory(page, MATCH.EVENT_KINDS)
+
+    def test_event_inventory_rejects_extra_and_missing_names(self):
+        page = (ROOT / "docs/guardrails/behaviour-evidence.md").read_text()
+        kinds = MATCH.EVENT_KINDS
+        for case, document, recognized, name in (
+            ("extra in page", page.replace("`move`,", "`move`, `pause`,"), kinds, "pause"),
+            ("missing from page", page.replace("`move`, ", ""), kinds, "move"),
+            ("extra in script", page, kinds | {"pause"}, "pause"),
+            ("missing from script", page, kinds - {"move"}, "move"),
+        ):
+            with self.subTest(case=case):
+                with self.assertRaisesRegex(AssertionError, name):
+                    self.assert_event_inventory(document, recognized)
 
 
 if __name__ == "__main__":

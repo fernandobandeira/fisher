@@ -1,4 +1,5 @@
 use std::{
+    num::NonZeroU8,
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -7,7 +8,7 @@ use std::{
 };
 
 use rules::{Color, Move, Position};
-use search::minimax_until_interrupted;
+use search::{SearchResult, minimax_variations_until_interrupted};
 
 pub use search::Score;
 
@@ -62,7 +63,7 @@ pub enum SearchReport {
 /// Reports each finished depth, then `BestMove` with the move to send.
 /// If interrupted or limited before depth 1 finishes, the move is the first
 /// legal move. A zero depth, node or time limit permits no searched depth.
-/// A terminal root reports depth 0 then `BestMove(None)` before applying limits.
+/// A terminal root reports depth 0 then `BestMove(None)`, even if interrupted.
 #[expect(
     clippy::needless_pass_by_value,
     reason = "The worker owns the request throughout the search"
@@ -212,12 +213,7 @@ fn run_search<const NODES_BETWEEN_READINGS: u64>(
     before_node: &mut dyn FnMut(),
     mut limits: SearchLimits<'_>,
 ) -> u64 {
-    let fallback = request.position.legal_moves().into_iter().next();
-    if limits.interrupted() {
-        report(SearchReport::BestMove(fallback));
-        return 0;
-    }
-    let Some(fallback) = fallback else {
+    let Some(fallback) = request.position.legal_moves().into_iter().next() else {
         let result = search::minimax(&request.position, 1);
         report(SearchReport::FinishedDepth(FinishedDepth {
             depth: 0,
@@ -237,10 +233,13 @@ fn run_search<const NODES_BETWEEN_READINGS: u64>(
         let Some(started) = limits.start_depth(&elapsed, last_depth_duration) else {
             break;
         };
-        let Some(result) = minimax_until_interrupted(&request.position, depth, || {
-            before_node();
-            limits.stop_before_node::<NODES_BETWEEN_READINGS>(&elapsed)
-        }) else {
+        let Some(result) =
+            minimax_variations_until_interrupted(&request.position, depth, NonZeroU8::MIN, || {
+                before_node();
+                limits.stop_before_node::<NODES_BETWEEN_READINGS>(&elapsed)
+            })
+            .map(SearchResult::from)
+        else {
             break;
         };
         best_move = result.best_move.unwrap_or(best_move);

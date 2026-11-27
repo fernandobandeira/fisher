@@ -5,8 +5,8 @@ edition.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+deepening = { path = "../deepening" }
 rules = { path = "../rules" }
-search = { path = "../search" }
 
 [lints]
 workspace = true

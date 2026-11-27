@@ -136,11 +136,12 @@ pub(super) fn parse_command(line: &str) -> Input {
     Input::Unknown
 }
 
-fn parse_setoption<'a>(mut tokens: impl Iterator<Item = &'a str>) -> Input {
-    if tokens.next() != Some("name")
-        || !tokens
-            .next()
-            .is_some_and(|name| name.eq_ignore_ascii_case(MULTIPV))
+fn parse_setoption<'a>(tokens: impl Iterator<Item = &'a str>) -> Input {
+    // Stockfish consumes whatever token occupies the name position.
+    let mut tokens = tokens.skip(1);
+    if !tokens
+        .next()
+        .is_some_and(|name| name.eq_ignore_ascii_case(MULTIPV))
     {
         return Input::Ignored;
     }

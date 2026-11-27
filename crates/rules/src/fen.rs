@@ -26,8 +26,8 @@ impl Position {
     ///
     /// # Errors
     ///
-    /// Reports the invalid field, a position that lacks the required pieces, or a position in
-    /// which the color that is not the side to move is in check.
+    /// Reports an invalid field, invalid piece placement, or a position in which the color
+    /// that is not the side to move is in check.
     pub fn from_fen(fen: &str) -> Result<Self, FenError> {
         let fields: Vec<_> = fen.split_whitespace().collect();
         let [pieces, color, castling, en_passant, halfmove, fullmove] = fields.as_slice() else {
@@ -148,6 +148,7 @@ impl Position {
                 "a position cannot have a pawn on rank 1 or rank 8",
             ));
         }
+        self.check_pawn_count()?;
         for (_, color, castle) in CASTLING_RIGHTS {
             if self.castling_rights.has(color, castle)
                 && !self.has_castling_pieces_at_home(color, castle)
@@ -158,6 +159,23 @@ impl Position {
             }
         }
         self.check_en_passant()
+    }
+
+    fn check_pawn_count(&self) -> Result<(), FenError> {
+        let mut pawns = [0; 2];
+        for piece in self.pieces.iter().flatten() {
+            if piece.kind == PieceKind::Pawn {
+                let count = match piece.color {
+                    Color::White => &mut pawns[0],
+                    Color::Black => &mut pawns[1],
+                };
+                *count += 1;
+            }
+        }
+        if pawns.into_iter().any(|count| count > 8) {
+            return Err(FenError("a color cannot have more than eight pawns"));
+        }
+        Ok(())
     }
 
     fn check_en_passant(&self) -> Result<(), FenError> {

@@ -588,10 +588,12 @@ fn recognized_command<'a>(words: &mut impl Iterator<Item = &'a str>) -> Option<&
 // The name is case insensitive and ends at the value marker. Only a declared
 // name can cause a response, and the busy rejection takes precedence.
 fn multipv_response<'a>(
-    mut words: impl Iterator<Item = &'a str>,
+    words: impl Iterator<Item = &'a str>,
     busy: bool,
 ) -> Option<CommandResponse> {
-    if words.next() != Some("name") || !words.next()?.eq_ignore_ascii_case("MultiPV") {
+    // As in Stockfish, the token before the name can be any word.
+    let mut words = words.skip(1);
+    if !words.next()?.eq_ignore_ascii_case("MultiPV") {
         return None;
     }
     let valid = match words.next() {
@@ -638,6 +640,10 @@ fn fen_position<'a>(
     let [pieces, color, castling, en_passant, clocks @ ..] = fields.as_slice() else {
         return None;
     };
+    // Shakmaty reads promoted-piece markers even in standard castling mode.
+    if pieces.contains('~') {
+        return None;
+    }
     match clocks {
         [] => {}
         [halfmove] => {

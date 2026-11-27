@@ -1,13 +1,16 @@
 use std::{
     ffi::OsStr,
     io::{self, Write},
+    num::NonZeroU8,
+    sync::{Arc, atomic::AtomicBool},
+    time::Instant,
 };
 
+use deepening::{Limits, SearchReport, SearchRequest, search};
 use rules::Position;
-use search::minimax;
 
 const POSITIONS: &str = include_str!("../../../expectations/perft.epd");
-const DEPTH: u8 = 4;
+const DEPTH: u64 = 5;
 
 /// Runs the bench for the first command-line argument `bench` and returns whether it matched.
 ///
@@ -27,7 +30,22 @@ pub fn run_if_requested(argument: Option<&OsStr>, output: &mut impl Write) -> io
     for (index, line) in positions.enumerate() {
         let fen = line.split(';').next().unwrap_or_default().trim();
         let position = Position::from_fen(fen).map_err(io::Error::other)?;
-        let nodes = minimax(&position, DEPTH).nodes;
+        let request = SearchRequest {
+            position,
+            limits: Limits {
+                depth: Some(DEPTH),
+                ..Limits::default()
+            },
+            requested_variations: NonZeroU8::MIN,
+            interrupt: Arc::new(AtomicBool::new(false)),
+            started: Instant::now(),
+        };
+        let mut nodes = 0;
+        search(request, &mut |report| {
+            if let SearchReport::FinishedDepth(finished) = report {
+                nodes = finished.nodes;
+            }
+        });
         writeln!(output, "Position {}: {nodes}", index + 1)?;
         total += nodes;
     }

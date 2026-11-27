@@ -9,7 +9,7 @@ import sys
 
 ALLOWED = {
     "fisher": {"bench", "deepening", "uci"},
-    "bench": {"rules", "search"},
+    "bench": {"deepening", "rules"},
     "search": {"rules"},
     "uci": {"deepening", "rules"},
     "deepening": {"rules", "search"},
@@ -105,7 +105,7 @@ def self_test():
             package("rules", [dict(uci, path="/other/crates/uci"), shakmaty]),
             package("xtask", []),
             package("search", [rules, shakmaty]),
-            package("bench", [rules, search]),
+            package("bench", [deepening, rules]),
             package("deepening", [rules, search]),
         ],
     }
@@ -124,9 +124,10 @@ def self_test():
         dict(shakmaty, kind=None, rename="oracle", optional=True),
     ]
     metadata["packages"][4]["dependencies"].append(uci)
-    metadata["packages"][5]["dependencies"].append(uci)
+    metadata["packages"][5]["dependencies"].extend([uci, search])
     metadata["packages"][1]["targets"][0]["src_path"] = "/workspace/crates/uci/unchecked.rs"
     expected = [
+        "bench -> search (normal dependency) is forbidden.",
         "bench -> uci (normal dependency) is forbidden.",
         "deepening -> uci (normal dependency) is forbidden.",
         "fisher -> rules (dev dependency) is forbidden.",

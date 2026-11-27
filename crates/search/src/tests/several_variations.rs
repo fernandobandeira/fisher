@@ -2,14 +2,14 @@
 //! The D13 and D48 checks for fisher-8hc.9. The tests here supply
 //! hand-written variations before search can return several of them.
 
-use std::{cmp::Reverse, error::Error};
+use std::{cmp::Reverse, error::Error, fmt::Display};
 
 use rules::{Move, Position};
 use shakmaty::{CastlingMode, Chess, fen::Fen};
 
 use super::{
-    comparison::{move_text, score_value},
-    plain_minimax::plain_minimax,
+    comparison::{check_each_prefix, move_text, score_value, visit_comparison_corpus},
+    plain_minimax::{plain_minimax, scored_variations},
     principal_variation,
 };
 use crate::Score;
@@ -17,7 +17,36 @@ use crate::Score;
 type TestResult = Result<(), Box<dyn Error>>;
 pub(super) type ScoredVariation<'a> = (Score, &'a [Move]);
 
-/// Checks the count, distinct root moves, exact scores, rank and D5 replay.
+/// Checks the same positions and depths as the every-commit comparison.
+/// The closure searches without interruption. At a terminal root it must
+/// return `Some(vec![])`, a finished result with no variations.
+/// The existing setting-1 search's empty principal variation maps to
+/// no first variation. A closure returning `None` failed to finish.
+pub(super) fn check_comparison_corpus(
+    mut search: impl FnMut(&Position, u8, u8) -> Option<Vec<(Score, Vec<Move>)>>,
+) -> TestResult {
+    visit_comparison_corpus(|root, depth| {
+        let single = crate::minimax(root, depth);
+        let single_moves = single.principal_variation.as_slice();
+        let first = (!single_moves.is_empty()).then_some((single.score, single_moves));
+        for requested in [2, 3, 255] {
+            let case = || format!("{} at depth {depth}, setting {requested}", root.to_fen());
+            let result = search(root, depth, requested)
+                .ok_or_else(|| format!("{}: expected a finished result", case()))?;
+            let variations: Vec<_> = result
+                .iter()
+                .map(|(score, moves)| (*score, moves.as_slice()))
+                .collect();
+            check_variations(root, depth, requested, &variations)
+                .and_then(|()| check_first_variation(&variations, first))
+                .map_err(|error| format!("{}: {error}", case()))?;
+        }
+        Ok(())
+    })
+}
+
+/// Checks the count, distinct root moves, exact scores, rank, D5 replay and
+/// the actual moves and scores of every prefix.
 /// Plain minimax scores each root move with its own ply included in the mate
 /// distance. Only scores are ranked here, so any permutation of tied moves
 /// passes if each variation earns its score.
@@ -62,15 +91,26 @@ pub(super) fn check_variations(
                 "variation {number}: expected score {ranked_score:?} at this rank, got {score:?}"
             ));
         }
-        principal_variation::verify(
-            &chess,
-            depth,
-            score_value(score),
-            moves.iter().copied().map(move_text),
-        )
-        .map_err(|error| format!("variation {number}: {error}"))?;
+        check_variation(root, &chess, depth, score, moves)
+            .map_err(|error| format!("variation {number}: {error}"))?;
     }
     Ok(())
+}
+
+fn check_variation(
+    root: &Position,
+    chess: &Chess,
+    depth: u8,
+    score: Score,
+    moves: &[Move],
+) -> Result<(), String> {
+    principal_variation::verify(
+        chess,
+        depth,
+        score_value(score),
+        moves.iter().copied().map(move_text),
+    )?;
+    check_each_prefix(root, depth, score, moves)
 }
 
 fn check_root_move(
@@ -133,8 +173,11 @@ fn play<const N: usize>(root: &Position, texts: [&str; N]) -> Result<[Move; N], 
     moves.try_into().map_err(|_| format!("expected {N} moves"))
 }
 
-fn assert_rejected(result: Result<(), String>, reason: &str) -> TestResult {
-    let error = result.err().ok_or_else(|| format!("accepted: {reason}"))?;
+fn assert_rejected(result: Result<(), impl Display>, reason: &str) -> TestResult {
+    let error = result
+        .err()
+        .ok_or_else(|| format!("accepted: {reason}"))?
+        .to_string();
     assert!(error.contains(reason), "expected {reason:?}, got {error}");
     Ok(())
 }
@@ -167,6 +210,52 @@ fn accepts_mate_before_centipawns_and_rejects_the_reversed_order() -> TestResult
     assert_rejected(
         check_variations(&root, 2, 1, &[material]),
         "expected score Mate { plies: 1, winning: true } at this rank",
+    )
+}
+
+#[test]
+fn rejects_a_slower_win_before_a_faster_win() -> TestResult {
+    let root = Position::from_fen(MATE_IN_ONE)?;
+    let immediate = play(&root, ["g6g7"])?;
+    let delayed = play(&root, ["g6g5", "h8h7", "g5g7"])?;
+    let immediate = (WIN_IN_ONE, immediate.as_slice());
+    let delayed = (
+        Score::Mate {
+            plies: 3,
+            winning: true,
+        },
+        delayed.as_slice(),
+    );
+    check_variations(&root, 4, 2, &[immediate, delayed])?;
+    assert_rejected(
+        check_variations(&root, 4, 2, &[delayed, immediate]),
+        "expected score Mate { plies: 1, winning: true } at this rank, got Mate { plies: 3, winning: true }",
+    )
+}
+
+#[test]
+fn rejects_a_faster_loss_before_a_slower_loss() -> TestResult {
+    let root = Position::from_fen("1k6/8/K7/4Q3/8/8/8/8 b - - 0 1")?;
+    let immediate = play(&root, ["b8a8", "e5h8"])?;
+    let delayed = play(&root, ["b8c8", "e5e7", "c8b8", "e7d8"])?;
+    let immediate = (
+        Score::Mate {
+            plies: 2,
+            winning: false,
+        },
+        immediate.as_slice(),
+    );
+    let delayed = (
+        Score::Mate {
+            plies: 4,
+            winning: false,
+        },
+        delayed.as_slice(),
+    );
+    check_variations(&root, 5, 2, &[delayed, immediate])?;
+    assert_rejected(
+        check_variations(&root, 5, 2, &[immediate, delayed]),
+        "expected score Mate { plies: 4, winning: false } at this rank, got Mate { plies: 2, winning: false }",
     )
 }
 
@@ -276,6 +365,41 @@ fn rejects_an_exact_root_score_that_the_moves_do_not_support() -> TestResult {
 }
 
 #[test]
+fn rejects_a_reply_copied_from_a_different_variation() -> TestResult {
+    let root = Position::starting();
+    let d4 = play(&root, ["d2d4", "e7e5"])?;
+    let [_, e5_after_d4] = d4;
+    let [e4] = play(&root, ["e2e4"])?;
+    assert_rejected(
+        check_variations(&root, 2, 2, &[(EVEN, &d4), (EVEN, &[e4, e5_after_d4])]),
+        "e7e5 is not legal after 1 plies",
+    )
+}
+
+#[test]
+fn rejects_a_later_variation_with_a_worse_reply() -> TestResult {
+    let root =
+        Position::from_fen("r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1")?;
+    let single = crate::minimax(&root, 3);
+    let worse_reply = play(&root, ["d5d6", "h3g2", "e2a6"])?;
+    assert_rejected(
+        check_variations(
+            &root,
+            3,
+            2,
+            &[
+                (single.score, &single.principal_variation),
+                (Score::Centipawns(200), &worse_reply),
+            ],
+        ),
+        concat!(
+            "after h3g2, 2 plies into the principal variation, ",
+            "plain minimax scores Centipawns(800), not Centipawns(200)"
+        ),
+    )
+}
+
+#[test]
 fn accepts_no_variation_at_a_terminal_root() -> TestResult {
     for fen in [
         "7k/6Q1/6K1/8/8/8/8/8 b - - 0 1",
@@ -311,4 +435,70 @@ fn first_variation_must_match_the_single_score_and_all_moves() -> TestResult {
         )?;
     }
     Ok(())
+}
+
+#[test]
+fn plain_minimax_passes_the_comparison_corpus() -> TestResult {
+    check_comparison_corpus(|root, depth, requested| {
+        Some(scored_variations(root, depth, requested))
+    })
+}
+
+#[test]
+#[ignore = "fisher-8hc.9 supplies the search that accepts a requested count"]
+fn search_passes_the_comparison_corpus() -> TestResult {
+    check_comparison_corpus(|root, depth, _requested| {
+        crate::minimax_until_interrupted(root, depth, || false).map(|single| {
+            if single.principal_variation.is_empty() {
+                Vec::new()
+            } else {
+                vec![(single.score, single.principal_variation)]
+            }
+        })
+    })
+}
+
+#[test]
+fn corpus_rejects_a_duplicate_at_setting_three() -> TestResult {
+    let result = check_comparison_corpus(|root, depth, requested| {
+        let mut variations = scored_variations(root, depth, requested);
+        if requested == 3
+            && let [first, second, ..] = variations.as_mut_slice()
+        {
+            *second = first.clone();
+        }
+        Some(variations)
+    });
+    assert_rejected(
+        result,
+        "at depth 1, setting 3: variation 2: repeated root move",
+    )
+}
+
+#[test]
+fn corpus_rejects_a_different_first_variation_at_setting_255() -> TestResult {
+    let result = check_comparison_corpus(|root, depth, requested| {
+        let mut variations = scored_variations(root, depth, requested);
+        if requested == 255
+            && let [first, second, ..] = variations.as_mut_slice()
+        {
+            std::mem::swap(first, second);
+        }
+        Some(variations)
+    });
+    assert_rejected(
+        result,
+        "at depth 1, setting 255: first variation differs from the result at setting 1",
+    )
+}
+
+#[test]
+fn corpus_requires_a_finished_result_at_a_terminal_root() -> TestResult {
+    let result = check_comparison_corpus(|root, depth, requested| {
+        (!root.legal_moves().is_empty()).then(|| scored_variations(root, depth, requested))
+    });
+    assert_rejected(
+        result,
+        "k7/1Q6/2K5/8/8/8/8/8 b - - 0 1 at depth 1, setting 2: expected a finished result",
+    )
 }

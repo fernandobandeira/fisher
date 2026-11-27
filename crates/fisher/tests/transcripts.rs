@@ -107,6 +107,21 @@ fn position_fen_five_fields() -> io::Result<()> {
 }
 
 #[test]
+fn kingside_k() -> io::Result<()> {
+    play_transcript("castling-letters/kingside-k")
+}
+
+#[test]
+fn kingside_kk() -> io::Result<()> {
+    play_transcript("castling-letters/kingside-kk")
+}
+
+#[test]
+fn kingside_h() -> io::Result<()> {
+    play_transcript("castling-letters/kingside-h")
+}
+
+#[test]
 fn go_parameters() -> io::Result<()> {
     play_transcript("go-parameters")
 }

@@ -1,9 +1,10 @@
 # Kingside castling with KK and H
 
 Staged on 2026-11-26 by fisher-vls for fisher-4h7, and given the bare
-`position` command on 2026-11-27 after review. The sessions stay staged
-until fisher-4h7 adds transcript tests that name them as
-`castling-letters/<name>` after fisher-b0b.
+`position` command on 2026-11-27 after review. fisher-4h7 activated them
+in pull request #114, merged as `3a4ce0d`. Transcript tests in
+`crates/fisher/tests/transcripts.rs` play each session by naming it as
+`castling-letters/<name>`.
 
 ## Owner decision
 
@@ -121,26 +122,39 @@ through a test added for the run and then removed:
 
 The last row stands for an engine that accepts the field but grants no right.
 An engine that reads `KK` or `H` only before a move list rejects the bare
-command, as fisher does today, and fails at line 17 like the second and third
+command, as fisher at `ce3dd17` did, and fails at line 17 like the second and third
 rows.
 
 ## Activation in fisher-4h7
 
-- Add transcript tests that name the three sessions as `castling-letters/<name>`.
-- Change the runner's own castling-field check in
-  `crates/fisher/tests/transcripts.rs` (about line 488), which rejects `KK`
-  and `H` today. The runner then sets up the reference position from the
-  same field, which the first command's `{pv}` and `{legal}` need.
-- Keep the history checker's behaviour. `position` in
-  `crates/uci/tests/support/search_history.rs` reads the field with
-  shakmaty in standard castling mode and already accepts `K`, `KK` and `H`
-  with 15 legal moves before `e1g1` (a review of this staging compiled it
-  unchanged).
-- Add an explicit check that `rules::Position::from_fen` still rejects both
-  `KK` and `H`. The owner decision keeps that parser strict, and nothing in
-  these sessions would fail if `H` were accepted there instead of at the UCI
-  boundary. `crates/rules/tests/positions.rs` (about line 132) rejects `X`
-  and `KK` today but has no `H` case. This staging adds no test.
+The staging listed four things for fisher-4h7 to do. Each is recorded here
+as it merged in `3a4ce0d`.
+
+- Done: transcript tests in `crates/fisher/tests/transcripts.rs` name the
+  three sessions as `castling-letters/<name>`.
+- Done: the runner's own FEN check, `check_fen_text` in
+  `crates/fisher/tests/transcripts.rs`, accepts the complete fields `KK`
+  and `H` and still rejects `KKK` (`the_runner_sets_up_the_fens_fisher_accepts`).
+  The runner sets up the reference position from the same field, which the
+  first command's `{pv}` and `{legal}` need
+  (`the_runner_tracks_kingside_castling_spellings`).
+- Changed, not kept: the staging asked to keep the history checker's
+  behaviour, and fisher-4h7 changed it. `position` in
+  `crates/uci/tests/support/search_history.rs` now checks the castling
+  field itself before shakmaty reads it in standard castling mode. It
+  reads only the complete fields `KK` and `H` as `K`, and otherwise allows
+  only distinct letters from `KQkq` or `-`. Before, shakmaty also accepted
+  other spellings, such as `KKK`.
+  The merged commit gives the reason: shakmaty's leniency made the checker
+  reject real engine diagnostics and accept histories that omitted them.
+  `K`, `KK` and `H` still give the same positions before and after `e1g1`
+  (`kingside_castling_spellings_agree_with_the_history_checker` in
+  `crates/uci/tests/search_history.rs`).
+- Done: `rejected_fens_identify_the_problem` in
+  `crates/rules/tests/positions.rs` checks that `rules::Position::from_fen`
+  rejects both `KK` and `H`. The owner decision keeps that parser strict,
+  and nothing in these sessions would fail if `H` were accepted there
+  instead of at the UCI boundary. The staging added no test.
 
 <details>
 <summary>Stockfish 19 input and output</summary>

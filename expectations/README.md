@@ -16,7 +16,7 @@ The 15 searched transcripts that expect an `info` line come from fisher-2aj.2.
 ## UCI transcripts
 
 The runner plays a session under `uci/` when a transcript test names it.
-The `whitespace/` and `castling-letters/` sessions are staged for activation.
+Transcript tests name the `whitespace/` and `castling-letters/` sessions too.
 Each `.uci` file describes one session with a fresh fisher process. Read
 the records top to bottom. Blank lines and lines starting with `#` are
 comments. The header gives the sources and date. A comment above a command
@@ -390,7 +390,8 @@ omitted FEN fields and fisher's responses to the equivalent six-field commands.
 ## Command whitespace transcripts
 
 fisher-82i staged the [whitespace sessions](uci/whitespace/README.md) on
-2026-11-26 before fisher-b0b activates them. They follow Stockfish 19's
+2026-11-26, and fisher-b0b activated them in pull request #109 (`2d517cf`).
+They follow Stockfish 19's
 token separators: U+00A0 stays inside a token, while horizontal and vertical
 tab separate tokens. The README records the probes and a hex dump of every
 send that holds a special byte.
@@ -398,5 +399,5 @@ send that holds a special byte.
 ## Castling letters
 
 fisher-vls staged the [sessions for kingside castling with `KK` and `H`](uci/castling-letters/README.md)
-on 2026-11-26. The sessions stay staged until fisher-4h7 adds transcript
-tests that name them as `castling-letters/<name>`.
+on 2026-11-26, and fisher-4h7 activated them in pull request #114
+(`3a4ce0d`) with transcript tests that name them as `castling-letters/<name>`.

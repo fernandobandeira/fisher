@@ -1,8 +1,7 @@
 #![cfg(test)]
 //! D68, staged for fisher-707.4. Add `mod from_previous_root;` to
-//! `remembered_move.rs` when the interruptible search takes what D62 remembers.
-//! `OrderingMemory::default()` stands for the proposed empty value until the
-//! owner chooses its name and constructor.
+//! `remembered_move.rs` when the interruptible search takes `MoveOrderMemory`.
+//! `MoveOrderMemory::default()` stands in for the empty constructor.
 
 use std::{error::Error, num::NonZeroU8};
 
@@ -15,14 +14,14 @@ use super::{
     },
     FIRST, SECOND, SHARED_MOVE,
 };
-use crate::{OrderingMemory, minimax_variations_until_interrupted};
+use crate::{MoveOrderMemory, minimax_variations_until_interrupted};
 
 #[test]
 fn the_remembered_move_is_played_from_the_position_in_hand() -> Result<(), Box<dyn Error>> {
     let first = Position::from_fen(FIRST)?;
     let second = Position::from_fen(SECOND)?;
     let depth = 1;
-    let mut remembered = OrderingMemory::default();
+    let mut remembered = MoveOrderMemory::default();
     let previous = minimax_variations_until_interrupted(
         &first,
         depth,
@@ -50,11 +49,12 @@ fn the_remembered_move_is_played_from_the_position_in_hand() -> Result<(), Box<d
     )
     .ok_or("second search did not finish")?;
     let expected = plain_minimax(&second, depth);
-    let (_, moves) = result
+    let (score, moves) = result
         .variations
         .first()
         .ok_or("missing principal variation")?;
     assert_eq!(result.score, expected.score, "{SECOND}");
+    assert_eq!(*score, expected.score, "first variation score at {SECOND}");
     assert!(!moves.is_empty(), "missing root move at {SECOND}");
     check_each_prefix(&second, depth, result.score, moves)?;
     Ok(())

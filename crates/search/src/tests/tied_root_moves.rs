@@ -38,21 +38,35 @@ fn the_previous_best_move_ties_with_an_earlier_legal_move() -> Result<(), Box<dy
 
 #[test]
 fn the_tie_at_setting_two_crosses_the_last_requested_place() -> Result<(), Box<dyn Error>> {
+    const REQUESTED: usize = 2;
     let fen = POSITIONS
         .lines()
         .find_map(|line| line.strip_prefix("2 "))
         .ok_or("missing position at setting 2")?;
-    let next = plain_minimax(&Position::from_fen(fen)?, 2);
+    let position = Position::from_fen(fen)?;
+    let previous = plain_minimax(&position, 1)
+        .chosen_root_move()
+        .ok_or("depth 1 has no best move")?;
+    let next = plain_minimax(&position, 2);
 
-    // If at least three root moves share the best score, places 2 and 3 tie.
-    let equal_best = next
+    let equal_best: Vec<_> = next
         .root_moves
         .iter()
-        .filter(|&&(_, score)| score == next.score)
-        .count();
+        .filter_map(|&(movement, score)| (score == next.score).then_some(movement))
+        .collect();
     assert!(
-        equal_best >= 3,
-        "{fen}: only {equal_best} equal-best root moves at depth 2"
+        equal_best.len() > REQUESTED,
+        "{fen}: only {} equal-best root moves at depth 2",
+        equal_best.len()
+    );
+    let place = equal_best
+        .iter()
+        .position(|&movement| movement == previous)
+        .ok_or("the depth-1 best move no longer has the best score at depth 2")?
+        + 1;
+    assert!(
+        place > REQUESTED,
+        "{fen}: the depth-1 best move is at place {place}, within setting {REQUESTED}"
     );
     Ok(())
 }

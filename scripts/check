@@ -50,6 +50,8 @@ check Format 'cargo fmt --all' cargo fmt --all -- --check
 check Lints 'scripts/check' crates_inherit_lints
 check 'Crate boundary fixtures' 'scripts/check-crate-boundaries --self-test' \
     scripts/check-crate-boundaries --self-test
+check 'Crate source path fixtures' 'scripts/check-source-paths --self-test' \
+    scripts/check-source-paths --self-test
 check 'Guard-Change fixtures' 'scripts/check-guard-change --self-test' \
     scripts/check-guard-change --self-test
 check 'Await merge fixtures' 'scripts/test-await-merge' scripts/test-await-merge
@@ -59,6 +61,7 @@ check 'Advisory database fixtures' 'scripts/test-advisory-db' scripts/test-advis
 check 'Clocked SPRT fixtures' 'scripts/test-clocked-sprt' scripts/test-clocked-sprt
 check 'Hosted SPRT fixtures' 'scripts/test-hosted-sprt' scripts/test-hosted-sprt
 check 'Crate boundaries' 'scripts/check-crate-boundaries' scripts/check-crate-boundaries
+check 'Crate source paths' 'scripts/check-source-paths' scripts/check-source-paths
 check Clippy 'cargo clippy --locked --workspace --all-targets --all-features -- -D warnings' \
     cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 check Tests 'cargo test --locked --workspace' cargo test --locked --workspace

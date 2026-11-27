@@ -44,6 +44,36 @@ fn position_fen_rejects_three_and_seven_fields() {
 }
 
 #[test]
+fn position_fen_keeps_other_castling_fields_strict() {
+    // Only the complete fields KK and H on an orthodox position are aliases.
+    for (placement_and_color, field, diagnostic) in [
+        ("4k2r/8/8/8/8/8/8/4K3 b", "kk", "duplicates"),
+        ("4k2r/8/8/8/8/8/8/4K3 b", "h", "K, Q, k, q"),
+        ("4k3/8/8/8/8/8/8/R3K3 w", "A", "K, Q, k, q"),
+        ("r3k3/8/8/8/8/8/8/4K3 b", "a", "K, Q, k, q"),
+        ("4k3/8/8/8/8/8/8/4K3 w", "H", "K, Q, k, q"),
+        ("4k3/8/8/8/8/8/8/4K3 w", "KK", "duplicates"),
+        ("4k3/8/8/8/8/8/8/4K2R w", "HH", "K, Q, k, q"),
+        ("4k3/8/8/8/8/8/8/4K2R w", "KKK", "duplicates"),
+        ("4k3/8/8/8/8/8/8/4K2R w", "KH", "K, Q, k, q"),
+        ("4k3/8/8/8/8/8/8/R3K2R w", "HQ", "K, Q, k, q"),
+        ("4k3/8/8/8/8/8/8/R3K2R w", "KKQ", "duplicates"),
+        ("4k3/8/8/8/8/8/8/R3K2R w", "QQ", "duplicates"),
+        ("4k3/8/8/8/8/8/8/3K3R w", "H", "K, Q, k, q"),
+        ("4k3/8/8/8/8/8/8/3K3R w", "KK", "duplicates"),
+        ("4k3/8/8/8/8/8/8/4K1R1 w", "G", "K, Q, k, q"),
+        ("4k3/8/8/8/8/8/8/4K1R1 w", "H", "K, Q, k, q"),
+    ] {
+        let fen = format!("{placement_and_color} {field} - 0 1");
+        let result = parse_uci_fen(fen.clone());
+        assert!(
+            matches!(&result, Err(error) if error.contains(diagnostic)),
+            "{fen}: expected {diagnostic:?}, got {result:?}"
+        );
+    }
+}
+
+#[test]
 fn node_rate_uses_reported_milliseconds() {
     assert_eq!(nodes_per_second(10, 2), 5000);
     assert_eq!(nodes_per_second(10, 3), 3333);

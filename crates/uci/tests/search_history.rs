@@ -785,6 +785,169 @@ fn a_joined_en_passant_field_is_rejected_by_the_history_checker() {
 }
 
 #[test]
+fn kingside_castling_spellings_agree_with_the_history_checker() -> io::Result<()> {
+    // Stockfish 19 printed these positions for all three fields in fisher-4h7.
+    for field in ["K", "KK", "H"] {
+        let bare = format!("position fen 4k3/8/8/8/8/8/8/4K2R w {field} - 0 1");
+        for (command, expected_fen, from, to) in [
+            (bare.clone(), "4k3/8/8/8/8/8/8/4K2R w K - 0 1", "e1", "g1"),
+            (
+                format!("{bare} moves e1g1"),
+                "4k3/8/8/8/8/8/8/5RK1 b - - 1 1",
+                "e8",
+                "d8",
+            ),
+        ] {
+            let expected = rules::Position::from_fen(expected_fen).map_err(io::Error::other)?;
+            let movement = rules::Square::parse(from)
+                .zip(rules::Square::parse(to))
+                .and_then(|(from, to)| expected.legal_move(from, to, None))
+                .ok_or_else(|| {
+                    io::Error::other("expected a legal move in the reference position")
+                })?;
+            let input = format!("{command}\ngo\nquit\n");
+            let mut output = Vec::new();
+            let searched = command.clone();
+            uci::run_session(
+                io::Cursor::new(input),
+                &mut output,
+                "test",
+                move |request, send| {
+                    assert_eq!(request.position.to_fen(), expected_fen, "{searched}");
+                    send(SearchReport::BestMove(Some(movement)));
+                },
+            )?;
+            let text = std::str::from_utf8(&output).map_err(io::Error::other)?;
+            let mut history = [
+                Command(&command),
+                GO,
+                QUIT,
+                Report(SearchReport::BestMove(Some(movement))),
+                Response(text),
+            ];
+            accepts(&history);
+            history[4] = Response("bestmove 0000\n");
+            rejects(5, "a null move with legal moves available", &history);
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn the_history_checker_requires_rejections_for_other_castling_fields() -> io::Result<()> {
+    for fen in [
+        "4k3/8/8/8/8/8/8/4K2R w KKK - 0 1",
+        "4k3/8/8/8/8/8/8/4K2R w Kk - 0 1",
+        "4k2r/8/8/8/8/8/8/4K2R w KKk - 0 1",
+        "4k2r/8/8/8/8/8/8/4K2R w kk - 0 1",
+        "4k2r/8/8/8/8/8/8/4K2R w h - 0 1",
+        "4k3/8/8/8/8/8/8/R3K2R w A - 0 1",
+        "r3k3/8/8/8/8/8/8/4K2R w a - 0 1",
+        "r3k2r/8/8/8/8/8/8/R3K2R w KQkqq - 0 1",
+    ] {
+        check_rejected_castling_fen(fen, None)?;
+    }
+    for field in ["HH", "KH", "HK", "HQ", "KKQ"] {
+        check_rejected_castling_fen(&format!("4k3/8/8/8/8/8/8/R3K2R w {field} - 0 1"), None)?;
+    }
+    Ok(())
+}
+
+#[test]
+fn the_history_checker_accepts_distinct_standard_castling_letters() {
+    accepts(&[
+        Command("position fen 4k2r/8/8/8/8/8/8/4K2R w Kk - 0 1"),
+        Command("position fen r3k2r/8/8/8/8/8/8/R3K2R w qkQK - 0 1"),
+        READY,
+        READY_OK,
+        QUIT,
+    ]);
+}
+
+#[test]
+fn malformed_fens_with_castling_aliases_keep_the_previous_position() -> io::Result<()> {
+    for (field, castling_error) in [
+        ("KK", "castling rights must not contain duplicates"),
+        ("H", "castling rights must use K, Q, k, q, or -"),
+    ] {
+        for (fen, diagnostic) in [
+            (
+                format!("4k3/8/8/8/8/8/8/4K2R w {field} z9 0 1"),
+                "invalid en passant square",
+            ),
+            (
+                format!("4k3/8/8/8/8/8/8/4K2R w {field} - x 1"),
+                "halfmove clock must be an unsigned decimal integer",
+            ),
+            (
+                format!("4k3/8/8/8/8/8/8/4K2R w {field} - 0 0"),
+                "fullmove number must be a positive decimal integer",
+            ),
+            (
+                format!("4k3/8/8/8/8/8/8/4K3 w {field} - 0 1"),
+                castling_error,
+            ),
+            (
+                format!("4k3/8/8/8/8/8/8/3K3R w {field} - 0 1"),
+                castling_error,
+            ),
+        ] {
+            check_rejected_castling_fen(&fen, Some(diagnostic))?;
+        }
+    }
+    Ok(())
+}
+
+fn check_rejected_castling_fen(fen: &str, expected_diagnostic: Option<&str>) -> io::Result<()> {
+    for moves in ["", " moves e1g1"] {
+        let command = format!("position fen {fen}{moves}");
+        let input = format!("position fen {A}\n{command}\nisready\ngo\nquit\n");
+        let mut output = Vec::new();
+        let movement = forced_move(A);
+        uci::run_session(
+            io::Cursor::new(input),
+            &mut output,
+            "test",
+            move |request, send| {
+                assert_eq!(request.position.to_fen(), A);
+                send(SearchReport::BestMove(Some(movement)));
+            },
+        )?;
+        let text = std::str::from_utf8(&output).map_err(io::Error::other)?;
+        let lines: Vec<_> = text.split_inclusive('\n').collect();
+        let [diagnostic, ready, bestmove] = lines[..] else {
+            return Err(io::Error::other(format!(
+                "{command}: expected three responses, got {text:?}"
+            )));
+        };
+        let cause = diagnostic
+            .strip_prefix("info string position rejected: invalid FEN: ")
+            .and_then(|cause| cause.strip_suffix('\n'));
+        assert!(cause.is_some(), "{command}: {diagnostic}");
+        if let Some(expected) = expected_diagnostic {
+            assert_eq!(cause, Some(expected), "{command}");
+        }
+        accepts(&[
+            POSITION_A,
+            Command(&command),
+            READY,
+            GO,
+            QUIT,
+            best_move_report(A),
+            Response(diagnostic),
+            Response(ready),
+            Response(bestmove),
+        ]);
+        rejects(
+            7,
+            "missing position rejection",
+            &[POSITION_A, Command(&command), READY, Response(ready), QUIT],
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn readiness_on_either_side_of_finite_bestmove() {
     accepts(&[
         POSITION_A,

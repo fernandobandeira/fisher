@@ -1,5 +1,4 @@
-// Replay principal variations as the search crate tests do.
-#[path = "../../search/src/tests/support/principal_variation.rs"]
+#[path = "support/principal_variation.rs"]
 mod principal_variation;
 #[path = "support/scripted_transcripts.rs"]
 mod scripted_transcripts;
@@ -104,6 +103,21 @@ fn position_fen_four_fields() -> io::Result<()> {
 #[test]
 fn position_fen_five_fields() -> io::Result<()> {
     play_transcript("position-fen-five-fields")
+}
+
+#[test]
+fn kingside_k() -> io::Result<()> {
+    play_transcript("castling-letters/kingside-k")
+}
+
+#[test]
+fn kingside_kk() -> io::Result<()> {
+    play_transcript("castling-letters/kingside-kk")
+}
+
+#[test]
+fn kingside_h() -> io::Result<()> {
+    play_transcript("castling-letters/kingside-h")
 }
 
 #[test]
@@ -512,8 +526,9 @@ fn reference_position<'a>(mut tokens: impl Iterator<Item = &'a str>) -> Result<T
     Ok(position)
 }
 
-/// Checks the text of a FEN by the rules of `rules::Position::from_fen`,
-/// which accepts less than shakmaty: shakmaty also reads missing fields,
+/// Checks the text of a UCI FEN. Apart from the complete castling fields
+/// `KK` and `H`, it follows `rules::Position::from_fen`.
+/// Shakmaty also reads missing fields,
 /// pockets, promoted pieces, check counters, `_` between fields, castling by
 /// file, clocks beyond `u32` and a fullmove number of 0. The rules about
 /// kings, pawns, castling pieces and the en passant pawn are the same in both
@@ -550,7 +565,7 @@ fn check_fen_text(fen: &str) -> Result<(u64, u64), &'static str> {
         "b" => b'3',
         _ => return Err("side to move must be w or b"),
     };
-    if castling != "-" {
+    if !matches!(castling, "-" | "KK" | "H") {
         let mut seen = Vec::new();
         for letter in castling.chars() {
             if !"KQkq".contains(letter) {
@@ -1343,13 +1358,13 @@ impl Drop for Engine {
 
 /// A stand-in for fisher that answers the nth command with the nth batch of
 /// lines, for checking the runner itself.
-struct FakeEngine {
-    replies: std::collections::VecDeque<Vec<&'static str>>,
-    stdout: std::collections::VecDeque<&'static str>,
+struct FakeEngine<'a> {
+    replies: std::collections::VecDeque<Vec<&'a str>>,
+    stdout: std::collections::VecDeque<&'a str>,
     started: Instant,
 }
 
-impl TranscriptIo for FakeEngine {
+impl TranscriptIo for FakeEngine<'_> {
     fn send(&mut self, _: &[u8]) -> io::Result<()> {
         self.stdout
             .extend(self.replies.pop_front().unwrap_or_default());
@@ -1371,7 +1386,7 @@ impl TranscriptIo for FakeEngine {
     }
 }
 
-fn run_against_fake(transcript: &str, replies: Vec<Vec<&'static str>>) -> io::Result<Vec<String>> {
+fn run_against_fake(transcript: &str, replies: Vec<Vec<&str>>) -> io::Result<Vec<String>> {
     run_transcript("fake", transcript, HANG_TIMEOUT, || {
         Ok(FakeEngine {
             replies: replies.into(),
@@ -1624,8 +1639,7 @@ fn a_stopped_search_reports_on_its_own_position() {
 
 #[test]
 fn the_runner_sets_up_the_fens_fisher_accepts() {
-    // Expected verdicts from the rules in crates/rules/src/fen.rs
-    // (`Position::from_fen`), after `uci` fills in four- and five-field FENs.
+    // Expected verdicts from the rules reader and the UCI FEN handling.
     let board = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR";
     let cases = [
         (format!("{board} w KQkq - 0 1"), true),
@@ -1638,7 +1652,9 @@ fn the_runner_sets_up_the_fens_fisher_accepts() {
         ("4k3/8/3N1N2/8/8/8/8/4K3 b - - 0 1".to_owned(), true),
         (format!("{board} w KQkq - 0 0"), false),
         (format!("{board} w KQkq - +1 1"), false),
-        (format!("{board} w KK - 0 1"), false),
+        // fisher-4h7 accepts only the complete fields KK and H as K.
+        (format!("{board} w KK - 0 1"), true),
+        (format!("{board} w KKK - 0 1"), false),
         (format!("{board} w HAha - 0 1"), false),
         (format!("{board} W KQkq - 0 1"), false),
         (format!("{board} w KQkq - 0 1 +3+3"), false),
@@ -1742,6 +1758,68 @@ fn the_runner_keeps_the_position_after_a_joined_en_passant_field() {
             "{fen:?}"
         );
     }
+}
+
+#[test]
+fn the_runner_tracks_kingside_castling_spellings() -> Result<(), String> {
+    // Stockfish 19 printed these positions for all three fields in fisher-4h7.
+    for field in ["K", "KK", "H"] {
+        let bare = format!("fen 4k3/8/8/8/8/8/8/4K2R w {field} - 0 1");
+        let position = reference_position(command_tokens(&bare))?;
+        assert_eq!(position.fen(), "4k3/8/8/8/8/8/8/4K2R w K - 0 1");
+        assert_eq!(position.chess.legal_moves().len(), 15);
+
+        let castle = format!("{bare} moves e1g1");
+        let position = reference_position(command_tokens(&castle))?;
+        assert_eq!(position.fen(), "4k3/8/8/8/8/8/8/5RK1 b - - 1 1");
+    }
+    Ok(())
+}
+
+#[test]
+fn the_runner_keeps_the_position_after_a_malformed_fen_with_a_castling_alias() -> io::Result<()> {
+    for (field, castling_error) in [
+        ("KK", "castling rights must not contain duplicates"),
+        ("H", "castling rights must use K, Q, k, q, or -"),
+    ] {
+        for (fen, diagnostic) in [
+            (
+                format!("4k3/8/8/8/8/8/8/4K2R w {field} z9 0 1"),
+                "invalid en passant square",
+            ),
+            (
+                format!("4k3/8/8/8/8/8/8/4K2R w {field} - x 1"),
+                "halfmove clock must be an unsigned decimal integer",
+            ),
+            (
+                format!("4k3/8/8/8/8/8/8/4K2R w {field} - 0 0"),
+                "fullmove number must be a positive decimal integer",
+            ),
+            (
+                format!("4k3/8/8/8/8/8/8/4K3 w {field} - 0 1"),
+                castling_error,
+            ),
+            (
+                format!("4k3/8/8/8/8/8/8/3K3R w {field} - 0 1"),
+                castling_error,
+            ),
+        ] {
+            assert!(
+                reference_position(command_tokens(&format!("fen {fen}"))).is_err(),
+                "{fen}"
+            );
+            let transcript = format!(
+                "> position fen 7k/8/5K1Q/8/8/8/8/8 b - - 0 1\n\
+                 > position fen {fen}\n> isready\n\
+                 < info string position rejected: invalid FEN: {diagnostic}\n< readyok\n\
+                 > go depth 1\n\
+                 < info depth 1 multipv 1 score cp -900 nodes 1 nps {{nps}} time {{time}} pv h8g8\n\
+                 < bestmove {{legal}}\n> quit\n! exit\n"
+            );
+            run_transcript(&fen, &transcript, HANG_TIMEOUT, Engine::start)?;
+        }
+    }
+    Ok(())
 }
 
 #[test]
@@ -1914,4 +1992,276 @@ fn a_rejected_go_loses_attribution_for_the_rest_of_the_session() {
     ];
     let error = rejection(run_against_fake(transcript, replies));
     assert!(error.contains("from a search whose position"), "{error}");
+}
+
+// No move from this starting position line captures a piece, so each
+// prefix has a material score of 0.
+const QUIET_VARIATION: [&str; 4] = ["e2e4", "e7e5", "g1f3", "b8c6"];
+
+fn replay_startpos_line(variation: &[&str], score: i32) -> io::Result<Vec<String>> {
+    replay_line(
+        "startpos",
+        variation.len(),
+        &format!("cp {score}"),
+        variation,
+    )
+}
+
+fn replay_line(
+    position: &str,
+    depth: usize,
+    score: &str,
+    variation: &[&str],
+) -> io::Result<Vec<String>> {
+    let info = format!(
+        "info depth {depth} multipv 1 score {score} nodes 1 nps 1000 time 1 pv {}",
+        variation.join(" ")
+    );
+    let first = variation
+        .first()
+        .ok_or_else(|| io::Error::other("missing first move of the variation"))?;
+    let bestmove = format!("bestmove {first}");
+    let transcript =
+        format!("> position {position}\n> go depth {depth}\n< {info}\n< {bestmove}\n! exit\n");
+    run_against_fake(&transcript, vec![vec![], vec![&info, &bestmove]])
+}
+
+#[test]
+fn rejects_illegal_principal_variation_moves_at_depths_one_to_four() {
+    for depth in 1..=QUIET_VARIATION.len() {
+        // The pawn on a2 cannot advance three squares.
+        let variation: Vec<_> = QUIET_VARIATION
+            .into_iter()
+            .take(depth - 1)
+            .chain(["a2a5"])
+            .collect();
+        let error = rejection(replay_startpos_line(&variation, 0));
+        let expected = format!(
+            "illegal principal variation move a2a5 after {} plies",
+            depth - 1
+        );
+        assert!(
+            error.contains(&expected),
+            "depth {depth}: expected {expected:?}, got {error:?}"
+        );
+    }
+}
+
+#[test]
+fn rejects_principal_variation_score_mismatches_at_depths_one_to_four() -> io::Result<()> {
+    let mut variation = Vec::new();
+    for movement in QUIET_VARIATION {
+        variation.push(movement);
+        let depth = variation.len();
+        replay_startpos_line(&variation, 0)?;
+        let error = rejection(replay_startpos_line(&variation, 100));
+        assert!(
+            error.contains("principal variation ends with material 0, not the score 100"),
+            "depth {depth}: expected a material mismatch, got {error:?}"
+        );
+    }
+    Ok(())
+}
+
+const WHITE_MATE_ROOT: &str = "fen 6k1/5ppp/8/8/8/8/8/R5K1 w - - 0 1";
+const BLACK_MATE_ROOT: &str = "fen 6k1/5ppp/8/8/8/8/8/R5K1 b - - 0 1";
+const WHITE_MATE_LINE: [&str; 1] = ["a1a8"];
+const BLACK_MATE_LINE: [&str; 2] = ["g8h8", "a1a8"];
+
+fn reference_line_end(position: &str, variation: &[&str]) -> io::Result<Chess> {
+    let mut chess = reference_position(position.split_ascii_whitespace())
+        .map_err(io::Error::other)?
+        .chess;
+    for movement in variation {
+        let legal = reference_move(&chess, movement)
+            .ok_or_else(|| io::Error::other(format!("illegal reference move {movement}")))?;
+        chess.play_unchecked(legal);
+    }
+    Ok(chess)
+}
+
+fn assert_replay_rejection(result: io::Result<Vec<String>>, depth: usize, expected: &str) {
+    let error = rejection(result);
+    assert!(
+        error.contains(expected),
+        "depth {depth}: expected {expected:?}, got {error:?}"
+    );
+}
+
+#[test]
+fn rejects_short_nonterminal_variations() -> io::Result<()> {
+    let short = ["e2e4"];
+    assert!(
+        !reference_line_end("startpos", &short)?
+            .legal_moves()
+            .is_empty()
+    );
+    let mut full = short.to_vec();
+    for movement in QUIET_VARIATION.into_iter().skip(1) {
+        full.push(movement);
+        let depth = full.len();
+        replay_line("startpos", depth, "cp 0", &full)?;
+        assert_replay_rejection(
+            replay_line("startpos", depth, "cp 0", &short),
+            depth,
+            &format!("principal variation expected {depth} plies, got 1"),
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn rejects_variations_longer_than_the_depth() -> io::Result<()> {
+    let mut variation = Vec::new();
+    for movement in QUIET_VARIATION.into_iter().chain(["f1b5"]) {
+        variation.push(movement);
+        let length = variation.len();
+        reference_line_end("startpos", &variation)?;
+        if length > 1 {
+            let depth = length - 1;
+            // A literal response reaches replay even when its length would
+            // disqualify it from the searched info allowance.
+            assert_replay_rejection(
+                replay_line("startpos", depth, "cp 0", &variation),
+                depth,
+                &format!("principal variation exceeds depth {depth}"),
+            );
+        }
+        if length <= usize::from(REPLAY_DEPTH) {
+            replay_startpos_line(&variation, 0)?;
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn rejects_wrong_mate_distance() -> io::Result<()> {
+    assert!(reference_line_end(WHITE_MATE_ROOT, &WHITE_MATE_LINE)?.is_checkmate());
+    assert!(reference_line_end(BLACK_MATE_ROOT, &BLACK_MATE_LINE)?.is_checkmate());
+    for (root, variation, correct, wrong, distance, depths) in [
+        (
+            WHITE_MATE_ROOT,
+            WHITE_MATE_LINE.as_slice(),
+            "mate 1",
+            "mate 2",
+            3,
+            3..=4,
+        ),
+        (
+            BLACK_MATE_ROOT,
+            BLACK_MATE_LINE.as_slice(),
+            "mate -1",
+            "mate -2",
+            4,
+            4..=4,
+        ),
+    ] {
+        let plies = variation.len();
+        for depth in depths {
+            replay_line(root, depth, correct, variation)?;
+            assert_replay_rejection(
+                replay_line(root, depth, wrong, variation),
+                depth,
+                &format!("principal variation expected {distance} plies, got {plies}"),
+            );
+        }
+    }
+    let delayed_mate = ["a1a2", "g8h8", "a2a8"];
+    assert!(reference_line_end(WHITE_MATE_ROOT, &delayed_mate)?.is_checkmate());
+    replay_line(WHITE_MATE_ROOT, 4, "mate 2", &delayed_mate)?;
+    assert_replay_rejection(
+        replay_line(WHITE_MATE_ROOT, 4, "mate 1", &delayed_mate),
+        4,
+        "principal variation expected 1 plies, got 3",
+    );
+    Ok(())
+}
+
+#[test]
+fn rejects_wrong_mate_sign() -> io::Result<()> {
+    for (root, variation, correct, wrong, depths) in [
+        (
+            WHITE_MATE_ROOT,
+            WHITE_MATE_LINE.as_slice(),
+            "mate 1",
+            "mate -1",
+            2..=4,
+        ),
+        (
+            BLACK_MATE_ROOT,
+            BLACK_MATE_LINE.as_slice(),
+            "mate -1",
+            "mate 1",
+            3..=4,
+        ),
+    ] {
+        let start = reference_position(root.split_ascii_whitespace())
+            .map_err(io::Error::other)?
+            .chess;
+        assert!(reference_line_end(root, variation)?.is_checkmate());
+        for depth in depths {
+            replay_line(root, usize::from(depth), correct, variation)?;
+            assert!(
+                replay_line(root, usize::from(depth), wrong, variation).is_err(),
+                "depth {depth}: accepted {wrong} for {correct}"
+            );
+
+            // UCI mate signs also encode distance parity. Flip the sign after
+            // parsing to exercise the replay check at the correct distance.
+            let score = reported_score(correct, depth)?;
+            let result = principal_variation::verify(&start, depth, -score, variation);
+            assert!(
+                result
+                    .as_ref()
+                    .is_err_and(|error| error
+                        .contains("principal variation does not end in the reported mate")),
+                "depth {depth}: expected wrong mate sign to be rejected, got {result:?}"
+            );
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn rejects_mate_without_checkmate() -> io::Result<()> {
+    let nonmate = ["a1a7"];
+    let end = reference_line_end(WHITE_MATE_ROOT, &nonmate)?;
+    assert!(!end.legal_moves().is_empty());
+    assert!(reference_line_end(WHITE_MATE_ROOT, &WHITE_MATE_LINE)?.is_checkmate());
+    let escape_root = "fen 6k1/6pp/8/8/8/8/8/R5K1 w - - 0 1";
+    let checked = reference_line_end(escape_root, &WHITE_MATE_LINE)?;
+    assert!(checked.is_check());
+    assert!(reference_move(&checked, "g8f7").is_some());
+    for depth in 2..=4 {
+        replay_line(WHITE_MATE_ROOT, depth, "mate 1", &WHITE_MATE_LINE)?;
+        assert_replay_rejection(
+            replay_line(WHITE_MATE_ROOT, depth, "mate 1", &nonmate),
+            depth,
+            "principal variation does not end in the reported mate",
+        );
+        assert_replay_rejection(
+            replay_line(escape_root, depth, "mate 1", &WHITE_MATE_LINE),
+            depth,
+            "principal variation does not end in the reported mate",
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn rejects_nonzero_stalemate_score() -> io::Result<()> {
+    let root = "fen 7k/5K2/8/6Q1/8/8/8/8 w - - 0 1";
+    // After Qg6, Black's king is outside check. White's king covers g8,
+    // and the queen covers g7 and h7.
+    let variation = ["g5g6"];
+    assert!(reference_line_end(root, &variation)?.is_stalemate());
+    for depth in 2..=4 {
+        replay_line(root, depth, "cp 0", &variation)?;
+        assert_replay_rejection(
+            replay_line(root, depth, "cp 100", &variation),
+            depth,
+            &format!("principal variation expected {depth} plies, got 1"),
+        );
+    }
+    Ok(())
 }

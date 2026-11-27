@@ -10,7 +10,9 @@ permissions:
 jobs:
   clock-match:
     runs-on: ubuntu-latest
-    timeout-minutes: 75
+    # Five 3-minute setup steps, up to 75 minutes for the match step,
+    # and 3 minutes to upload evidence leave 7 minutes in the job.
+    timeout-minutes: 100
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         timeout-minutes: 3
@@ -42,6 +44,9 @@ jobs:
             exit 1
           fi
       - name: Play and verify the real-clock match
+        # Play has 60 minutes plus 10 seconds of grace. Build and replay
+        # share the remaining 14 minutes and 50 seconds.
+        timeout-minutes: 75
         env:
           CARGO_NET_OFFLINE: 'true'
         run: |

@@ -696,6 +696,76 @@ fn deferred_readiness_uses_stockfish_whitespace() {
 }
 
 #[test]
+fn readiness_after_an_unknown_prefix() {
+    let ready = Command("stop\u{a0}x isready");
+    rejects(
+        6,
+        "missing readyok after an unknown prefix",
+        &[ready.clone(), QUIT],
+    );
+    accepts(&[ready, READY_OK, QUIT]);
+    for ignored in ["setoption", "debug", "ponderhit", "register", "ucinewgame"] {
+        let command = format!("stop\u{a0}x {ignored} isready");
+        accepts(&[Command(&command), QUIT]);
+    }
+}
+
+#[test]
+fn deferred_readiness_after_an_unknown_prefix() {
+    let ready = Command("stop\u{a0}x isready");
+    rejects(
+        6,
+        "missing deferred readiness behind stop",
+        &[POSITION_A, GO, STOP, ready.clone(), QUIT],
+    );
+    rejects(
+        6,
+        "missing deferred readyok after bestmove",
+        &[
+            POSITION_A,
+            GO,
+            STOP,
+            ready.clone(),
+            best_move_report(A),
+            MOVE_A,
+            QUIT,
+        ],
+    );
+    accepts(&[
+        POSITION_A,
+        GO,
+        STOP,
+        ready,
+        best_move_report(A),
+        MOVE_A,
+        READY_OK,
+        QUIT,
+    ]);
+}
+
+#[test]
+fn deferred_quit_after_an_unknown_prefix() {
+    let quit = Command("stop\u{a0}x quit");
+    rejects(
+        8,
+        "missing bestmove when a deferred quit hides later readiness",
+        &[POSITION_A, GO, STOP, quit.clone(), READY],
+    );
+    let mut history = vec![
+        POSITION_A,
+        GO,
+        STOP,
+        quit,
+        READY,
+        best_move_report(A),
+        MOVE_A,
+    ];
+    accepts(&history);
+    history.push(READY_OK);
+    rejects(9, "unsolicited readyok after a deferred quit", &history);
+}
+
+#[test]
 fn a_joined_en_passant_field_is_rejected_by_the_history_checker() {
     for command in [
         "position fen 4k3/8/8/8/8/8/8/4K2R w K -\u{a0}0 1",

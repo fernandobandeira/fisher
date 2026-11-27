@@ -243,7 +243,7 @@ impl<'a> Session<'a> {
 
     fn command(&mut self, command: &str) {
         let mut words = command_tokens(command);
-        match words.next() {
+        match recognized_command(&mut words) {
             Some("go") if self.search.is_some() => {
                 self.command_responses
                     .push_back(CommandResponse::GoRejected);
@@ -478,10 +478,10 @@ impl<'a> Session<'a> {
         let mut deferred_before_exit = self
             .deferred
             .iter()
-            .copied()
-            .take_while(|command| command_tokens(command).next() != Some("quit"));
+            .map(|command| recognized_command(&mut command_tokens(command)))
+            .take_while(|command| *command != Some("quit"));
         if self.command_responses.contains(&CommandResponse::Ready)
-            || deferred_before_exit.any(|text| command_tokens(text).next() == Some("isready"))
+            || deferred_before_exit.any(|command| command == Some("isready"))
         {
             return Err((6, "missing readyok"));
         }
@@ -515,6 +515,26 @@ fn payload(text: &str, prefix: &str) -> bool {
 fn command_tokens(text: &str) -> impl Iterator<Item = &str> {
     text.split(|ch: char| ch.is_ascii_whitespace() || ch == '\x0b')
         .filter(|token| !token.is_empty())
+}
+
+fn recognized_command<'a>(words: &mut impl Iterator<Item = &'a str>) -> Option<&'a str> {
+    // An ignored command also ends the search for a command on this line.
+    words.find(|&word| {
+        matches!(
+            word,
+            "uci"
+                | "isready"
+                | "ucinewgame"
+                | "position"
+                | "go"
+                | "quit"
+                | "stop"
+                | "setoption"
+                | "debug"
+                | "ponderhit"
+                | "register"
+        )
+    })
 }
 
 fn position<'a>(words: impl Iterator<Item = &'a str>) -> Option<Chess> {

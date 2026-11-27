@@ -82,11 +82,11 @@ fn legal_move(position: &Position, from: &str, to: &str) -> Option<Move> {
 }
 
 fn session_output(
-    input: &'static [u8],
+    input: impl AsRef<[u8]> + Send + 'static,
     search: impl FnMut(deepening::SearchRequest, &mut dyn FnMut(SearchReport)) + Send + 'static,
 ) -> io::Result<String> {
     let mut output = Vec::new();
-    uci::run_session(input, &mut output, "test", search)?;
+    uci::run_session(io::Cursor::new(input), &mut output, "test", search)?;
     String::from_utf8(output).map_err(io::Error::other)
 }
 
@@ -164,25 +164,37 @@ fn rejected_positions_leave_the_last_accepted_position_in_place() -> io::Result<
 
 #[test]
 fn no_break_space_in_fen_keeps_the_full_position() -> io::Result<()> {
-    // The two rejected commands are from no-break-space-in-fen.uci.
-    for input in [
-        &b"position fen 7k/8/5K1Q/8/8/8/8/8 b - - 13 29\nposition fen 4k3/8/8/8/8/8/8/4K2R w K -\xc2\xa00 1\ngo\n"[..],
-        &b"position fen 7k/8/5K1Q/8/8/8/8/8 b - - 13 29\nposition fen 4k3/8/8/8/8/8/8/4K2R w K -\xc2\xa07 42\ngo\n"[..],
+    const PREVIOUS: &str = "7k/8/5K1Q/8/8/8/8/8 b - - 13 29";
+    // The rules position tests fix the fragments. The en passant cases
+    // are the two rejected FENs in no-break-space-in-fen.uci.
+    for (fen, diagnostic) in [
+        ("4k3/8/8/8/8/8/8/4K\u{a0}2R w K - 0 1", "piece letter"),
+        ("4k3/8/8/8/8/8/8/4K2R w\u{a0}K K - 0 1", "side to move"),
+        ("4k3/8/8/8/8/8/8/4K2R w K\u{a0}q - 0 1", "K, Q, k, q"),
+        ("4k3/8/8/8/8/8/8/4K2R w K -\u{a0}0 1", "invalid en passant"),
+        ("4k3/8/8/8/8/8/8/4K2R w K -\u{a0}7 42", "invalid en passant"),
+        ("4k3/8/8/8/8/8/8/4K2R w K - 0\u{a0}1 1", "halfmove clock"),
+        ("4k3/8/8/8/8/8/8/4K2R w K - 0 1\u{a0}2", "fullmove number"),
     ] {
+        let input = format!("position fen {PREVIOUS}\nposition fen {fen}\ngo\n");
         let output = session_output(input, |request, report| {
             assert_eq!(
                 request.position.to_fen(),
-                "7k/8/5K1Q/8/8/8/8/8 b - - 13 29",
+                PREVIOUS,
                 "search must receive the full previous position"
             );
-            report(SearchReport::BestMove(legal_move(&request.position, "h8", "g8")));
+            report(SearchReport::BestMove(legal_move(
+                &request.position,
+                "h8",
+                "g8",
+            )));
         })?;
         let mut responses = output.lines();
         assert!(
             responses.next().is_some_and(|line| {
-                line.starts_with("info string ") && line.contains("invalid en passant")
+                line.starts_with("info string ") && line.contains(diagnostic)
             }),
-            "{output:?}"
+            "{fen:?}: expected {diagnostic:?} in the diagnostic, got {output:?}"
         );
         assert_eq!(responses.next(), Some("bestmove h8g8"));
         assert_eq!(responses.next(), None);

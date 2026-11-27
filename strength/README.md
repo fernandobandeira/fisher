@@ -2,7 +2,10 @@
 
 A record of how strongly each revision of fisher plays. Compare matches played under the same numbered conditions.
 
-This is a record, not a gate. `scripts/check` does not run it, and nothing here is an expected value. A claim that a change plays stronger is still settled by SPRT with bounds fixed beforehand, as [docs/evidence.md](../docs/evidence.md) says.
+The node-limited series is a repeatable record and judges no claim of
+strength. The clocked SPRT uses SPRT bounds fixed before play to settle
+claims of strength. Both run separately from `scripts/check`. See
+[Evidence](../docs/evidence.md).
 
 ## What is here
 
@@ -110,7 +113,7 @@ The conditions do not fix the Stockfish version or the machine. Compare two reco
 
 Both engines get 10 seconds plus 0.1 seconds a move. The other conditions are the same as in conditions 1.
 
-The last recorded revision under conditions 1, `dbe9113`, is measured again under conditions 2 to connect the series. It ignores its clock and may lose games on time. Those games count toward `abnormal_endings`.
+The last recorded revision under conditions 1, `dbe9113`, is measured again under conditions 2 so both sets of records include it. It ignores its clock and may lose games on time. Those games count toward `abnormal_endings`.
 
 ### 3 and 4
 
@@ -173,9 +176,10 @@ Under a node limit, repeating the series gives the same games. The Elo
 interval estimates how far the result might move with other openings.
 Each opening contributes the mean score of its two games. The series
 uses the mean of these pair scores and the 95% normal interval from their
-variance, then converts the score and both bounds to Elo. The `elo_interval` field stores
-half the width between the converted bounds. A mirror match scores
-exactly half on every pair, so its observed pair variance is zero.
+variance. It converts the score and the two endpoints of the score interval
+to Elo. The `elo_interval` field stores half the width of the Elo interval.
+A mirror match scores exactly half on every pair, so its observed pair
+variance is zero.
 [fastchess paired Elo](https://github.com/Disservin/fastchess/blob/d7b47e8dec6b564aaf4cbb2922ab37e6c6761e75/app/src/matchmaking/elo/elo_pentanomial.cpp)
 
 A node limit gives no credit for speed. The ratio compares the two builds
@@ -219,6 +223,24 @@ any games were played.
 
 ## Clocked SPRT
 
+The gain test settles "this change plays stronger" with SPRT bounds of
+0 and 10 Elo. The no-loss test settles "this change does not play weaker"
+with SPRT bounds of -10 and 0 Elo. Both tests set a 5% error rate in each
+direction.
+
+Both engines get 10 seconds plus 0.1 seconds per move. The two revisions
+seed the draw from the published opening positions. The draw leaves out
+the positions of the node-limited series. Each opening is played once with
+each color. The points from both games are one observation. See
+[how the openings are drawn](../scripts/clocked-sprt.md#draw-the-openings).
+
+The judge counts pairs in draw order. The first log-likelihood ratio at
+or beyond either threshold decides the verdict. The upper threshold is
+log(19) for a pass and the lower threshold is -log(19) for a fail. The
+jobs finish their requested ranges and keep games beyond the deciding
+pair. The result is inconclusive if neither threshold is reached in
+10,000 pairs.
+
 Dispatch **Clocked SPRT** from the repository's default branch. Give the
 measured revision and the gain or no-loss test. Use a commit ID or
 `origin/<branch>` for the measured revision and opponent. A bare branch
@@ -235,18 +257,33 @@ concurrent hosted-job limit with other workflows. For standard runners
 GitHub lists 20 concurrent jobs on Free and 40 on Pro.
 [GitHub Actions job concurrency limits](https://docs.github.com/en/actions/reference/limits#job-concurrency-limits-for-github-hosted-runners)
 
-The trial of `5c5d6cf` against `8b9c254` measured about 7 runner-seconds
-per pair at two games at a time. For a revision that spends its clock,
-estimate 20 to 30 runner-seconds per pair, or about 17 to 25 minutes of
-play per 50-pair range. The playing step retains its 75-minute timeout
-and the job its 90-minute timeout.
+The qualification played 256 pairs of `5c5d6cf` against `8b9c254` in
+4 minutes 59 seconds of elapsed workflow time. The gain test counted 104
+pairs. The last self-match dispatch played 376 pairs in 7 minutes 34
+seconds and the gain test decided at cumulative pair 167. The last
+self-match dispatch, the predecessor match and the 1,180- and 130-iteration
+matches used about 7.3 to 7.7 runner-seconds per pair at two games at a
+time. This includes building both engines. Treat it as a floor for later
+revisions that use more of their clock. In these matches `5c5d6cf` spent
+about 0.12 seconds per move from a starting allowance of about 0.43 seconds.
+The hosted replays took 28 to 32 seconds each.
+See the [predecessor run](https://github.com/fernandobandeira/fisher/actions/runs/46001457732),
+the [self-match continuation](https://github.com/fernandobandeira/fisher/actions/runs/46000161044)
+and the [qualification rows](sprt-records.tsv).
+
+For a revision that spends its clock, estimate 20 to 30 runner-seconds
+per pair, or about 17 to 25 minutes of play per 50-pair range. The playing
+step has a 75-minute timeout and the job has a 90-minute timeout.
 
 After **no verdict yet**, keep the same revisions and test, set the first
 opening to the next unplayed one, and enter the last run's numeric Actions
 ID in `previous_run`. The plan replays the cumulative prefix from opening
 1 and refuses a continuation if it already has a verdict or is incomplete.
-The continuation was checked locally with hosted games. The first
-cross-dispatch continuation on GitHub is part of fisher-mwa.5.
+The first hosted continuation added openings 9 through 24 to the first
+eight pairs and named both runs in its record. A local replay of the
+joined games reproduced the judge output byte for byte.
+[First dispatch](https://github.com/fernandobandeira/fisher/actions/runs/45999763856)
+and [first continuation](https://github.com/fernandobandeira/fisher/actions/runs/45999957928).
 
 To replay, give the Actions ID in `replay_run`, keep the original
 revisions in their original order, set the first opening to 1, and
@@ -255,12 +292,128 @@ some games are missing. Select the test to apply. Selecting
 `opponent_view` scores the points taken by the original opponent. Both
 inputs for earlier run IDs require a manual dispatch of this workflow
 from the default branch, and use its first attempt. Retain the run
-artifacts before they expire.
-[Local replay instructions](../scripts/clocked-sprt.md)
+artifacts before they expire. To compute the result locally, pass the
+cumulative `games.pgn` from the `sprt-record` artifact to
+`scripts/clocked-sprt --pgn`. Use the original revision order, the test,
+and the same cumulative range starting at 1. For an opponent reading,
+add `--opponent-view`. See the
+[local replay instructions](../scripts/clocked-sprt.md).
+
+### Qualification on hosted runners
+
+The self-match showed no detectable advantage for either side. Its 95%
+intervals still allow a small advantage.
+
+All slow copies add the same loop once per searched node. Local timing
+divides the median wall time of five `go nodes 3000000` searches from the
+starting position by the baseline median. Hosted timing sums the nodes and
+milliseconds reported in the engine-attributed UCI `info` entries in each
+fastchess log. Divide the baseline's nodes per millisecond by the copy's.
+Fastchess logs these entries when a principal variation continues past a
+threefold repetition. They sample those searches, and a search can
+contribute more than one entry. There were 35 to 218 entries per job for
+the two new measured copies, and 35 to 279 per engine per job across all
+four runs. Grouping by engine, starting position and move history gives
+22 to 129 distinct searches per engine per job. Using the median of the
+last logged rate per search gave slowdown ratios within about 10% of
+the ratios from summed nodes and time.
+
+| Loop iterations | Revision | Local slowdown | Hosted slowdown overall (per job) | No-loss result |
+|---:|---|---:|---:|---|
+| 1,180 | `a30d6ba` | 16.26× | 5.09× (4.09–5.56×) | Fail at pair 104, -76.37 Elo ([run 46002462277](https://github.com/fernandobandeira/fisher/actions/runs/46002462277)) |
+| 130 | `998f9a4` | 2.17× | 1.34× (1.23–1.41×) | Fail at pair 135 ([run 46003154219](https://github.com/fernandobandeira/fisher/actions/runs/46003154219)) |
+| 6,400 | `bcd0b83` | 88.41× | 22.40× (17.27–26.57×) | Fail at pair 104 ([run 46013121250](https://github.com/fernandobandeira/fisher/actions/runs/46013121250)) |
+| 380 | `057bf56` | 5.80× | 2.35× (2.02–3.75×) | Fail at pair 104 ([run 46013930062](https://github.com/fernandobandeira/fisher/actions/runs/46013930062)) |
+
+The 1,180- and 130-iteration copies ran 5.09 and 1.34 times slower on the
+hosted runners. The 6,400-iteration copy met D82's requirement of more
+than fifteen times slower in every job and failed the no-loss test.
+
+Each overall ratio pools the jobs in that run. It depends on the mix of
+processors that played. The lowest ratios in the 6,400-, 380- and
+1,180-iteration runs were 17.27×, 2.02× and 4.09× on the Xeon 8573C.
+The 3.75× job was the only one on a Xeon 8370C. Across its sampled
+searches, the 380-iteration copy ran at about half its usual node rate
+while the baseline ran about 15% slower. The other 350 pairs gave
+-39.88 Elo (95% interval [-49.76, -30.07]). All 400 gave -41.45 Elo.
+
+<details>
+<summary>Slowdown and processor by playing job</summary>
+
+| Loop iterations | First opening | Processor | Slowdown |
+|---:|---:|---|---:|
+| 1,180 | 1 | EPYC 9V74 | 5.14× |
+| 1,180 | 33 | EPYC 9V45 | 5.46× |
+| 1,180 | 65 | EPYC 9V45 | 5.08× |
+| 1,180 | 97 | EPYC 7763 | 4.97× |
+| 1,180 | 129 | EPYC 7763 | 4.92× |
+| 1,180 | 161 | EPYC 9V74 | 5.56× |
+| 1,180 | 193 | EPYC 9V45 | 5.39× |
+| 1,180 | 225 | Xeon 8573C | 4.09× |
+| 130 | 1 | EPYC 9V45 | 1.37× |
+| 130 | 51 | EPYC 9V74 | 1.38× |
+| 130 | 101 | EPYC 9V74 | 1.31× |
+| 130 | 151 | EPYC 9V74 | 1.30× |
+| 130 | 201 | EPYC 9V74 | 1.39× |
+| 130 | 251 | EPYC 7763 | 1.39× |
+| 130 | 301 | EPYC 9V74 | 1.41× |
+| 130 | 351 | Xeon 8573C | 1.23× |
+| 6,400 | 1 | EPYC 9V74 | 23.08× |
+| 6,400 | 33 | Xeon 8573C | 17.27× |
+| 6,400 | 65 | EPYC 9V45 | 26.57× |
+| 6,400 | 97 | EPYC 9V74 | 23.12× |
+| 6,400 | 129 | EPYC 7763 | 22.81× |
+| 6,400 | 161 | EPYC 9V74 | 20.75× |
+| 6,400 | 193 | EPYC 9V74 | 22.54× |
+| 6,400 | 225 | EPYC 9V74 | 22.44× |
+| 380 | 1 | EPYC 9V45 | 2.37× |
+| 380 | 51 | EPYC 9V45 | 2.35× |
+| 380 | 101 | EPYC 9V74 | 2.35× |
+| 380 | 151 | Xeon 8573C | 2.02× |
+| 380 | 201 | EPYC 9V74 | 2.28× |
+| 380 | 251 | Xeon 8370C | 3.75× |
+| 380 | 301 | EPYC 7763 | 2.19× |
+| 380 | 351 | EPYC 9V74 | 2.35× |
+
+</details>
+
+Each of the four copies scored exactly half under
+a node limit and played the same moves in both games of all 25 opening pairs.
+
+For measuring the cost of a slowdown, use all the pairs. Stopping at a
+threshold can pull the estimate away from zero.
+
+| Loop iterations | Elo difference at the deciding pair (95% interval) | Elo difference over all played pairs (95% interval) |
+|---:|---|---|
+| 1,180 | -76.37 [-96.53, -56.71] | -72.98 [-86.43, -59.75] over 256 pairs |
+| 130 | -27.08 [-43.93, -10.35] | -23.92 [-33.45, -14.44] over 400 pairs |
+| 6,400 | -114.18 [-138.95, -90.49] | -111.58 [-126.52, -97.02] over 256 pairs |
+| 380 | -33.51 [-51.14, -16.05] | -41.45 [-50.64, -32.33] over 400 pairs |
+
+Calibrate a planted slowdown on the machines that play, from the engines'
+own node rates in the fastchess logs, and expect the machines to differ.
+
+The lightweight tags `sprt-qualification/slow-1180`,
+`sprt-qualification/slow-130`, `sprt-qualification/slow-6400` and
+`sprt-qualification/slow-380` keep the four recorded commits reachable
+after their branches are deleted.
+
+The subjects of `sprt-qualification/slow-1180` and
+`sprt-qualification/slow-130` give the local slowdowns. The hosted
+runners measured 5.09× and 1.34×, respectively.
+
+To fetch the commits in a checkout for local replay, run:
+
+```sh
+git fetch origin 'refs/tags/sprt-qualification/*:refs/tags/sprt-qualification/*'
+```
+
+### Record and artifacts
 
 The record job replays the joined games with the judge and prints the row
-for [`sprt-records.tsv`](sprt-records.tsv). Save the row in that file in a
-pull request. The workflow makes no commits. Its `sprt-record` artifact
+for [`sprt-records.tsv`](sprt-records.tsv). Save every printed row in that
+file in a pull request. A verdict stands. Play the same test again only
+when a job failure voided it. The `sprt-record` artifact
 has the row in `record.tsv`, the judge output, the plan, the current range
 in `range.pgn`, and the cumulative games in `games.pgn`. The two initial
 rows are the fisher-mwa.4 trials played from a throwaway branch before

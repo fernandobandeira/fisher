@@ -818,15 +818,94 @@ fn kingside_castling_spellings_agree_with_the_history_checker() -> io::Result<()
                 },
             )?;
             let text = std::str::from_utf8(&output).map_err(io::Error::other)?;
-            let mut history = vec![
+            let mut history = [
                 Command(&command),
                 GO,
                 QUIT,
                 Report(SearchReport::BestMove(Some(movement))),
+                Response(text),
             ];
-            history.extend(text.split_inclusive('\n').map(Response));
             accepts(&history);
+            history[4] = Response("bestmove 0000\n");
+            rejects(5, "a null move with legal moves available", &history);
         }
+    }
+    Ok(())
+}
+
+#[test]
+fn the_history_checker_requires_rejections_for_other_castling_fields() -> io::Result<()> {
+    for fen in [
+        "4k3/8/8/8/8/8/8/4K2R w KKK - 0 1",
+        "4k3/8/8/8/8/8/8/4K2R w Kk - 0 1",
+        "4k2r/8/8/8/8/8/8/4K2R w KKk - 0 1",
+        "4k2r/8/8/8/8/8/8/4K2R w kk - 0 1",
+        "4k2r/8/8/8/8/8/8/4K2R w h - 0 1",
+        "4k3/8/8/8/8/8/8/R3K2R w A - 0 1",
+        "r3k3/8/8/8/8/8/8/4K2R w a - 0 1",
+        "r3k2r/8/8/8/8/8/8/R3K2R w KQkqq - 0 1",
+    ] {
+        check_rejected_castling_fen(fen)?;
+    }
+    for field in ["HH", "KH", "HK", "HQ", "KKQ"] {
+        check_rejected_castling_fen(&format!("4k3/8/8/8/8/8/8/R3K2R w {field} - 0 1"))?;
+    }
+    Ok(())
+}
+
+#[test]
+fn the_history_checker_accepts_distinct_standard_castling_letters() {
+    accepts(&[
+        Command("position fen 4k2r/8/8/8/8/8/8/4K2R w Kk - 0 1"),
+        Command("position fen r3k2r/8/8/8/8/8/8/R3K2R w qkQK - 0 1"),
+        READY,
+        READY_OK,
+        QUIT,
+    ]);
+}
+
+fn check_rejected_castling_fen(fen: &str) -> io::Result<()> {
+    for moves in ["", " moves e1g1"] {
+        let command = format!("position fen {fen}{moves}");
+        let input = format!("position fen {A}\n{command}\nisready\ngo\nquit\n");
+        let mut output = Vec::new();
+        let movement = forced_move(A);
+        uci::run_session(
+            io::Cursor::new(input),
+            &mut output,
+            "test",
+            move |request, send| {
+                assert_eq!(request.position.to_fen(), A);
+                send(SearchReport::BestMove(Some(movement)));
+            },
+        )?;
+        let text = std::str::from_utf8(&output).map_err(io::Error::other)?;
+        let lines: Vec<_> = text.split_inclusive('\n').collect();
+        let [diagnostic, ready, bestmove] = lines[..] else {
+            return Err(io::Error::other(format!(
+                "{command}: expected three responses, got {text:?}"
+            )));
+        };
+        assert!(
+            diagnostic.starts_with("info string position rejected: invalid FEN: "),
+            "{command}: {diagnostic}"
+        );
+        accepts(&[
+            POSITION_A,
+            Command(&command),
+            READY,
+            GO,
+            QUIT,
+            best_move_report(A),
+            Response(diagnostic),
+            Response(ready),
+            Response(bestmove),
+        ]);
+        rejects(
+            7,
+            "missing position rejection",
+            &[POSITION_A, Command(&command), READY, Response(ready), QUIT],
+        );
     }
     Ok(())
 }

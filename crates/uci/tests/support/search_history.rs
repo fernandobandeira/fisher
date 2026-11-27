@@ -615,32 +615,7 @@ fn position<'a>(words: impl Iterator<Item = &'a str>) -> Option<Chess> {
     let mut words = words.peekable();
     let mut position = match words.next()? {
         "startpos" => Chess::default(),
-        "fen" => {
-            let mut fen = Vec::new();
-            while words.peek().is_some_and(|word| *word != "moves") {
-                fen.push(words.next()?);
-            }
-            if !(4..=6).contains(&fen.len()) {
-                return None;
-            }
-            if fen.get(4).is_some_and(|clock| fen_decimal(clock).is_none())
-                || fen.get(5).is_some_and(|number| {
-                    fen_decimal(number)
-                        .and_then(std::num::NonZeroU64::new)
-                        .is_none()
-                })
-            {
-                return None;
-            }
-            // The checker uses Chess for move legality. The engine's u64 clocks
-            // can exceed the range of Chess's counters, so pass only the first four fields.
-            fen.truncate(4);
-            fen.join(" ")
-                .parse::<Fen>()
-                .ok()?
-                .into_position(CastlingMode::Standard)
-                .ok()?
-        }
+        "fen" => fen_position(&mut words)?,
         _ => return None,
     };
     match words.next() {
@@ -654,6 +629,51 @@ fn position<'a>(words: impl Iterator<Item = &'a str>) -> Option<Chess> {
         Some(_) => return None,
     }
     Some(position)
+}
+
+fn fen_position<'a>(
+    words: &mut std::iter::Peekable<impl Iterator<Item = &'a str>>,
+) -> Option<Chess> {
+    let fields: Vec<_> = std::iter::from_fn(|| words.next_if(|&word| word != "moves")).collect();
+    let [pieces, color, castling, en_passant, clocks @ ..] = fields.as_slice() else {
+        return None;
+    };
+    match clocks {
+        [] => {}
+        [halfmove] => {
+            fen_decimal(halfmove)?;
+        }
+        [halfmove, fullmove] => {
+            fen_decimal(halfmove)?;
+            std::num::NonZeroU64::new(fen_decimal(fullmove)?)?;
+        }
+        _ => return None,
+    }
+    // The counters can exceed Chess's range. Pass only the first four fields.
+    // Standard castling mode checks the king and rook home squares.
+    let castling = castling_field(castling)?;
+    format!("{pieces} {color} {castling} {en_passant}")
+        .parse::<Fen>()
+        .ok()?
+        .into_position(CastlingMode::Standard)
+        .ok()
+}
+
+fn castling_field(field: &str) -> Option<&str> {
+    match field {
+        "KK" | "H" => Some("K"),
+        "-" => Some(field),
+        _ => {
+            let mut seen = Vec::new();
+            for letter in field.chars() {
+                if !"KQkq".contains(letter) || seen.contains(&letter) {
+                    return None;
+                }
+                seen.push(letter);
+            }
+            Some(field)
+        }
+    }
 }
 
 fn fen_decimal(text: &str) -> Option<u64> {

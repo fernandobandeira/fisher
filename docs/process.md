@@ -51,6 +51,8 @@ Before merge, dispatch **Clocked SPRT** by hand from `main`. Play the changed re
 
 ## Recording the bench signature
 
+`fisher bench` runs iterative deepening to depth 5. A change to the bench depth gets its own commit with a new baseline (D63).
+
 Run `fisher bench` for a change to search, evaluation or time management. Put `Bench: <total>` in the commit message and record the total and the revision in the Result column of the [claims table](evidence.md#the-claims-table). No hook enforces this yet; a hook is a guard and would be proposed on its own.
 
 A change that claims to preserve behaviour must keep the signature unchanged. A change intended to alter the search reports the old and new totals and explains why they differ.

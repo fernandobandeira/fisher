@@ -4,7 +4,7 @@ This page explains how coverage floors are set and which regions the tests leave
 
 Each crate has a separate report and floor. The check excludes dedicated test-only files. Source paths escaping `src/` and build scripts fail the layout check.
 
-Coverage floors use the measured regions, rounded down to a half percentage point. The bench tests exercise a failed position write. The final total write and the final flush can also fail, but testing both would add two complete four-ply benches to `scripts/check`.
+Coverage floors use the measured regions, rounded down to a half percentage point. The bench tests exercise a failed position write. The final total write and the final flush can also fail, but testing both would add two complete depth-5 benches to `scripts/check`.
 
 The fixed perft data also leaves the invalid-FEN path uncovered. The rules constructors require kings and valid square coordinates, leaving defensive paths for a missing king or an out-of-bounds square outside public tests.
 

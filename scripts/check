@@ -37,6 +37,15 @@ if [ "$(cargo deny --version 2>/dev/null)" != "cargo-deny $cargo_deny_version" ]
     exit 1
 fi
 
+if ! python3 -Ic 'import sys; sys.exit(sys.version_info < (3, 9))'; then
+    case "$(uname -s)" in
+        Darwin) fix='brew install python' ;;
+        *) fix='sudo apt-get install python3 python3-venv' ;;
+    esac
+    printf 'The fixtures need Python 3.9 or newer. Run: %s\n' "$fix" >&2
+    exit 1
+fi
+
 check Format 'cargo fmt --all' cargo fmt --all -- --check
 check Lints 'scripts/check' crates_inherit_lints
 check 'Crate boundary fixtures' 'scripts/check-crate-boundaries --self-test' \
@@ -44,6 +53,8 @@ check 'Crate boundary fixtures' 'scripts/check-crate-boundaries --self-test' \
 check 'Guard-Change fixtures' 'scripts/check-guard-change --self-test' \
     scripts/check-guard-change --self-test
 check 'Await merge fixtures' 'scripts/test-await-merge' scripts/test-await-merge
+check 'Clock match fixtures' 'python3 -I scripts/run-clock-match-fixtures' \
+    python3 -I scripts/run-clock-match-fixtures
 check 'Advisory database fixtures' 'scripts/test-advisory-db' scripts/test-advisory-db
 check 'Clocked SPRT fixtures' 'scripts/test-clocked-sprt' scripts/test-clocked-sprt
 check 'Hosted SPRT fixtures' 'scripts/test-hosted-sprt' scripts/test-hosted-sprt

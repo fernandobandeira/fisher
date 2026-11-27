@@ -12,7 +12,9 @@ cargo install cargo-deny --version 0.22.0 --locked             # check dependenc
 scripts/check                                                 # run the local checks
 ```
 
-The scripts use Python 3.8 or newer for the crate boundary check and fixtures. The pre-commit hook runs the local gate. Rust comes from [rustup](https://rustup.rs). The version is pinned in `rust-toolchain.toml`.
+The scripts use Python 3.9 or newer with `venv` for the crate boundary check and fixtures. On macOS, install it with `brew install python`. On Ubuntu, use `sudo apt-get install python3 python3-venv`. The pre-commit hook runs the local gate. Rust comes from [rustup](https://rustup.rs). The version is pinned in `rust-toolchain.toml`.
+
+The first run of the clock match fixtures installs the pinned PGN replay library into a virtual environment under `target/clock-match-venv/`. Later runs reuse it if the installed library passes its integrity check and the requirements, helper, and Python major and minor versions still match.
 
 If the RustSec refresh fails, the gate reports the date of the cached snapshot and uses it if its checkout is intact and the later of its HEAD commit time and last successful refresh is at most seven days old. After verifying the refreshed checkout, the gate records the refresh time and HEAD commit beside the checkout in Cargo's `advisory-dbs` directory. A refresh marker applies only to that commit. Missing, malformed or future-dated markers fall back to the commit time.
 

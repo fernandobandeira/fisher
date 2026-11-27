@@ -1,5 +1,4 @@
-// Replay principal variations as the search crate tests do.
-#[path = "../../search/src/tests/support/principal_variation.rs"]
+#[path = "support/principal_variation.rs"]
 mod principal_variation;
 #[path = "support/scripted_transcripts.rs"]
 mod scripted_transcripts;
@@ -1181,13 +1180,13 @@ impl Drop for Engine {
 
 /// A stand-in for fisher that answers the nth command with the nth batch of
 /// lines, for checking the runner itself.
-struct FakeEngine {
-    replies: std::collections::VecDeque<Vec<&'static str>>,
-    stdout: std::collections::VecDeque<&'static str>,
+struct FakeEngine<'a> {
+    replies: std::collections::VecDeque<Vec<&'a str>>,
+    stdout: std::collections::VecDeque<&'a str>,
     started: Instant,
 }
 
-impl TranscriptIo for FakeEngine {
+impl TranscriptIo for FakeEngine<'_> {
     fn send(&mut self, _: &[u8]) -> io::Result<()> {
         self.stdout
             .extend(self.replies.pop_front().unwrap_or_default());
@@ -1209,7 +1208,7 @@ impl TranscriptIo for FakeEngine {
     }
 }
 
-fn run_against_fake(transcript: &str, replies: Vec<Vec<&'static str>>) -> io::Result<Vec<String>> {
+fn run_against_fake(transcript: &str, replies: Vec<Vec<&str>>) -> io::Result<Vec<String>> {
     run_transcript("fake", transcript, HANG_TIMEOUT, || {
         Ok(FakeEngine {
             replies: replies.into(),
@@ -1566,4 +1565,60 @@ fn a_rejected_go_loses_attribution_for_the_rest_of_the_session() {
     ];
     let error = rejection(run_against_fake(transcript, replies));
     assert!(error.contains("from a search whose position"), "{error}");
+}
+
+// No move from this starting position line captures a piece, so each
+// prefix has a material score of 0.
+const QUIET_VARIATION: [&str; 4] = ["e2e4", "e7e5", "g1f3", "b8c6"];
+
+fn replay_startpos_line(variation: &[&str], score: i32) -> io::Result<Vec<String>> {
+    let depth = variation.len();
+    let info = format!(
+        "info depth {depth} multipv 1 score cp {score} nodes 1 nps 1000 time 1 pv {}",
+        variation.join(" ")
+    );
+    let first = variation
+        .first()
+        .ok_or_else(|| io::Error::other("missing first move of the variation"))?;
+    let bestmove = format!("bestmove {first}");
+    let transcript =
+        format!("> position startpos\n> go depth {depth}\n< {info}\n< {bestmove}\n! exit\n");
+    run_against_fake(&transcript, vec![vec![], vec![&info, &bestmove]])
+}
+
+#[test]
+fn rejects_illegal_principal_variation_moves_at_depths_one_to_four() {
+    for depth in 1..=QUIET_VARIATION.len() {
+        // The pawn on a2 cannot advance three squares.
+        let variation: Vec<_> = QUIET_VARIATION
+            .into_iter()
+            .take(depth - 1)
+            .chain(["a2a5"])
+            .collect();
+        let error = rejection(replay_startpos_line(&variation, 0));
+        let expected = format!(
+            "illegal principal variation move a2a5 after {} plies",
+            depth - 1
+        );
+        assert!(
+            error.contains(&expected),
+            "depth {depth}: expected {expected:?}, got {error:?}"
+        );
+    }
+}
+
+#[test]
+fn rejects_principal_variation_score_mismatches_at_depths_one_to_four() -> io::Result<()> {
+    let mut variation = Vec::new();
+    for movement in QUIET_VARIATION {
+        variation.push(movement);
+        let depth = variation.len();
+        replay_startpos_line(&variation, 0)?;
+        let error = rejection(replay_startpos_line(&variation, 100));
+        assert!(
+            error.contains("principal variation ends with material 0, not the score 100"),
+            "depth {depth}: expected a material mismatch, got {error:?}"
+        );
+    }
+    Ok(())
 }

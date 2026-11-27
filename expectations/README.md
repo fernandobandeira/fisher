@@ -409,3 +409,9 @@ staged on 2026-11-27 before the engine changes and activated by fisher-38w
 in pull request #125. They follow Stockfish 19, which consumes whatever
 token stands in the name position. Transcript tests play each session by
 naming it as `setoption-name/<name>`.
+
+## Boards a FEN may hold
+
+fisher-2ou staged the [sessions for a promoted-piece marker and nine pawns](uci-fen-boards/README.md)
+on 2026-11-27. Stockfish 19 rejects both boards, so fisher rejects both.
+No test reads them until fisher-2ou moves them into `uci/fen-boards/`.

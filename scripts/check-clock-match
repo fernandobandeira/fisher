@@ -5,6 +5,7 @@ Usage: scripts/check-clock-match FASTCHESS NEW_EVIDENCE_DIRECTORY
 Install the pinned PGN replay library and its build tool as in .github/workflows/clock-match.yml.
 """
 import collections
+import contextlib
 import io
 import json
 import os
@@ -29,8 +30,21 @@ ENGINE = r"fisher-[ab]"
 PAIR = rf"\({ENGINE} vs {ENGINE}\)"
 NUMBER = r"-?(?:\d+(?:\.\d+)?|inf|nan)"
 IDS = set(range(1, GAME_COUNT + 1))
-REPETITION = re.compile(rf"Warning; PV continues after threefold repetition - move {MOVE} from {ENGINE}")
+PV_WARNING = re.compile(
+    rf"Warning; PV continues after (threefold repetition|fifty-move rule) - move {MOVE} from {ENGINE}"
+)
+WARNING_COUNTS = {"threefold repetition": "repetition_warnings", "fifty-move rule": "fifty_move_warnings"}
+DIAGNOSTICS = tuple(map(re.compile, (
+    r"Info; info depth \d+ multipv \d+ score (?:cp|mate) -?\d+ "
+    rf"nodes \d+ nps \d+ time \d+ pv {MOVE}(?: {MOVE})*",
+    r"Position; fen [prnbqkPRNBQK1-8/]+ [wb] (?:[KQkq]+|-) (?:[a-h][36]|-) \d+ \d+",
+    rf"Moves; (?:{MOVE}(?: {MOVE})*)?",
+)))
+LOSS_ON_TIME = r"(?:White|Black) loses on time \(\d+ms overrun\)"
 RESULT_MARKER = re.compile(rf"(?:^|\s)({RESULT})$")
+PGN_HEADERS = re.compile(r"(?:\[[^\n]*\]\n|[ \t]*\n|[%;][^\n]*\n)*")
+RESULT_HEADER = re.compile(r'(?m)^\[Result[ \t]+"([^"\n]*)"\][ \t]*$')
+PGN_DELIMITERS = re.compile(rf"(?m)\{{[^}}]*\}}|^%[^\n]*|;[^\n]*|[{{}}()]|{RESULT}|\*")
 # These are the console shapes reviewed for the pinned fastchess release.
 # Review the list when deliberately changing the pin. Everything else fails.
 CONSOLE = tuple(map(re.compile, (
@@ -39,11 +53,7 @@ CONSOLE = tuple(map(re.compile, (
     rf"Started game \d+ of {GAME_COUNT} {PAIR}",
     rf"Finished game \d+ {PAIR}: {RESULT} \{{(?:White mates|Black mates|"
     r"Draw by (?:3-fold repetition|insufficient mating material|fifty moves rule|stalemate)|"
-    r"(?:White|Black) loses on time \(\d+ms overrun\))\}",
-    r"Info; info depth \d+ multipv \d+ score (?:cp|mate) -?\d+ "
-    rf"nodes \d+ nps \d+ time \d+ pv {MOVE}(?: {MOVE})*",
-    rf"Moves;(?: {MOVE})*",
-    r"Position; fen [prnbqkPRNBQK1-8/]+ [wb] (?:[KQkq]+|-) (?:[a-h][36]|-) \d+ \d+",
+    rf"{LOSS_ON_TIME})\}}",
     r"Results of fisher-a vs fisher-b \(10/1, NULL, NULL, openings\.epd\):",
     rf"Elo: {NUMBER} \+/- {NUMBER}, nElo: {NUMBER} \+/- {NUMBER}",
     rf"LOS: {NUMBER} %, DrawRatio: {NUMBER} %, PairsRatio: {NUMBER}",
@@ -68,7 +78,9 @@ def run_match(command, evidence):
     started = time.monotonic()
     deadline_reached = False
     with (evidence / "fastchess.log").open("w") as stream:
-        with subprocess.Popen(command, cwd=evidence, stdout=stream, stderr=subprocess.STDOUT) as process:
+        with subprocess.Popen(
+            command, cwd=evidence, stdout=stream, stderr=subprocess.STDOUT, start_new_session=True,
+        ) as process:
             try:
                 process.wait(timeout=MATCH_SECONDS)
             except subprocess.TimeoutExpired:
@@ -77,7 +89,8 @@ def run_match(command, evidence):
                 try:
                     process.wait(timeout=STOP_SECONDS)
                 except subprocess.TimeoutExpired:
-                    process.kill()
+                    with contextlib.suppress(ProcessLookupError):
+                        os.killpg(process.pid, signal.SIGKILL)
                     process.wait()
     return process.returncode, deadline_reached, time.monotonic() - started
 
@@ -87,11 +100,22 @@ def read_log(path, report):
     events = {}
     finish_reasons = []
 
-    for raw in path.read_text(errors="replace").split("\n"):
-        line = ANSI_COLOR.sub("", raw).rstrip("\r")
-        if REPETITION.fullmatch(line):
-            report["repetition_warnings"] += 1
+    lines = path.read_text(errors="replace").split("\n")
+    next_line = 0
+    for index, raw in enumerate(lines):
+        if index < next_line:
             continue
+        line = console_text(raw)
+        warning = PV_WARNING.fullmatch(line)
+        if warning:
+            end = index + 1 + len(DIAGNOSTICS)
+            if end <= len(lines) and all(
+                shape.fullmatch(console_text(detail))
+                for shape, detail in zip(DIAGNOSTICS, lines[index + 1:end])
+            ):
+                report[WARNING_COUNTS[warning[1]]] += 1
+                next_line = end
+                continue
         if any(shape.fullmatch(line) for shape in CONSOLE):
             continue
         try:
@@ -103,6 +127,9 @@ def read_log(path, report):
             continue
         if kind == "game_aborted":
             terminations["interrupted"] += 1
+            reason = event.get("reason")
+            if isinstance(reason, str) and re.fullmatch(LOSS_ON_TIME, reason):
+                terminations["time_forfeit"] += 1
             continue
         if kind == "tournament_finished":
             finish_reasons.append(event.get("reason"))
@@ -121,6 +148,35 @@ def read_log(path, report):
     return terminations, events, finish_reasons
 
 
+def console_text(raw):
+    return ANSI_COLOR.sub("", raw).rstrip("\r")
+
+
+def has_pgn_result(record, result):
+    headers = PGN_HEADERS.match(record)
+    marker = RESULT_MARKER.search(record.rstrip())
+    if RESULT_HEADER.findall(headers[0]) != [result] or not marker or marker[1] != result:
+        return False
+
+    # The replay library tolerates unfinished comments and extra result markers.
+    # Scan the source for these before trusting its parsed result.
+    depth = 0
+    markers = []
+    for match in PGN_DELIMITERS.finditer(record, headers.end()):
+        token = match[0]
+        if token in ("{", "}"):
+            return False
+        if token == "(":
+            depth += 1
+        elif token == ")":
+            if not depth:
+                return False
+            depth -= 1
+        elif not depth and token[0] not in "{%;":
+            markers.append((token, match.start()))
+    return depth == 0 and markers == [(result, marker.start(1))]
+
+
 def replay_pgn(path, events):
     game_ids = set()
     terminations = collections.Counter()
@@ -131,7 +187,8 @@ def replay_pgn(path, events):
     preamble, *records = re.split(r"(?m)(?=^\[Event )", path.read_text(errors="replace"))
     replay_errors += bool(preamble.strip())
     for record in records:
-        game = chess.pgn.read_game(io.StringIO(record))
+        stream = io.StringIO(record)
+        game = chess.pgn.read_game(stream)
         if game is None:
             replay_errors += 1
             continue
@@ -146,7 +203,9 @@ def replay_pgn(path, events):
             continue
         game_ids.add(number)
         result = game.headers["Result"]
-        marker = RESULT_MARKER.search(record.rstrip())
+        if stream.read().strip() or not has_pgn_result(record, result):
+            replay_errors += 1
+            continue
         plies = 0
         position = game.board()
         for move in game.mainline_moves():
@@ -155,7 +214,7 @@ def replay_pgn(path, events):
             position.push(move)
             plies += 1
         else:
-            if marker and marker[1] == result and events.get(number) == (plies, result):
+            if events.get(number) == (plies, result):
                 continue
         replay_errors += 1
     return game_ids, terminations, replay_errors
@@ -196,7 +255,7 @@ def main():
     ]
     (evidence / "command.sh").write_text(shlex.join(command) + "\n")
     status, deadline_reached, duration = run_match(command, evidence)
-    report = {"repetition_warnings": 0, "unexpected": 0, "unexpected_examples": []}
+    report = {"repetition_warnings": 0, "fifty_move_warnings": 0, "unexpected": 0, "unexpected_examples": []}
     terminations, events, finish_reasons = read_log(evidence / "fastchess.log", report)
     pgn_ids, pgn_terminations, replay_errors = replay_pgn(evidence / "games.pgn", events)
     finished = len(events)
@@ -212,6 +271,7 @@ def main():
         f"Tournament finish reasons: {finish_reasons}",
         f"Unexpected output lines: {report['unexpected']}",
         f"Repetition warnings: {report['repetition_warnings']}",
+        f"Fifty-move warnings: {report['fifty_move_warnings']}",
         f"Terminations by kind: {dict(terminations)}",
         f"Match duration: {duration:.2f} seconds",
         f"Match deadline reached ({MATCH_SECONDS} seconds): {'yes' if deadline_reached else 'no'}",

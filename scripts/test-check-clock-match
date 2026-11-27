@@ -1,0 +1,288 @@
+#!/usr/bin/env python3
+"""Focused fixtures. Run with the PGN replay library installed as in the workflow."""
+import contextlib
+import importlib.machinery
+import importlib.util
+import io
+import json
+import os
+import platform
+from pathlib import Path
+import re
+import select
+import signal
+import subprocess
+import sys
+import tempfile
+import unittest
+from unittest.mock import patch
+
+
+ROOT = Path(__file__).resolve().parent.parent
+LOADER = importlib.machinery.SourceFileLoader("clock_match", str(ROOT / "scripts/check-clock-match"))
+MATCH = importlib.util.module_from_spec(importlib.util.spec_from_loader(LOADER.name, LOADER))
+with patch.object(sys, "dont_write_bytecode", True):
+    LOADER.exec_module(MATCH)
+
+# Run 45683425250, first warning. The fifty-move warning and empty history
+# use the alternate forms from d7b47e8 match.cpp:56–63 and 798–808.
+REPETITION = "Warning; PV continues after threefold repetition - move d7c6 from fisher-a"
+FIFTY_MOVE = "Warning; PV continues after fifty-move rule - move d7c6 from fisher-a"
+DIAGNOSTICS = (
+    "Info; info depth 4 multipv 1 score cp -200 nodes 134657 nps 8416062 time 16 pv c6d7 e4f5 d7c6 f5c8",
+    "Position; fen r1bqkbnr/pp1pppp1/2n4p/2p5/2P2P2/4P3/PP1P2PP/RNBQKBNR w KQkq - 0 4",
+    "Moves; c6d7 e4f5 d7c6",
+)
+# Reduced from the GameId 1 record and finish event of run 45683425250.
+# Keep its starting FEN, first two plies and result.
+PGN = (
+    '[Event "Fastchess Tournament"]\n[GameId "1"]\n[Result "1/2-1/2"]\n'
+    '[FEN "r1bqkbnr/pp1pppp1/2n4p/2p5/2P2P2/4P3/PP1P2PP/RNBQKBNR w KQkq - 0 4"]\n'
+    '[Termination "normal"]\n\n4. Na3 e5 1/2-1/2\n'
+)
+FINISH = {
+    "event": "game_finished", "game": 1, "plies": 2, "result": "1/2-1/2", "termination": "normal",
+}
+# Run 45683651168, fastchess.log. The two totals of 290 include these aborts.
+ABORTS = (
+    '{"event":"game_aborted","game":593,"reason":"White loses on time (202ms overrun)"}',
+    '{"event":"game_aborted","game":594,"reason":"White loses on time (202ms overrun)"}',
+)
+
+
+class ClockMatchTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.directory = Path(temporary.name)
+
+    def read_log(self, *lines):
+        log = self.directory / "fastchess.log"
+        log.write_text("\n".join(lines))
+        report = {"repetition_warnings": 0, "fifty_move_warnings": 0,
+                  "unexpected": 0, "unexpected_examples": []}
+        terminations, _, _ = MATCH.read_log(log, report)
+        return terminations, report
+
+    def verify_match(self, *lines, finish=None, pgn=PGN):
+        evidence = self.directory / "match"
+
+        def stand_in(command, output):
+            (output / "fastchess.log").write_text("\n".join((
+                *lines, json.dumps(FINISH if finish is None else finish),
+                '{"event":"tournament_finished","reason":"completed"}',
+            )))
+            (output / "games.pgn").write_text(pgn)
+            return 0, False, 0
+
+        with patch.object(sys, "argv", ["check-clock-match", __file__, str(evidence)]), \
+                patch.multiple(MATCH, GAME_COUNT=1, IDS={1}, run_match=stand_in), \
+                patch.object(MATCH, "runner_cores", return_value=2), \
+                patch.object(platform, "platform", return_value="fixture"), \
+                patch.object(subprocess, "run"), \
+                patch.object(subprocess, "check_output", return_value="fixture\n"), \
+                contextlib.redirect_stdout(io.StringIO()):
+            verdict = MATCH.main()
+        summary = (evidence / "summary.txt").read_text()
+        return verdict, summary
+
+    def test_both_exact_warnings_pass_and_are_counted(self):
+        verdict, summary = self.verify_match(REPETITION, *DIAGNOSTICS, FIFTY_MOVE, *DIAGNOSTICS)
+        self.assertEqual(verdict, 0, summary)
+        self.assertIn("Repetition warnings: 1\n", summary)
+        self.assertIn("Fifty-move warnings: 1\n", summary)
+
+    def test_other_warnings_fail(self):
+        for warning in (
+            FIFTY_MOVE + " extra",
+            FIFTY_MOVE.replace("fisher-a", "fisher-c"),
+            FIFTY_MOVE.replace("d7c6", "d7c9"),
+            FIFTY_MOVE.replace("after fifty", "after the fifty"),
+            "Warning; Illegal move a1a8 played by fisher-a",
+        ):
+            with self.subTest(warning=warning):
+                _, report = self.read_log(warning, *DIAGNOSTICS)
+                self.assertGreater(report["unexpected"], 0, "unrecognized warning was accepted")
+
+    def test_losses_on_time_still_fail(self):
+        verdict, summary = self.verify_match(finish=dict(FINISH, termination="time_forfeit"))
+        self.assertEqual(verdict, 1, summary)
+        self.assertIn("Losses on time: 1\n", summary)
+
+    def test_abnormal_finish_still_fails(self):
+        verdict, summary = self.verify_match(finish=dict(FINISH, termination="crash"))
+        self.assertEqual(verdict, 1, summary)
+        self.assertIn("Abnormal endings: 1\n", summary)
+
+    def test_illegal_replay_still_fails(self):
+        with contextlib.redirect_stderr(io.StringIO()):
+            verdict, summary = self.verify_match(pgn=PGN.replace("Na3", "Qa8"))
+        self.assertEqual(verdict, 1, summary)
+        self.assertIn("PGN replay or record errors: 1\n", summary)
+
+    def test_empty_history_requires_its_space(self):
+        for history, unexpected in (("Moves; ", 0), ("Moves;", 1), ("Moves;  ", 1)):
+            with self.subTest(history=history):
+                _, report = self.read_log(REPETITION, *DIAGNOSTICS[:2], history)
+                self.assertEqual(bool(report["unexpected"]), bool(unexpected), repr(history))
+
+    def test_forced_cleanup_kills_the_descendant(self):
+        # The child holds the stdout pipe open. It writes its PID only after
+        # both processes are ready. Controlled wait calls reach the two
+        # deadlines independently of startup time. Pipe EOF proves cleanup.
+        command = [sys.executable, "-c", (
+            "import os, signal\n"
+            "signal.signal(signal.SIGINT, signal.SIG_IGN)\n"
+            "if os.fork() == 0:\n"
+            "    print(os.getpid(), flush=True)\n"
+            "while True:\n"
+            "    signal.pause()\n"
+        )]
+        popen = subprocess.Popen
+        waits = []
+        signals = []
+        hang_timeout = 30
+
+        def start(args, **options):
+            options["stdout"] = subprocess.PIPE
+            process = popen(args, **options)
+            self.addCleanup(process.stdout.close)
+            self.addCleanup(process.wait, timeout=hang_timeout)
+            self.addCleanup(stop, process.pid)
+            self.assertTrue(select.select([process.stdout], [], [], hang_timeout)[0],
+                            "stand-in did not signal readiness")
+            descendant = int(process.stdout.readline())
+            self.addCleanup(stop, descendant)
+            original_wait = process.wait
+            original_send_signal = process.send_signal
+            expected = iter((3600, 10, None, None))
+
+            def wait(timeout=None):
+                waits.append(timeout)
+                self.assertEqual(timeout, next(expected))
+                if timeout is not None:
+                    raise subprocess.TimeoutExpired(args, timeout)
+                return original_wait(timeout=hang_timeout)
+
+            process.wait = wait
+
+            def send_signal(signum):
+                signals.append(signum)
+                original_send_signal(signum)
+
+            process.send_signal = send_signal
+            self.process_output = os.fdopen(os.dup(process.stdout.fileno()), "rb")
+            self.addCleanup(self.process_output.close)
+            return process
+
+        def stop(pid):
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(pid, signal.SIGKILL)
+
+        with patch.object(subprocess, "Popen", side_effect=start), \
+                patch.object(os, "killpg", wraps=os.killpg) as kill_group:
+            status, deadline, _ = MATCH.run_match(command, self.directory)
+        self.assertTrue(deadline)
+        self.assertEqual(status, -signal.SIGKILL)
+        self.assertEqual(waits, [3600, 10, None, None])
+        timeout = hang_timeout if kill_group.called else 0
+        self.assertTrue(select.select([self.process_output], [], [], timeout)[0],
+                        "descendant kept the pipe open after forced cleanup")
+        self.assertEqual(self.process_output.read(1), b"")
+        self.assertEqual(signals, [signal.SIGINT])
+
+    def test_workflow_leaves_time_for_evidence(self):
+        workflow = (ROOT / ".github/workflows/clock-match.yml").read_text()
+        job_minutes = int(re.search(r"(?m)^    timeout-minutes: (\d+)$", workflow)[1])
+        steps = re.split(r"(?m)^      - ", workflow.split("    steps:\n", 1)[1])[1:]
+        self.assertEqual(len(steps), 7)
+        self.assertEqual(MATCH.MATCH_SECONDS, 3600, "approved Arm B play deadline")
+        self.assertEqual(MATCH.STOP_SECONDS, 10, "grace after SIGINT")
+        self.assertIn("if: always()", steps[-1], "upload must run after failure")
+        self.assertIn("actions/upload-artifact@", steps[-1])
+        limits = []
+        for step in steps:
+            limit = re.search(r"(?m)^        timeout-minutes: (\d+)$", step)
+            self.assertIsNotNone(limit, step.splitlines()[0] + " needs a step timeout")
+            limits.append(60 * int(limit[1]))
+        self.assertEqual(limits[:5], [180] * 5)
+        self.assertEqual(limits[-1], 180)
+        self.assertIn("check-clock-match", steps[5])
+        self.assertGreater(limits[5], 3600 + 10, "leave time for build and replay")
+        self.assertGreater(job_minutes * 60, sum(limits), "all step limits must fit with time to spare")
+
+    def test_pgn_requires_explicit_header_and_one_top_level_result(self):
+        cases = {
+            "complete": (PGN, 0),
+            "closed comment and variation": (
+                PGN.replace("Na3 e5", "Na3 {comment 0-1} (4. Nf3) e5"), 0),
+            "missing Result header": (PGN.replace('[Result "1/2-1/2"]\n', ""), 1),
+            "result inside unfinished comment": (PGN.replace("e5 1/2-1/2", "e5 { 1/2-1/2"), 1),
+            "unfinished comment after result": (PGN.rstrip() + " { trailing comment\n1/2-1/2", 1),
+            "result inside line comment": (PGN.replace("e5 1/2-1/2", "e5 ; 1/2-1/2"), 1),
+            "hidden final token after a result": (PGN.rstrip() + " ; 1/2-1/2", 1),
+            "result inside unfinished variation": (PGN.replace("e5 1/2-1/2", "e5 (4... d5 1/2-1/2"), 1),
+            "duplicate result": (PGN.replace("e5 1/2-1/2", "e5 0-1 1/2-1/2"), 1),
+            "duplicate result on separated line": (PGN + "\n1/2-1/2\n", 1),
+            "unfinished marker before result": (PGN.replace("e5 1/2-1/2", "e5 * 1/2-1/2"), 1),
+            "mismatched result": (PGN.replace("e5 1/2-1/2", "e5 1-0"), 1),
+        }
+        path = self.directory / "games.pgn"
+        for case, (record, expected) in cases.items():
+            with self.subTest(case=case), contextlib.redirect_stderr(io.StringIO()):
+                path.write_text(record)
+                _, _, errors = MATCH.replay_pgn(path, {1: (2, "1/2-1/2")})
+                self.assertEqual(errors, expected, case)
+        path.write_text(PGN)
+        for finish in ((1, "1/2-1/2"), (2, "1-0")):
+            with self.subTest(finish=finish):
+                _, _, errors = MATCH.replay_pgn(path, {1: finish})
+                self.assertEqual(errors, 1, "finish event disagrees with record")
+
+    def test_diagnostics_must_be_a_complete_ordered_group(self):
+        info, position, moves = DIAGNOSTICS
+        cases = {
+            "complete": ((REPETITION, info, position, moves), False),
+            "orphaned": ((info, position, moves), True),
+            "incomplete at end of log": ((REPETITION, info, position), True),
+            "reordered": ((REPETITION, info, moves, position), True),
+            "interleaved event": ((REPETITION, info, json.dumps(FINISH), position, moves), True),
+        }
+        for case, (lines, unexpected) in cases.items():
+            with self.subTest(case=case):
+                _, report = self.read_log(*lines)
+                self.assertEqual(bool(report["unexpected"]), unexpected, case)
+                self.assertEqual(report["repetition_warnings"], int(not unexpected), case)
+
+    def test_archived_aborted_losses_keep_both_counts(self):
+        verdict, summary = self.verify_match(*ABORTS)
+        self.assertIn("Losses on time: 2\n", summary)
+        self.assertIn("Interrupted games: 2\n", summary)
+        self.assertEqual(verdict, 1, summary)
+
+    def test_other_abort_reasons_only_count_as_interruptions(self):
+        terminations, _ = self.read_log(
+            '{"event":"game_aborted","game":595,"reason":"interrupted"}',
+            '{"event":"game_aborted","game":596,"reason":null}',
+        )
+        self.assertEqual(terminations["interrupted"], 2)
+        self.assertEqual(terminations["time_forfeit"], 0)
+
+    def test_evidence_page_describes_pinned_verdicts_and_cleanup(self):
+        page = (ROOT / "docs/guardrails/behaviour-evidence.md").read_text()
+        section = page.split("## Real-clock match", 1)[1].split("To repeat it locally", 1)[0]
+        self.assertEqual(set(re.findall(r"`(move|[a-z]+_[a-z]+)`", section)), {
+            "tournament_started", "game_started", "move", "game_finished",
+            "tournament_finished", "game_aborted",
+        }, "event inventory differs from the archived runs")
+        self.assertIn('reason `completed`', section)
+        self.assertIn("`game_aborted` event fails", section)
+        self.assertIn("threefold repetition or the fifty-move rule", section)
+        self.assertIn("`Info;`, `Position;`, and `Moves;`", section)
+        self.assertIn("sends `stop` to a started engine", section)
+        self.assertIn("up to ten seconds if the first read yielded no usable `bestmove`", section)
+        self.assertIn("What consumed the full allowance in individual games remains unknown.", section)
+
+
+if __name__ == "__main__":
+    unittest.main()

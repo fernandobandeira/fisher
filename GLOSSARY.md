@@ -134,6 +134,30 @@ _Avoid_: estimate, approximate score
 Leaving the remaining moves of a position unplayed, because a reply already found proves the position cannot change the result at the root. It does not interrupt the search: the depth in hand still finishes, with the same score.
 _Avoid_: cut, refutation, witness
 
+**Move order**:
+The order in which the search tries the legal moves of a position, so that moves likely to cause a cutoff can be tried first.
+_Avoid_: move ranking, move sort
+
+**Capture**:
+A move that takes an opposing piece, including en passant, which takes a pawn from a square other than the destination square. For move order, a promotion to a queen goes with the captures even if it takes no piece.
+_Avoid_: take (as a noun), attack
+
+**Quiet move**:
+For move order, any move left after grouping captures and promotions to a queen.
+_Avoid_: safe move, non-capture (as a name for this group)
+
+**Killer move**:
+A quiet move remembered because it caused a cutoff at another position at the same ply. The search tries it after the captures when it is legal in the position in hand.
+_Avoid_: refutation, winning move
+
+**History**:
+A record of quiet moves that caused cutoffs during this `go`, across positions and plies. The search uses it to order the quiet moves left after the killer moves.
+_Avoid_: history heuristic (for the record), search history (use session history for UCI events), history on its own for played moves or Git revisions
+
+**Move order memory**:
+The single value `search` exports to hold what move order remembers has contents private to `search` and is created by `deepening` for all depths of one `go`. It holds the principal variation of the last finished depth first, with killer moves and history joining it later and a transposition table able to replace part of what it holds.
+_Avoid_: search state, history (which names only the record of quiet moves that caused cutoffs)
+
 **Perft**:
 The number of leaf nodes in the tree of legal moves to a fixed depth from a position, used to check move generation against published counts.
 _Avoid_: move count, node test

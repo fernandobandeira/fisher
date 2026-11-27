@@ -51,10 +51,13 @@ jobs:
             uname -sm
             if [ -n "$MEASURED" ]; then
               if [ "$CALIBRATE_FIRST" = true ]; then
+                printf '\n## Calibration check\n\n'
                 strength/ordering calibrate -- "$BASE" || exit
               fi
+              printf '\n## Measurement\n\n'
               strength/ordering measure -- "$BASE" "$MEASURED"
             else
+              printf '\n## Calibration\n\n'
               strength/ordering calibrate -- "$BASE"
             fi
           } | tee -a "$GITHUB_STEP_SUMMARY"

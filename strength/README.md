@@ -44,8 +44,7 @@ at the specified depths, the six times and their median, and the measured
 median's percentage change relative to the base. Node counts must repeat
 exactly. The job log and summary include the results and the runner's CPU
 model. The script also prints the CPU model associated with the recorded
-threshold. Recalibrate when the measurement runs on a different CPU model
-before using its times for D64.
+threshold.
 
 To repeat the node measurement locally, run
 `strength/ordering measure <base-commit> <measured-commit>` from the checkout
@@ -53,28 +52,60 @@ that contains the sample. Use the hosted run's times for D64.
 
 ### Time threshold
 
-The current threshold and the runner that produced it are recorded in
-[`ordering-threshold.tsv`](ordering-threshold.tsv). To recalibrate, dispatch
-**Ordering sample** and leave the measured revision blank. The workflow builds
-the base twice and repeats the full comparison five times. Set
-`calibrate_first` with a measured revision to run calibration and comparison
-on the same hosted runner. Use the threshold printed by that calibration
-when reading the paired comparison.
+The owner's agent settled the verdict rule on 2026-11-27. The threshold in
+[`ordering-threshold.tsv`](ordering-threshold.tsv) always governs a D64 verdict.
+A verdict requires the CPU model in that file. The script prints the CPU model
+before timing. If it differs, discard the run for the verdict and dispatch again
+based on the CPU model alone.
 
-For each calibration comparison, divide the absolute gap between medians
-by the base median. Round the largest gap up to a whole percent. Calibration takes 70
-full-sample runs, including 10 warm-ups, and allows up to 300 minutes.
+Dispatch **Ordering sample** with the measured revision blank to calibrate.
+The workflow builds the base twice and runs five self-comparisons. Divide each
+absolute median gap by the base median and round the largest up to a whole
+percent. Calibration takes 70 full-sample runs, including 10 warm-ups, and
+allows up to 300 minutes.
 
-The recorded calibration used `950e06e6aa78e4ceeaa51914fc71087d3efa4e82` before the first move order change.
-The largest gap was 0.1845%, so the recorded threshold is 1%.
-Every calibration pass reported 114,642,076 nodes, matching the local result.
-[Calibration run](https://github.com/fernandobandeira/fisher/actions/runs/46056818707)
+Set `calibrate_first` with a measured revision for a calibration check before
+measurement on the same runner. The recorded threshold still governs. If the
+paired calibration exceeds the recorded threshold, withhold the verdict and
+bring the run to the owner.
 
-- Adding a delay of 2.5% of elapsed search time before reporting the best
-  move raised the median from 51.249 s to 52.828 s (+3.0818%) with the same
-  114,642,076 nodes on the calibration CPU model. [Delay control](https://github.com/fernandobandeira/fisher/actions/runs/46056818707)
-- Reversing the legal move traversal below the root changed the node total
-  from 114,642,076 to 611,209,419. [Move-order control](https://github.com/fernandobandeira/fisher/actions/runs/46043091865)
+### Hosted qualification
+
+The owner's agent accepted `950e06e6aa78e4ceeaa51914fc71087d3efa4e82` on
+2026-11-27 as the calibration base. It is the baseline immediately before
+fisher-707.4. It has the same search and deepening as the previously named
+`9772649`. FEN parsing, UCI command handling and the bench signature changed
+between those revisions.
+
+All three calibrations rounded to **1%**. The largest self-comparison gap
+observed on AMD EPYC 7763 was **0.3931%** (0.39%). Both hosted base builds
+reported **114,642,076 nodes**, matching the local result.
+
+| Hosted run | CPU model | Result |
+|---|---|---|
+| [46035834751](https://github.com/fernandobandeira/fisher/actions/runs/46035834751) | AMD EPYC 9V74 | Initial calibration on main. Largest gap 0.3249%, rounded to 1%. |
+| [46043088284](https://github.com/fernandobandeira/fisher/actions/runs/46043088284) | Intel Xeon 6975P-C | Fixed delay measured +2.1966% with equal nodes. The CPU differed from the initial calibration. |
+| [46044717437](https://github.com/fernandobandeira/fisher/actions/runs/46044717437) | AMD EPYC 7763 | Largest calibration gap 0.3931%, rounded to 1%. The fixed delay of 2,843 µs per search was about 1.67% of the sample time. It measured +0.6521% with equal nodes and failed the control by staying within 1%. |
+| [46056818707](https://github.com/fernandobandeira/fisher/actions/runs/46056818707) | AMD EPYC 7763 | Recorded calibration. Largest gap 0.1845%, rounded to 1%. The proportional delay raised the median from 51.249 s to 52.828 s (+3.0818%) with equal nodes. |
+| [46043091865](https://github.com/fernandobandeira/fisher/actions/runs/46043091865) | AMD EPYC 7763 | Reversing legal move traversal below the root changed 114,642,076 nodes to 611,209,419. |
+
+The fixed delay took a smaller share of the sample time on the slower CPU.
+The difference between the nominal delay and the measured change was about
+one percentage point, consistent with build-layout effects on timing. The
+revised copy adds 2.5% of each search's elapsed time before reporting the best
+move, so the delay scales with the work the runner did.
+
+Lightweight tags keep the three control revisions available to rebuild.
+
+| Tag | Commit |
+|---|---|
+| `ordering-qualification/fixed-delay` | `8816e9e48e78d8d6b129377eccd944f4c0dcf1ed` |
+| `ordering-qualification/proportional-delay` | `e8eaffda235a0189b21543afc4ee740df026cf83` |
+| `ordering-qualification/reversed-order` | `5ae5a5882fddf0ee824aee9857dad19ea05aa639` |
+
+```sh
+git fetch origin 'refs/tags/ordering-qualification/*:refs/tags/ordering-qualification/*'
+```
 
 Run `python3 strength/test-ordering.py` to check the timing comparison with
 a planted first-run cost.

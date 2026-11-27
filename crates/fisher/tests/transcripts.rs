@@ -5,9 +5,7 @@ mod scripted_transcripts;
 
 use std::{
     collections::VecDeque,
-    fs,
     io::{self, BufRead, BufReader, Write},
-    path::Path,
     process::{Child, Command, Stdio},
     sync::{
         Mutex,
@@ -25,275 +23,205 @@ use wait_timeout::ChildExt;
 const LEGAL_BESTMOVE: &str = "bestmove {legal}";
 const HANG_TIMEOUT: Duration = Duration::from_secs(30);
 
-#[test]
-fn handshake() -> io::Result<()> {
-    play_transcript("multipv/handshake")
-}
+mod transcript_documents {
+    use std::{
+        collections::{BTreeMap, BTreeSet},
+        fs, io,
+        path::{Path, PathBuf},
+    };
 
-#[test]
-fn multipv_settings() -> io::Result<()> {
-    play_transcript("multipv/settings")
-}
+    use super::{Engine, HANG_TIMEOUT, run_transcript};
 
-#[test]
-fn multipv_option_values() -> io::Result<()> {
-    play_transcript("multipv/option-values")
-}
+    // Each registration supplies both the test's session name and the coverage check.
+    macro_rules! register_transcripts {
+        ($($play:ident { $($test:ident => $name:literal,)+ })+) => {
+            const PLAYED_TRANSCRIPTS: &[&str] = &[$($($name,)+)+];
 
-#[test]
-fn multipv_retained_setting() -> io::Result<()> {
-    play_transcript("multipv/retained-setting")
-}
+            $($(
+                #[test]
+                fn $test() -> io::Result<()> {
+                    $play($name)
+                }
+            )+)+
+        };
+    }
 
-#[test]
-fn multipv_root_move_count() -> io::Result<()> {
-    play_transcript("multipv/root-move-count")
-}
+    register_transcripts! {
+        play_transcript {
+            handshake => "multipv/handshake",
+            multipv_settings => "multipv/settings",
+            multipv_option_values => "multipv/option-values",
+            multipv_retained_setting => "multipv/retained-setting",
+            multipv_root_move_count => "multipv/root-move-count",
+            multipv_finished_depths => "multipv/finished-depths",
+            multipv_setoption_during_search => "multipv/setoption-during-search",
+            unknown_input => "unknown-input",
+            ignored_commands => "ignored-commands",
+            quit => "quit",
+            end_of_input => "end-of-input",
+            startpos => "startpos",
+            new_game => "new-game",
+            position_moves => "position-moves",
+            position_fen_four_fields => "position-fen-four-fields",
+            position_fen_five_fields => "position-fen-five-fields",
+            kingside_k => "castling-letters/kingside-k",
+            kingside_kk => "castling-letters/kingside-kk",
+            kingside_h => "castling-letters/kingside-h",
+            go_parameters => "go-parameters",
+            go_depth => "go-depth",
+            startpos_depth_two => "startpos-depth-2",
+            go_nodes => "go-nodes",
+            go_movetime => "go-movetime",
+            go_nodes_movetime => "go-nodes-movetime",
+            go_white_clock_exhausted => "go-white-clock-exhausted",
+            go_black_clock_exhausted => "go-black-clock-exhausted",
+            go_healthy_clock => "go-healthy-clock",
+            go_clock_terminal => "go-clock-terminal",
+            quit_while_deepening => "quit-while-deepening",
+            end_of_input_while_deepening => "end-of-input-while-deepening",
+            terminal_positions => "terminal-positions",
+            halfmove_clock => "halfmove-clock",
+            whitespace_no_break_space_command => "whitespace/no-break-space-command",
+            whitespace_tab_command => "whitespace/tab-command",
+            whitespace_tab_then_isready => "whitespace/tab-then-isready",
+            whitespace_vertical_tab_command => "whitespace/vertical-tab-command",
+            whitespace_vertical_tab_then_isready => "whitespace/vertical-tab-then-isready",
+            whitespace_no_break_space_in_fen => "whitespace/no-break-space-in-fen",
+            rejected_position => "rejected-position",
+            rejected_position_opposite_check => "rejected-position-opposite-check",
+            go_infinite => "go-infinite",
+            go_infinite_terminal => "go-infinite-terminal",
+            quit_while_held => "quit-while-held",
+            end_of_input_while_held => "end-of-input-while-held",
+            go_then_quit => "go-then-quit",
+            go_then_end_of_input => "go-then-end-of-input",
+            stop_position_go => "stop-position-go",
+            mate_in_one => "mate-in-one",
+            material_zero => "material-zero",
+        }
+        compare_best_moves {
+            equal_scores => "equal-scores",
+        }
+    }
 
-#[test]
-fn multipv_finished_depths() -> io::Result<()> {
-    play_transcript("multipv/finished-depths")
-}
+    // Add future staged documents here with the ticket that will activate them.
+    const STAGED_TRANSCRIPTS: &[(&str, &str)] = &[];
 
-#[test]
-fn multipv_setoption_during_search() -> io::Result<()> {
-    play_transcript("multipv/setoption-during-search")
-}
+    #[test]
+    fn every_transcript_is_played_or_staged() -> io::Result<()> {
+        let mut documents = BTreeSet::new();
+        collect_transcript_paths(&transcript_directory(), Path::new(""), &mut documents)?;
+        let played = registered_transcript_paths();
+        let staged: BTreeMap<_, _> = STAGED_TRANSCRIPTS
+            .iter()
+            .map(|(name, ticket)| (transcript_path(name), ticket))
+            .collect();
 
-#[test]
-fn unknown_input() -> io::Result<()> {
-    play_transcript("unknown-input")
-}
+        for path in &played {
+            assert!(
+                documents.contains(path),
+                "{} is registered for playback but missing from expectations/uci/. Restore the document or remove its playback registration.",
+                path.display()
+            );
+        }
+        for (path, ticket) in &staged {
+            assert!(
+                documents.contains(path),
+                "{} is staged for {ticket} but missing from expectations/uci/. Restore the document or remove its staged entry.",
+                path.display()
+            );
+            assert!(
+                !played.contains(path),
+                "{} is both registered for playback and staged for {ticket}. Remove its staged entry.",
+                path.display()
+            );
+        }
+        for path in documents.difference(&played) {
+            assert!(
+                staged.contains_key(path),
+                "{} has no playback registration or staged entry. Add its test to register_transcripts! or, if the expectations mark it staged, list it with its activation ticket.",
+                path.display()
+            );
+        }
+        Ok(())
+    }
 
-#[test]
-fn ignored_commands() -> io::Result<()> {
-    play_transcript("ignored-commands")
-}
+    fn registered_transcript_paths() -> BTreeSet<PathBuf> {
+        let mut played = BTreeSet::new();
+        for name in PLAYED_TRANSCRIPTS {
+            assert!(
+                played.insert(transcript_path(name)),
+                "{name}.uci is registered for playback more than once. Keep a single playback registration."
+            );
+        }
+        played
+    }
 
-#[test]
-fn quit() -> io::Result<()> {
-    play_transcript("quit")
-}
+    fn collect_transcript_paths(
+        root: &Path,
+        directory: &Path,
+        documents: &mut BTreeSet<PathBuf>,
+    ) -> io::Result<()> {
+        let mut entries = fs::read_dir(root.join(directory))?.collect::<io::Result<Vec<_>>>()?;
+        entries.sort_by_key(fs::DirEntry::file_name);
+        for entry in entries {
+            let kind = entry.file_type()?;
+            let path = directory.join(entry.file_name());
+            assert!(
+                !kind.is_symlink(),
+                "{} is a symbolic link. Replace it with the document itself or a directory containing the documents.",
+                path.display()
+            );
+            if kind.is_dir() {
+                collect_transcript_paths(root, &path, documents)?;
+            } else if kind.is_file() && is_transcript_path(&path) {
+                documents.insert(path);
+            }
+        }
+        Ok(())
+    }
 
-#[test]
-fn end_of_input() -> io::Result<()> {
-    play_transcript("end-of-input")
-}
+    fn is_transcript_path(path: &Path) -> bool {
+        // Only lowercase .uci names are transcript documents. Ignore other
+        // extensions (such as .md for README notes), but reject case variants of .uci.
+        let Some(extension) = path.extension() else {
+            return false;
+        };
+        if !extension.eq_ignore_ascii_case("uci") {
+            return false;
+        }
+        assert!(
+            extension == "uci",
+            "{} has a non-lowercase UCI extension. Rename it to use .uci.",
+            path.display()
+        );
+        true
+    }
 
-#[test]
-fn startpos() -> io::Result<()> {
-    play_transcript("startpos")
-}
+    fn transcript_directory() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../expectations/uci")
+    }
 
-#[test]
-fn new_game() -> io::Result<()> {
-    play_transcript("new-game")
-}
+    fn transcript_path(name: &str) -> PathBuf {
+        PathBuf::from(format!("{name}.uci"))
+    }
 
-#[test]
-fn position_moves() -> io::Result<()> {
-    play_transcript("position-moves")
-}
+    fn compare_best_moves(name: &str) -> io::Result<()> {
+        let first = collect_legal_bestmove_replies(name)?;
+        let second = collect_legal_bestmove_replies(name)?;
+        assert_eq!(first.len(), 1);
+        assert_eq!(first, second);
+        Ok(())
+    }
 
-#[test]
-fn position_fen_four_fields() -> io::Result<()> {
-    play_transcript("position-fen-four-fields")
-}
+    fn play_transcript(name: &str) -> io::Result<()> {
+        collect_legal_bestmove_replies(name).map(drop)
+    }
 
-#[test]
-fn position_fen_five_fields() -> io::Result<()> {
-    play_transcript("position-fen-five-fields")
-}
-
-#[test]
-fn kingside_k() -> io::Result<()> {
-    play_transcript("castling-letters/kingside-k")
-}
-
-#[test]
-fn kingside_kk() -> io::Result<()> {
-    play_transcript("castling-letters/kingside-kk")
-}
-
-#[test]
-fn kingside_h() -> io::Result<()> {
-    play_transcript("castling-letters/kingside-h")
-}
-
-#[test]
-fn go_parameters() -> io::Result<()> {
-    play_transcript("go-parameters")
-}
-
-#[test]
-fn go_depth() -> io::Result<()> {
-    play_transcript("go-depth")
-}
-
-#[test]
-fn startpos_depth_two() -> io::Result<()> {
-    play_transcript("startpos-depth-2")
-}
-
-#[test]
-fn go_nodes() -> io::Result<()> {
-    play_transcript("go-nodes")
-}
-
-#[test]
-fn go_movetime() -> io::Result<()> {
-    play_transcript("go-movetime")
-}
-
-#[test]
-fn go_nodes_movetime() -> io::Result<()> {
-    play_transcript("go-nodes-movetime")
-}
-
-#[test]
-fn go_white_clock_exhausted() -> io::Result<()> {
-    play_transcript("go-white-clock-exhausted")
-}
-
-#[test]
-fn go_black_clock_exhausted() -> io::Result<()> {
-    play_transcript("go-black-clock-exhausted")
-}
-
-#[test]
-fn go_healthy_clock() -> io::Result<()> {
-    play_transcript("go-healthy-clock")
-}
-
-#[test]
-fn go_clock_terminal() -> io::Result<()> {
-    play_transcript("go-clock-terminal")
-}
-
-#[test]
-fn quit_while_deepening() -> io::Result<()> {
-    play_transcript("quit-while-deepening")
-}
-
-#[test]
-fn end_of_input_while_deepening() -> io::Result<()> {
-    play_transcript("end-of-input-while-deepening")
-}
-
-#[test]
-fn terminal_positions() -> io::Result<()> {
-    play_transcript("terminal-positions")
-}
-
-#[test]
-fn halfmove_clock() -> io::Result<()> {
-    play_transcript("halfmove-clock")
-}
-
-#[test]
-fn whitespace_no_break_space_command() -> io::Result<()> {
-    play_transcript("whitespace/no-break-space-command")
-}
-
-#[test]
-fn whitespace_tab_command() -> io::Result<()> {
-    play_transcript("whitespace/tab-command")
-}
-
-#[test]
-fn whitespace_tab_then_isready() -> io::Result<()> {
-    play_transcript("whitespace/tab-then-isready")
-}
-
-#[test]
-fn whitespace_vertical_tab_command() -> io::Result<()> {
-    play_transcript("whitespace/vertical-tab-command")
-}
-
-#[test]
-fn whitespace_vertical_tab_then_isready() -> io::Result<()> {
-    play_transcript("whitespace/vertical-tab-then-isready")
-}
-
-#[test]
-fn whitespace_no_break_space_in_fen() -> io::Result<()> {
-    play_transcript("whitespace/no-break-space-in-fen")
-}
-
-#[test]
-fn rejected_position() -> io::Result<()> {
-    play_transcript("rejected-position")
-}
-
-#[test]
-fn rejected_position_opposite_check() -> io::Result<()> {
-    play_transcript("rejected-position-opposite-check")
-}
-
-#[test]
-fn go_infinite() -> io::Result<()> {
-    play_transcript("go-infinite")
-}
-
-#[test]
-fn go_infinite_terminal() -> io::Result<()> {
-    play_transcript("go-infinite-terminal")
-}
-
-#[test]
-fn quit_while_held() -> io::Result<()> {
-    play_transcript("quit-while-held")
-}
-
-#[test]
-fn end_of_input_while_held() -> io::Result<()> {
-    play_transcript("end-of-input-while-held")
-}
-
-#[test]
-fn go_then_quit() -> io::Result<()> {
-    play_transcript("go-then-quit")
-}
-
-#[test]
-fn go_then_end_of_input() -> io::Result<()> {
-    play_transcript("go-then-end-of-input")
-}
-
-#[test]
-fn stop_position_go() -> io::Result<()> {
-    play_transcript("stop-position-go")
-}
-
-#[test]
-fn mate_in_one() -> io::Result<()> {
-    play_transcript("mate-in-one")
-}
-
-#[test]
-fn material_zero() -> io::Result<()> {
-    play_transcript("material-zero")
-}
-
-#[test]
-fn equal_scores() -> io::Result<()> {
-    let first = collect_legal_bestmove_replies("equal-scores")?;
-    let second = collect_legal_bestmove_replies("equal-scores")?;
-    assert_eq!(first.len(), 1);
-    assert_eq!(first, second);
-    Ok(())
-}
-
-fn play_transcript(name: &str) -> io::Result<()> {
-    collect_legal_bestmove_replies(name).map(drop)
-}
-
-fn collect_legal_bestmove_replies(name: &str) -> io::Result<Vec<String>> {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../expectations/uci")
-        .join(format!("{name}.uci"));
-    let transcript = fs::read_to_string(path)?;
-    run_transcript(name, &transcript, HANG_TIMEOUT, Engine::start)
+    fn collect_legal_bestmove_replies(name: &str) -> io::Result<Vec<String>> {
+        let transcript = fs::read_to_string(transcript_directory().join(transcript_path(name)))?;
+        run_transcript(name, &transcript, HANG_TIMEOUT, Engine::start)
+    }
 }
 
 fn run_transcript<I: TranscriptIo>(

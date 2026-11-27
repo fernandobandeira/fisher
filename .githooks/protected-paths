@@ -16,3 +16,5 @@
 ^test-data/
 ^strength/ordering-sample\.tsv$
 ^strength/ordering$
+^strength/ordering-threshold\.tsv$
+^strength/test-ordering\.py$

@@ -20,12 +20,22 @@ permissions:
 jobs:
   measure:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 300
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           fetch-depth: 0
           persist-credentials: false
+      - name: Install the release Rust toolchains
+        timeout-minutes: 5
+        env:
+          BASE: ${{ inputs.base }}
+          MEASURED: ${{ inputs.measured }}
+        run: |
+          ORDERING_RUSTUP_HOME=$(mktemp -d "$RUNNER_TEMP/ordering-rustup.XXXXXX")
+          export ORDERING_RUSTUP_HOME
+          strength/ordering prepare-rust -- "$BASE" "$MEASURED"
+          printf 'ORDERING_RUSTUP_HOME=%s\n' "$ORDERING_RUSTUP_HOME" >> "$GITHUB_ENV"
       - name: Measure the sample
         env:
           BASE: ${{ inputs.base }}
@@ -34,7 +44,6 @@ jobs:
         run: |
           {
             uname -sm
-            lscpu | sed -n '/^Model name:/p'
             if [ -n "$MEASURED" ]; then
               strength/ordering measure -- "$BASE" "$MEASURED"
             else

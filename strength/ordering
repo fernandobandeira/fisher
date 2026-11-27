@@ -3,12 +3,14 @@
 
 import argparse
 from contextlib import contextmanager
+import csv
 from fractions import Fraction
 from hashlib import sha256
 import json
 from math import ceil
 import os
 from pathlib import Path
+from platform import system
 from random import Random
 import re
 from selectors import DefaultSelector, EVENT_READ
@@ -20,9 +22,10 @@ from time import perf_counter, perf_counter_ns
 
 ROOT = Path(__file__).resolve().parents[1]
 SAMPLE = ROOT / "strength/ordering-sample.tsv"
+THRESHOLD = ROOT / "strength/ordering-threshold.tsv"
 POSITIONS = 300
 SEED = 20261127
-TIMED_RUNS = 5
+TIMED_PAIRS = 6
 CALIBRATIONS = 5
 SEARCH_TIMEOUT = 120
 FINISHED_DEPTH = re.compile(rb"info depth (\d+)(?: multipv 1)? score (?:cp|mate) -?\d+ nodes (\d+) ")
@@ -35,15 +38,38 @@ def revision(ref):
     ).strip()
 
 
+def toolchain(commit):
+    import tomllib
+
+    manifest = subprocess.check_output(
+        ["git", "show", f"{commit}:rust-toolchain.toml"], cwd=ROOT, text=True,
+    )
+    return tomllib.loads(manifest)["toolchain"]["channel"]
+
+
+def prepare_rust(base, measured):
+    channels = dict.fromkeys(toolchain(revision(ref)) for ref in (base, measured or base))
+    environment = dict(os.environ, RUSTUP_HOME=os.environ["ORDERING_RUSTUP_HOME"])
+    for channel in channels:
+        subprocess.run(
+            ["rustup", "toolchain", "install", channel, "--profile", "minimal", "--no-self-update"],
+            env=environment, check=True,
+        )
+
+
 def build(commit, source):
     source.mkdir()
     archive = source / "source.tar"
     subprocess.run(["git", "archive", "-o", archive, commit], cwd=ROOT, check=True)
     subprocess.run(["tar", "-xf", archive], cwd=source, check=True)
     target = source / "target"
+    command = ["cargo", "build", "--locked", "--release", "-p", "fisher", "--target-dir", target]
+    environment = os.environ.copy()
+    if rustup_home := environment.get("ORDERING_RUSTUP_HOME"):
+        environment["RUSTUP_HOME"] = rustup_home
+        command[:0] = ["rustup", "run", toolchain(commit)]
     subprocess.run(
-        ["cargo", "build", "--locked", "--release", "-p", "fisher", "--target-dir", target],
-        cwd=source, stdout=sys.stderr, check=True,
+        command, cwd=source, env=environment, stdout=sys.stderr, check=True,
     )
     return target / "release/fisher"
 
@@ -205,31 +231,65 @@ def run_sample(binary, positions):
     return counts, elapsed
 
 
+def cpu_model():
+    if system() == "Darwin":
+        return subprocess.check_output(["sysctl", "-n", "machdep.cpu.brand_string"], text=True).strip()
+    output = subprocess.check_output(["lscpu"], env=dict(os.environ, LC_ALL="C"), text=True)
+    for line in output.splitlines():
+        label, _, value = line.partition(":")
+        if label == "Model name":
+            return value.strip()
+    raise ValueError("lscpu did not report the CPU model")
+
+
+def report_threshold(model):
+    with THRESHOLD.open(encoding="utf-8", newline="") as stream:
+        records = list(csv.DictReader(stream, delimiter="\t"))
+    if not records:
+        print("Recorded time threshold: pending (CPU model: pending)", flush=True)
+        return
+    if len(records) != 1:
+        raise ValueError(f"expected one time threshold in {THRESHOLD}")
+    record = records[0]
+    if not re.fullmatch(r"[0-9]+", record["percent"] or "") or not all(
+        record[field] for field in ("runner", "cpu_model", "date", "run_url")
+    ):
+        raise ValueError(f"incomplete time threshold in {THRESHOLD}")
+    print(f"Recorded time threshold: {record['percent']}% (CPU model: {record['cpu_model']})", flush=True)
+    if model != record["cpu_model"]:
+        print("CPU model differs from the recorded model. Recalibrate before using these times for D64.",
+              flush=True)
+
+
 def compare(revisions, binaries, positions):
     warmup = [run_sample(binary, positions)[0] for binary in binaries]
     if revisions[0] == revisions[1] and warmup[0] != warmup[1]:
         raise ValueError("the two builds of the same revision gave different node counts")
     times = [[], []]
-    for repeat in range(TIMED_RUNS):
+    for repeat in range(TIMED_PAIRS):
         for index in ((0, 1) if repeat % 2 == 0 else (1, 0)):
             counts, elapsed = run_sample(binaries[index], positions)
             if counts != warmup[index]:
                 raise ValueError(f"{revisions[index]}: node counts changed between runs")
             times[index].append(elapsed)
 
-    medians = [median(samples) for samples in times]
+    medians = [median(map(Fraction, samples)) for samples in times]
     for label, commit, counts, samples, middle in zip(
         ("Base", "Measured"), revisions, warmup, times, medians,
     ):
         readings = ", ".join(f"{sample / 1e9:.6f}" for sample in samples)
         print(f"{label} {commit}: {sum(counts)} nodes, {middle / 1e9:.6f} s median"
               f" ({readings} s)", flush=True)
-    gap = Fraction(100 * (medians[1] - medians[0]), medians[0])
+    gap = 100 * (medians[1] - medians[0]) / medians[0]
     print(f"Measured time change: {float(gap):+.4f}%", flush=True)
     return gap
 
 
 def measure(base, measured, directory):
+    model = cpu_model()
+    print(f"CPU model: {model}", flush=True)
+    if measured is not None:
+        report_threshold(model)
     positions = read_sample()
     commits = (revision(base), revision(measured or base))
     binaries = [build(commit, directory / str(index)) for index, commit in enumerate(commits)]
@@ -259,16 +319,22 @@ def main():
     comparison.add_argument("measured")
     calibration = commands.add_parser("calibrate", help="time one revision against itself five times")
     calibration.add_argument("base")
+    install = commands.add_parser("prepare-rust", help="install the pinned Rust channels for a hosted run")
+    install.add_argument("base")
+    install.add_argument("measured", nargs="?")
     args = parser.parse_args()
 
     try:
+        if args.command == "prepare-rust":
+            prepare_rust(args.base, args.measured)
+            return
         with TemporaryDirectory(prefix="fisher-ordering-") as temporary:
             directory = Path(temporary)
             if args.command == "draw":
                 draw(args, directory)
             else:
                 measure(args.base, getattr(args, "measured", None), directory)
-    except (OSError, ValueError, subprocess.SubprocessError) as error:
+    except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
         sys.exit(f"{parser.prog}: {error}")
 
 

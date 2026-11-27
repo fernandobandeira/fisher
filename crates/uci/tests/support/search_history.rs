@@ -640,6 +640,10 @@ fn fen_position<'a>(
     let [pieces, color, castling, en_passant, clocks @ ..] = fields.as_slice() else {
         return None;
     };
+    // Shakmaty reads promoted-piece markers even in standard castling mode.
+    if pieces.contains('~') {
+        return None;
+    }
     match clocks {
         [] => {}
         [halfmove] => {

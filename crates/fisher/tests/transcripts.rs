@@ -176,6 +176,36 @@ fn halfmove_clock() -> io::Result<()> {
 }
 
 #[test]
+fn whitespace_no_break_space_command() -> io::Result<()> {
+    play_transcript("whitespace/no-break-space-command")
+}
+
+#[test]
+fn whitespace_tab_command() -> io::Result<()> {
+    play_transcript("whitespace/tab-command")
+}
+
+#[test]
+fn whitespace_tab_then_isready() -> io::Result<()> {
+    play_transcript("whitespace/tab-then-isready")
+}
+
+#[test]
+fn whitespace_vertical_tab_command() -> io::Result<()> {
+    play_transcript("whitespace/vertical-tab-command")
+}
+
+#[test]
+fn whitespace_vertical_tab_then_isready() -> io::Result<()> {
+    play_transcript("whitespace/vertical-tab-then-isready")
+}
+
+#[test]
+fn whitespace_no_break_space_in_fen() -> io::Result<()> {
+    play_transcript("whitespace/no-break-space-in-fen")
+}
+
+#[test]
 fn rejected_position() -> io::Result<()> {
     play_transcript("rejected-position")
 }
@@ -390,6 +420,11 @@ fn reference_command<'a>(tokens: &mut impl Iterator<Item = &'a str>) -> Option<&
     })
 }
 
+fn command_tokens(text: &str) -> impl Iterator<Item = &str> {
+    text.split(|ch: char| ch.is_ascii_whitespace() || ch == '\x0b')
+        .filter(|token| !token.is_empty())
+}
+
 /// A position as fisher holds it. shakmaty keeps the move counters as `u32`
 /// and fisher as `u64`, so the runner keeps fisher's counters itself.
 #[derive(Clone)]
@@ -484,7 +519,7 @@ fn reference_position<'a>(mut tokens: impl Iterator<Item = &'a str>) -> Result<T
 /// and are left to shakmaty. Returns the move counters as fisher reads them.
 fn check_fen_text(fen: &str) -> Result<(u64, u64), &'static str> {
     let [pieces, color, castling, en_passant, halfmove, fullmove] =
-        fen.split_whitespace().collect::<Vec<_>>()[..]
+        command_tokens(fen).collect::<Vec<_>>()[..]
     else {
         return Err("FEN must have six fields");
     };
@@ -1118,7 +1153,7 @@ impl<I: TranscriptIo> Session<I> {
             return;
         }
         let text = String::from_utf8_lossy(line);
-        let mut tokens = text.split_whitespace();
+        let mut tokens = command_tokens(&text);
         let running = self.searches.back().filter(|search| !search.stopped);
         let maybe_running = running.is_some();
         match reference_command(&mut tokens) {
@@ -1620,9 +1655,90 @@ fn the_runner_sets_up_the_fens_fisher_accepts() {
     for (fen, accepted) in cases {
         let command = format!("fen {fen}");
         assert_eq!(
-            reference_position(command.split_whitespace()).is_ok(),
+            reference_position(command_tokens(&command)).is_ok(),
             accepted,
             "{fen}"
+        );
+    }
+}
+
+#[test]
+fn the_runner_uses_stockfish_whitespace() {
+    for (line, expected) in [
+        ("isready\u{a0}x", None),
+        ("isready\tx", Some("x")),
+        ("isready\tisready", Some("isready")),
+        ("isready\x0bx", Some("x")),
+        ("isready\x0bisready", Some("isready")),
+    ] {
+        let mut tokens = command_tokens(line);
+        assert_eq!(
+            reference_command(&mut tokens),
+            expected.map(|_| "isready"),
+            "{line:?}"
+        );
+        assert_eq!(tokens.next(), expected, "{line:?}");
+        assert_eq!(tokens.next(), None, "{line:?}");
+    }
+}
+
+#[test]
+fn multipv_setoption_uses_stockfish_whitespace() -> io::Result<()> {
+    // option-values.uci requires a diagnostic and retains the setting
+    // when a declared option receives a malformed value.
+    for (name, separator, value) in [
+        ("space", " ", "2"),
+        ("tab", "\t", "2"),
+        ("vertical-tab", "\x0b", "2"),
+        ("no-break-space", " ", "\u{a0}2"),
+    ] {
+        let command = format!("setoption name MultiPV value{separator}{value}");
+        let mut tokens = command_tokens(&command);
+        assert_eq!(reference_command(&mut tokens), Some("setoption"), "{name}");
+        assert!(tokens.eq(["name", "MultiPV", "value", value]), "{name}");
+
+        let (diagnostic, second_variation) = if value == "2" {
+            (
+                "",
+                "< info depth 1 multipv 2 score cp 0 nodes {nodes} nps {nps} time {time} pv {pv}\n",
+            )
+        } else {
+            ("< info string {message:MultiPV}\n", "")
+        };
+        let transcript = format!(
+            "> {command}\n> isready\n{diagnostic}< readyok\n> go depth 1\n\
+             < info depth 1 multipv 1 score cp 0 nodes {{nodes}} nps {{nps}} time {{time}} pv {{pv}}\n\
+             {second_variation}< bestmove {{legal}}\n> quit\n! exit\n"
+        );
+        run_transcript(name, &transcript, HANG_TIMEOUT, Engine::start)?;
+    }
+    Ok(())
+}
+
+#[test]
+fn the_runner_keeps_the_position_after_a_joined_en_passant_field() {
+    let mut runner = Session::new(
+        FakeEngine {
+            replies: VecDeque::new(),
+            stdout: VecDeque::new(),
+            started: Instant::now(),
+        },
+        HANG_TIMEOUT,
+    );
+    for fen in [
+        "4k3/8/8/8/8/8/8/4K2R w K -\u{a0}0 1",
+        "4k3/8/8/8/8/8/8/4K2R w K -\u{a0}7 42",
+    ] {
+        runner.track_input(format!("position fen {fen}\n").as_bytes());
+        assert_eq!(
+            runner.position.as_ref().map(Tracked::fen).as_deref(),
+            Some(Tracked::STARTING),
+            "{fen:?}"
+        );
+        assert_eq!(
+            check_fen_text(fen),
+            Err("FEN must have six fields"),
+            "{fen:?}"
         );
     }
 }
@@ -1753,7 +1869,7 @@ fn nothing_after_quit_is_read() {
 fn move_counters_keep_fisher_s_range() {
     // fisher keeps both counters as u64; shakmaty would write 4294967295.
     let fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 4294967296";
-    let position = reference_position(format!("fen {fen}").split_whitespace());
+    let position = reference_position(command_tokens(&format!("fen {fen}")));
     assert_eq!(position.map(|position| position.fen()), Ok(fen.to_owned()));
     let error = rejection(run_against_fake(
         &format!(

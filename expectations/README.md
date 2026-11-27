@@ -384,3 +384,9 @@ The [four-field session](uci/position-fen-four-fields.uci) and
 [five-field session](uci/position-fen-five-fields.uci) are active for fisher-og6.
 The [source record](uci-short-fen/README.md) gives Stockfish 19's treatment of
 omitted FEN fields and fisher's responses to the equivalent six-field commands.
+
+## Castling letters
+
+fisher-vls staged the [sessions for kingside castling with `KK` and `H`](uci/castling-letters/README.md)
+on 2026-11-26, before fisher-4h7 accepts both fields over UCI. The runner
+does not read `uci/castling-letters/` until fisher-4h7 moves them into `uci/`.

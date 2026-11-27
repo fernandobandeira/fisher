@@ -530,6 +530,35 @@ fn expect_depths(session: &Session, last: u8) -> io::Result<()> {
     Ok(())
 }
 
+#[test]
+fn the_same_go_twice_reports_the_same_best_move_and_nodes() -> io::Result<()> {
+    let session = Session::start(deepening::search);
+    // The position after e2e4 is in the fisher-4yn score comparison corpus.
+    session.command("position startpos moves e2e4")?;
+    let go = || {
+        session.command("go depth 4")?;
+        let mut nodes = Vec::new();
+        for depth in 1..=4 {
+            let info = session.reply()?;
+            assert!(info.starts_with(&format!("info depth {depth} ")), "{info}");
+            let (_, nodes_and_rest) = info
+                .split_once(" nodes ")
+                .ok_or_else(|| io::Error::other(format!("no nodes in {info}")))?;
+            let (count, _) = nodes_and_rest
+                .split_once(' ')
+                .ok_or_else(|| io::Error::other(format!("no node count in {info}")))?;
+            nodes.push(count.to_owned());
+        }
+        let best_move = session.reply()?;
+        assert!(best_move.starts_with("bestmove "), "{best_move}");
+        Ok::<_, io::Error>((best_move, nodes))
+    };
+    assert_eq!(go()?, go()?);
+    session.command("quit")?;
+    assert_eq!(session.finish()?, Vec::<String>::new());
+    Ok(())
+}
+
 fn first_starting_move() -> io::Result<String> {
     let best_move = rules::Position::starting()
         .legal_moves()

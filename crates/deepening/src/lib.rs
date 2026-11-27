@@ -8,7 +8,7 @@ use std::{
 };
 
 use rules::{Color, Move, Position};
-use search::minimax_variations_until_interrupted;
+use search::{MoveOrderMemory, minimax_variations_until_interrupted};
 
 pub use search::Score;
 
@@ -87,6 +87,7 @@ struct SearchLimits<'a> {
 impl<'a> SearchLimits<'a> {
     const MARGIN: Duration = Duration::from_millis(10);
     const NODES_BETWEEN_READINGS: u64 = 1024;
+    // TODO(fisher-jx1): Measure the depth forecast with the new move order.
     const DEPTH_GROWTH_FACTOR: u32 = 15;
 
     fn new(request: &'a SearchRequest, depth_cap: u8) -> Self {
@@ -232,6 +233,7 @@ fn run_search<const NODES_BETWEEN_READINGS: u64>(
     let elapsed = || now().duration_since(request.started);
     let mut best_move = fallback;
     let mut last_depth_duration = None;
+    let mut memory = MoveOrderMemory::default();
     for depth in 1..=limits.depth_limit {
         let Some(started) = limits.start_depth(&elapsed, last_depth_duration) else {
             break;
@@ -240,6 +242,7 @@ fn run_search<const NODES_BETWEEN_READINGS: u64>(
             &request.position,
             depth,
             request.requested_variations,
+            &mut memory,
             || {
                 before_node();
                 limits.stop_before_node::<NODES_BETWEEN_READINGS>(&elapsed)

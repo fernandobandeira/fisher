@@ -4,6 +4,7 @@
 //! so these tests live inside it.
 
 mod comparison;
+mod move_order_memory;
 mod plain_minimax;
 mod remembered_move;
 mod several_variations;

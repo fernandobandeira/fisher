@@ -7,6 +7,8 @@ use shakmaty::{CastlingMode, Chess, EnPassantMode, Position as _, fen::Fen, uci:
 
 use super::comparison::move_text;
 
+mod from_previous_root;
+
 // D68, reasoned by hand from the rules and material. In each position White's
 // rook can take the undefended queen on a7. The knight on g6 in the second
 // position remains on the board after Rxa7, changing the material at depth 1.

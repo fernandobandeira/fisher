@@ -9,7 +9,10 @@ use std::{error::Error, num::NonZeroU8};
 
 use perft::check_perft;
 use rules::Position;
-use search::{FinishedResult, Score, SearchResult, minimax, minimax_variations_until_interrupted};
+use search::{
+    FinishedResult, MoveOrderMemory, Score, SearchResult, minimax,
+    minimax_variations_until_interrupted,
+};
 use shakmaty::{CastlingMode, Chess, Position as _, fen::Fen};
 
 type TestResult = Result<(), Box<dyn Error>>;
@@ -285,7 +288,13 @@ fn search_variations(
 ) -> Option<FinishedResult> {
     // Exercise all outcomes of one search instantiation for LLVM region coverage.
     let interrupted: &mut dyn FnMut() -> bool = &mut interrupted;
-    minimax_variations_until_interrupted(root, depth, requested, interrupted)
+    minimax_variations_until_interrupted(
+        root,
+        depth,
+        requested,
+        &mut MoveOrderMemory::default(),
+        interrupted,
+    )
 }
 
 #[test]

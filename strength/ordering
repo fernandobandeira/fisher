@@ -257,8 +257,8 @@ def report_threshold(model):
         raise ValueError(f"incomplete time threshold in {THRESHOLD}")
     print(f"Recorded time threshold: {record['percent']}% (CPU model: {record['cpu_model']})", flush=True)
     if model != record["cpu_model"]:
-        print("CPU model differs from the recorded model. Recalibrate before using these times for D64.",
-              flush=True)
+        print("CPU model differs from the model in the recorded D64 threshold. "
+              "Dispatch again on the recorded model before taking a verdict.", flush=True)
 
 
 def compare(revisions, binaries, positions):

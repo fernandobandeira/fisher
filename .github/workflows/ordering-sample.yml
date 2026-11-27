@@ -9,6 +9,10 @@ on:
       measured:
         description: Revision to measure (leave blank to calibrate on the base)
         type: string
+      calibrate_first:
+        description: Calibrate on the same runner before comparing both revisions
+        type: boolean
+        default: false
 
 concurrency:
   group: ordering-sample
@@ -40,13 +44,20 @@ jobs:
         env:
           BASE: ${{ inputs.base }}
           MEASURED: ${{ inputs.measured }}
+          CALIBRATE_FIRST: ${{ inputs.calibrate_first }}
         shell: bash
         run: |
           {
             uname -sm
             if [ -n "$MEASURED" ]; then
+              if [ "$CALIBRATE_FIRST" = true ]; then
+                printf '\n## Calibration check\n\n'
+                strength/ordering calibrate -- "$BASE" || exit
+              fi
+              printf '\n## Measurement\n\n'
               strength/ordering measure -- "$BASE" "$MEASURED"
             else
+              printf '\n## Calibration\n\n'
               strength/ordering calibrate -- "$BASE"
             fi
           } | tee -a "$GITHUB_STEP_SUMMARY"

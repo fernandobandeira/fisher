@@ -53,28 +53,28 @@ that contains the sample. Use the hosted run's times for D64.
 
 ### Time threshold
 
-Before measuring fisher-707.4, dispatch **Ordering sample** with the base
-`97726497a43a592afe4f58cadd3c32c514f1eebf` and leave the measured revision
-blank. The workflow builds that revision twice and repeats the full
-comparison five times on the same runner. For each comparison, divide the
-absolute gap between medians by the base median. Round the largest of those
-percentages up to a whole percent. Calibration takes 70 full-sample runs,
-including 10 warm-ups, and the hosted job allows up to 300 minutes.
+The current threshold and the runner that produced it are recorded in
+[`ordering-threshold.tsv`](ordering-threshold.tsv). To recalibrate, dispatch
+**Ordering sample** and leave the measured revision blank. The workflow builds
+the base twice and repeats the full comparison five times. Set
+`calibrate_first` with a measured revision to run calibration and comparison
+on the same hosted runner. Use the threshold printed by that calibration
+when reading the paired comparison.
 
-After the workflow lands on `main`, finish fisher-707.3 before measuring
-fisher-707.4:
+For each calibration comparison, divide the absolute gap between medians
+by the base median. Round the largest gap up to a whole percent. Calibration takes 70
+full-sample runs, including 10 warm-ups, and allows up to 300 minutes.
 
-1. Dispatch the hosted calibration and record its threshold, runner, CPU
-   model, date and run link in [`ordering-threshold.tsv`](ordering-threshold.tsv).
-2. Confirm that both hosted builds report the local total of 114,642,076
-   nodes. Keep the run link with the confirmation.
-3. Push the planted-delay and reversed-order copies of the base revision to
-   throwaway branches. Size the added delay at about twice the threshold as
-   a share of the base median, divided across the 300 searches. Dispatch
-   **Ordering sample** with the base and each throwaway revision. Record the
-   run links and check that the delay exceeds the threshold and the
-   reversed order changes the node total. Use the recorded CPU model for
-   the timing comparison.
+The recorded calibration used `950e06e6aa78e4ceeaa51914fc71087d3efa4e82` before the first move order change.
+The largest gap was 0.1845%, so the recorded threshold is 1%.
+Every calibration pass reported 114,642,076 nodes, matching the local result.
+[Calibration run](https://github.com/fernandobandeira/fisher/actions/runs/46056818707)
+
+- Adding a delay of 2.5% of elapsed search time before reporting the best
+  move raised the median from 51.249 s to 52.828 s (+3.0818%) with the same
+  114,642,076 nodes on the calibration CPU model. [Delay control](https://github.com/fernandobandeira/fisher/actions/runs/46056818707)
+- Reversing the legal move traversal below the root changed the node total
+  from 114,642,076 to 611,209,419. [Move-order control](https://github.com/fernandobandeira/fisher/actions/runs/46043091865)
 
 Run `python3 strength/test-ordering.py` to check the timing comparison with
 a planted first-run cost.

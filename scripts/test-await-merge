@@ -43,13 +43,22 @@ CLOCK = """\
     import json
     from pathlib import Path
     import runpy
+    import subprocess
     import sys
     from types import SimpleNamespace
+
+    def run_gh(args, *, timeout, **options):
+        # The outer test runner bounds real execution time.
+        return subprocess.run(args, **options)
 
     sleeps = []
     sys.argv.pop(0)
     main = runpy.run_path(sys.argv[0])["main"]
     main.__globals__["time"] = SimpleNamespace(monotonic=lambda: sum(sleeps), sleep=sleeps.append)
+    main.__globals__["subprocess"] = SimpleNamespace(
+        run=run_gh, TimeoutExpired=subprocess.TimeoutExpired,
+        CalledProcessError=subprocess.CalledProcessError,
+    )
     try:
         main()
     finally:
@@ -81,15 +90,13 @@ class AwaitMergeTest(unittest.TestCase):
             fake.write_text(f"#!{sys.executable}\n" + textwrap.dedent(STAND_IN))
             fake.chmod(0o755)
             (root / "steps").write_text(json.dumps(steps))
-            args = [sys.executable]
-            if expected_sleeps is not None:
-                args.extend(("-c", textwrap.dedent(CLOCK)))
-            args.extend((str(SCRIPT), "42", "--timeout", timeout, "--interval", interval))
+            args = [sys.executable, "-c", textwrap.dedent(CLOCK), str(SCRIPT),
+                    "42", "--timeout", timeout, "--interval", interval]
             result = subprocess.run(
                 args,
                 cwd=root, env={**os.environ, "PATH": f"{root}{os.pathsep}{os.environ['PATH']}"},
                 capture_output=True, text=True,
-                timeout=5 if expected_sleeps is not None else float(timeout) + 1.5,
+                timeout=5,
             )
             if expected_sleeps is not None:
                 self.assertEqual(json.loads((root / "sleeps").read_text()), expected_sleeps)
@@ -223,12 +230,15 @@ class AwaitMergeTest(unittest.TestCase):
                 self.assertEqual(calls, [VIEW, BASE, VIEW, BASE, UPDATE, VIEW])
 
     def test_persistent_read_error_reaches_time_limit(self):
-        result, calls = self.run_script([pull(), (VIEW, {"error": "temporary GitHub error"})], timeout="0.6")
+        result, calls = self.run_script(
+            [pull(), (VIEW, {"error": "temporary GitHub error"})],
+            timeout="3", interval="1", expected_sleeps=[1, 1, 1],
+        )
         self.assertEqual(result.returncode, 1, result)
         self.assertIn("Warning:", result.stderr)
         self.assertIn("Timed out waiting for pull request #42", result.stderr)
         self.assertIn("OPEN/BLOCKED at first-head", result.stderr)
-        self.assertGreater(len(calls), 2)
+        self.assertEqual(calls, [VIEW, VIEW, VIEW])
 
     def test_failed_update_followed_by_merge(self):
         behind = pull(merge_state="BEHIND")
@@ -289,12 +299,14 @@ class AwaitMergeTest(unittest.TestCase):
         self.assert_steps([pull(base="another-branch")], 1, "must target main")
 
     def test_timeout(self):
-        result, calls = self.run_script([pull()], timeout="0.6")
+        # Read once, then advance the clock to the deadline on the next wait.
+        result, calls = self.run_script(
+            [pull()], timeout="1", interval="15", expected_sleeps=[1],
+        )
         self.assertEqual(result.returncode, 1, result)
         self.assertIn("Timed out waiting for pull request #42", result.stderr)
         self.assertIn("OPEN/BLOCKED at first-head", result.stderr)
-        self.assertTrue(calls)
-        self.assertTrue(all(args == VIEW for args in calls))
+        self.assertEqual(calls, [VIEW])
 
 
 if __name__ == "__main__":

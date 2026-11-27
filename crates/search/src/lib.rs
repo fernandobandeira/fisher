@@ -111,6 +111,13 @@ fn search<E>(
     let mut best_score = -i32::MAX;
     let stopped = moves.into_iter().try_for_each(|movement| {
         let reply = before_node().and_then(|()| {
+            // Plant extra work without changing the search or its node count.
+            let mut work = std::hint::black_box(*nodes);
+            for _ in 0..1_180 {
+                work = std::hint::black_box(
+                    work.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1),
+                );
+            }
             *nodes += 1;
             search(
                 &movement.play(),

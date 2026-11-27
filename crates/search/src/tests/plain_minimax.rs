@@ -9,7 +9,7 @@
 //! evaluation, `material`, with the exported search. `plain_minimax` is new:
 //! it plays each root move with the copied `search` to score every root move.
 
-use std::convert::Infallible;
+use std::{cmp::Reverse, convert::Infallible};
 
 use rules::{Move, Position};
 
@@ -41,40 +41,68 @@ impl PlainMinimax {
 
 /// Searches every legal move to `depth` plies and scores every root move.
 pub(super) fn plain_minimax(position: &Position, depth: u8) -> PlainMinimax {
-    let Some(reply_depth) = depth.checked_sub(1) else {
-        return PlainMinimax {
-            score: minimax(position, depth).score,
-            root_moves: Vec::new(),
-            nodes: 0,
-        };
-    };
-    let mut nodes = 0;
-    let mut variations: Vec<_> = (0..reply_depth).map(|_| Vec::new()).collect();
-    let root_moves: Vec<_> = position
-        .legal_moves()
-        .into_iter()
-        .map(|movement| {
-            nodes += 1;
-            let Ok(score) = search(
-                &movement.play(),
-                1,
-                &mut nodes,
-                &mut variations,
-                &mut || Ok::<(), Infallible>(()),
-            );
-            (movement, mate_within_depth_or_centipawns(-score, depth))
-        })
-        .collect();
+    let mut root_moves = Vec::new();
+    let nodes = visit_root_moves(position, depth, |movement, score, _| {
+        root_moves.push((movement, score));
+    });
     let best = root_moves
         .iter()
         .map(|&(_, score)| score)
         .max_by_key(|&score| order(score));
     PlainMinimax {
-        // A root with no legal move is checkmate or stalemate.
+        // At depth zero or a terminal root, score the position directly.
         score: best.unwrap_or_else(|| minimax(position, depth).score),
         root_moves,
         nodes,
     }
+}
+
+/// Supplies a search closure for testing the several-variations corpus driver.
+/// Stable sorting keeps the legal order among tied root moves.
+pub(super) fn scored_variations(
+    position: &Position,
+    depth: u8,
+    requested: u8,
+) -> Vec<(Score, Vec<Move>)> {
+    let mut variations = Vec::new();
+    visit_root_moves(position, depth, |movement, score, replies| {
+        let mut moves = Vec::with_capacity(replies.len() + 1);
+        moves.push(movement);
+        moves.extend_from_slice(replies);
+        variations.push((score, moves));
+    });
+    variations.sort_by_key(|&(score, _)| Reverse(order(score)));
+    variations.truncate(usize::from(requested));
+    variations
+}
+
+fn visit_root_moves(
+    position: &Position,
+    depth: u8,
+    mut visit: impl FnMut(Move, Score, &[Move]),
+) -> u64 {
+    let Some(reply_depth) = depth.checked_sub(1) else {
+        return 0;
+    };
+    let mut nodes = 0;
+    let mut variations: Vec<_> = (0..reply_depth).map(|_| Vec::new()).collect();
+    for movement in position.legal_moves() {
+        nodes += 1;
+        let Ok(score) = search(
+            &movement.play(),
+            1,
+            &mut nodes,
+            &mut variations,
+            &mut || Ok::<(), Infallible>(()),
+        );
+        let replies = variations.first().map_or(&[][..], Vec::as_slice);
+        visit(
+            movement,
+            mate_within_depth_or_centipawns(-score, depth),
+            replies,
+        );
+    }
+    nodes
 }
 
 /// Ranks a score from the root's color: the higher, the better.

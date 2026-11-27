@@ -75,7 +75,7 @@ fn assert_same_as_plain_minimax(
 /// minimax searches what is left of the depth, and its score, seen from the
 /// root, must equal the score the search reported. A variation that reaches
 /// the score through a reply worse than the best one fails here.
-fn check_each_prefix(
+pub(super) fn check_each_prefix(
     root: &Position,
     depth: u8,
     score: Score,
@@ -123,7 +123,7 @@ fn seen_from_root(score: Score, ply: u8) -> Score {
     }
 }
 
-fn score_value(score: Score) -> i32 {
+pub(super) fn score_value(score: Score) -> i32 {
     match score {
         Score::Centipawns(value) => value,
         Score::Mate { plies, winning } => {
@@ -133,7 +133,7 @@ fn score_value(score: Score) -> i32 {
     }
 }
 
-fn move_text(movement: Move) -> String {
+pub(super) fn move_text(movement: Move) -> String {
     let promotion = match movement.promotion() {
         Some(Promotion::Knight) => "n",
         Some(Promotion::Bishop) => "b",
@@ -145,9 +145,21 @@ fn move_text(movement: Move) -> String {
 }
 
 fn compare_at_depths(fen: &str, depths: impl IntoIterator<Item = u8>) -> TestResult {
+    visit_at_depths(fen, depths, &mut compare_case)
+}
+
+fn compare_case(position: &Position, depth: u8) -> TestResult {
+    assert_same_as_plain_minimax(position, depth).map(|_| ())
+}
+
+fn visit_at_depths(
+    fen: &str,
+    depths: impl IntoIterator<Item = u8>,
+    visit: &mut impl FnMut(&Position, u8) -> TestResult,
+) -> TestResult {
     let position = Position::from_fen(fen)?;
     for depth in depths {
-        assert_same_as_plain_minimax(&position, depth)?;
+        visit(&position, depth)?;
     }
     Ok(())
 }
@@ -189,30 +201,40 @@ const EXAMPLES: [&str; 8] = [
     "k7/8/1QK5/8/8/8/8/8 w - - 0 1",
 ];
 
-#[test]
-fn perft_positions_at_depths_one_to_three() -> TestResult {
+/// The corpus exercised on every commit by the plain minimax comparison.
+/// The deeper release-only cases below are run separately.
+pub(super) fn visit_comparison_corpus(
+    mut visit: impl FnMut(&Position, u8) -> TestResult,
+) -> TestResult {
+    visit_perft_positions(&mut visit)?;
+    visit_seeded_walks(&mut visit)?;
+    visit_examples(&mut visit)?;
+    visit_open_scores(&mut visit)?;
+    visit_published_mate_in_two(&mut visit)?;
+    visit_published_mates_on_the_horizon(&mut visit)
+}
+
+fn visit_perft_positions(visit: &mut impl FnMut(&Position, u8) -> TestResult) -> TestResult {
     for record in records()? {
-        compare_at_depths(record.fen, 1..=3)?;
+        visit_at_depths(record.fen, 1..=3, visit)?;
     }
     Ok(())
 }
 
-#[test]
-fn seeded_walks_at_depths_one_and_two() -> TestResult {
+fn visit_seeded_walks(visit: &mut impl FnMut(&Position, u8) -> TestResult) -> TestResult {
     for seed in 1..=3 {
         for position in seeded_walk(seed)? {
             for depth in 1..=2 {
-                assert_same_as_plain_minimax(&position, depth)?;
+                visit(&position, depth)?;
             }
         }
     }
     Ok(())
 }
 
-#[test]
-fn examples_at_depths_one_to_three() -> TestResult {
+fn visit_examples(visit: &mut impl FnMut(&Position, u8) -> TestResult) -> TestResult {
     for fen in EXAMPLES {
-        compare_at_depths(fen, 1..=3)?;
+        visit_at_depths(fen, 1..=3, visit)?;
     }
     Ok(())
 }
@@ -222,18 +244,37 @@ fn examples_at_depths_one_to_three() -> TestResult {
 /// `{score}` at depths 1 to 4.
 const OPEN_SCORES: &str = include_str!("../../../../test-data/open-scores.txt");
 
-#[test]
-fn positions_whose_score_a_transcript_leaves_open() -> TestResult {
+fn visit_open_scores(visit: &mut impl FnMut(&Position, u8) -> TestResult) -> TestResult {
     let mut positions = 0;
     for fen in OPEN_SCORES.lines() {
         if fen.is_empty() || fen.starts_with('#') {
             continue;
         }
-        compare_at_depths(fen, 1..=4)?;
+        visit_at_depths(fen, 1..=4, visit)?;
         positions += 1;
     }
     assert!(positions > 0, "open-scores.txt lists no position");
     Ok(())
+}
+
+#[test]
+fn perft_positions_at_depths_one_to_three() -> TestResult {
+    visit_perft_positions(&mut compare_case)
+}
+
+#[test]
+fn seeded_walks_at_depths_one_and_two() -> TestResult {
+    visit_seeded_walks(&mut compare_case)
+}
+
+#[test]
+fn examples_at_depths_one_to_three() -> TestResult {
+    visit_examples(&mut compare_case)
+}
+
+#[test]
+fn positions_whose_score_a_transcript_leaves_open() -> TestResult {
+    visit_open_scores(&mut compare_case)
 }
 
 #[test]
@@ -273,24 +314,34 @@ fn prefix_check_rejects_a_variation_through_a_worse_reply() -> TestResult {
     Ok(())
 }
 
-#[test]
-fn published_mate_in_two_at_depth_four() -> TestResult {
+fn visit_published_mate_in_two(visit: &mut impl FnMut(&Position, u8) -> TestResult) -> TestResult {
     let records = mate_in_two::records()?;
     let record = records
         .iter()
         .find(|record| record.id == "000Zo")
         .ok_or("missing puzzle 000Zo")?;
-    compare_at_depths(record.fen, [4])
+    visit_at_depths(record.fen, [4], visit)
+}
+
+fn visit_published_mates_on_the_horizon(
+    visit: &mut impl FnMut(&Position, u8) -> TestResult,
+) -> TestResult {
+    // The checkmate is three plies away, so at depth 3 it stands on the
+    // horizon and is scored by material alone.
+    for record in mate_in_two::records()?.into_iter().take(10) {
+        visit_at_depths(record.fen, [3], visit)?;
+    }
+    Ok(())
+}
+
+#[test]
+fn published_mate_in_two_at_depth_four() -> TestResult {
+    visit_published_mate_in_two(&mut compare_case)
 }
 
 #[test]
 fn published_mates_in_two_on_the_horizon() -> TestResult {
-    // The checkmate is three plies away, so at depth 3 it stands on the
-    // horizon and is scored by material alone.
-    for record in mate_in_two::records()?.into_iter().take(10) {
-        compare_at_depths(record.fen, [3])?;
-    }
-    Ok(())
+    visit_published_mates_on_the_horizon(&mut compare_case)
 }
 
 #[test]

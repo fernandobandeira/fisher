@@ -1,4 +1,4 @@
-use std::{convert::Infallible, ops::ControlFlow};
+use std::{convert::Infallible, num::NonZeroU8, ops::ControlFlow};
 
 use rules::{Move, PieceKind, Position, Square};
 
@@ -22,6 +22,33 @@ pub struct SearchResult {
     pub principal_variation: Vec<Move>,
 }
 
+/// The result of one finished depth, with its requested ranked variations.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FinishedResult {
+    /// The best score from the root's side to move, also present when the root has no legal move.
+    pub score: Score,
+    /// Total nodes reached while finding these variations, excluding the root.
+    pub nodes: u64,
+    /// Exact scores and their variations, best first and in legal move order on ties.
+    pub variations: Vec<(Score, Vec<Move>)>,
+}
+
+impl From<FinishedResult> for SearchResult {
+    fn from(result: FinishedResult) -> Self {
+        let principal_variation = result
+            .variations
+            .into_iter()
+            .next()
+            .map_or_else(Vec::new, |(_, moves)| moves);
+        Self {
+            best_move: principal_variation.first().copied(),
+            score: result.score,
+            nodes: result.nodes,
+            principal_variation,
+        }
+    }
+}
+
 /// Searches to the given depth in plies with alpha-beta pruning.
 /// At depth zero the result has no best move, even if legal moves exist.
 /// The score is from the root's side to move, and nodes exclude the root.
@@ -34,7 +61,7 @@ pub fn minimax(position: &Position, depth: u8) -> SearchResult {
 /// Searches one depth, calling `interrupted` before playing the move that reaches each node.
 /// Returns `None` if the callback returns true anywhere in the depth.
 #[must_use]
-pub fn minimax_until_interrupted(
+fn minimax_until_interrupted(
     position: &Position,
     depth: u8,
     mut interrupted: impl FnMut() -> bool,
@@ -43,6 +70,88 @@ pub fn minimax_until_interrupted(
         (!interrupted()).then_some(()).ok_or(())
     })
     .ok()
+}
+
+/// Searches one depth for up to `requested` variations.
+/// At depth zero and at a root with no legal move, the result has no variations.
+/// Calls `interrupted` before each node and returns `None` on the first refusal.
+#[must_use]
+pub fn minimax_variations_until_interrupted(
+    position: &Position,
+    depth: u8,
+    requested: NonZeroU8,
+    mut interrupted: impl FnMut() -> bool,
+) -> Option<FinishedResult> {
+    if requested == NonZeroU8::MIN || depth == 0 {
+        let result = minimax_until_interrupted(position, depth, interrupted)?;
+        let variations = if result.best_move.is_some() {
+            vec![(result.score, result.principal_variation)]
+        } else {
+            Vec::new()
+        };
+        return Some(FinishedResult {
+            score: result.score,
+            nodes: result.nodes,
+            variations,
+        });
+    }
+
+    search_root_moves(position, depth, usize::from(requested.get()), &mut || {
+        (!interrupted()).then_some(()).ok_or(())
+    })
+    .ok()
+}
+
+fn search_root_moves<E>(
+    position: &Position,
+    depth: u8,
+    requested: usize,
+    before_node: &mut impl FnMut() -> Result<(), E>,
+) -> Result<FinishedResult, E> {
+    let moves = position.legal_moves();
+    let count = requested.min(moves.len());
+    let mut ranked = Vec::with_capacity(count);
+    let mut replies: Vec<_> = (1..depth).map(|_| Vec::new()).collect();
+    let mut nodes = 0;
+    for movement in moves {
+        // Once the requested ranks are filled, a new move has to beat the
+        // last score. A tie belongs to the move encountered earlier.
+        let alpha = ranked
+            .last()
+            .filter(|_| ranked.len() == count)
+            .map_or(-i32::MAX, |&(score, _)| score);
+        let score = -search_move(
+            movement,
+            1,
+            (-i32::MAX, -alpha),
+            &mut nodes,
+            &mut replies,
+            before_node,
+        )?;
+        if score <= alpha {
+            // A cutoff in the reply search leaves only an upper bound here.
+            continue;
+        }
+        let mut variation = vec![movement];
+        if let Some(reply) = replies.first() {
+            variation.extend_from_slice(reply);
+        }
+        let rank = ranked.partition_point(|&(other, _)| other >= score);
+        ranked.insert(rank, (score, variation));
+        ranked.truncate(count);
+    }
+
+    let score = ranked
+        .first()
+        .map_or_else(|| terminal_score(position, 0), |&(score, _)| score);
+    Ok(FinishedResult {
+        score: mate_within_depth_or_centipawns(score, depth),
+        nodes,
+        variations: ranked
+            .into_iter()
+            .map(|(score, moves)| (mate_within_depth_or_centipawns(score, depth), moves))
+            .collect(),
+    })
 }
 
 fn search_depth<E>(
@@ -101,26 +210,19 @@ fn search<E>(
     best_variation.clear();
     let moves = position.legal_moves();
     if moves.is_empty() {
-        return Ok(if position.is_in_check() {
-            i32::from(ply) - CHECKMATE
-        } else {
-            0
-        });
+        return Ok(terminal_score(position, ply));
     }
 
     let mut best_score = -i32::MAX;
     let stopped = moves.into_iter().try_for_each(|movement| {
-        let reply = before_node().and_then(|()| {
-            *nodes += 1;
-            search(
-                &movement.play(),
-                ply + 1,
-                (-beta, -alpha),
-                nodes,
-                replies,
-                before_node,
-            )
-        });
+        let reply = search_move(
+            movement,
+            ply + 1,
+            (-beta, -alpha),
+            nodes,
+            replies,
+            before_node,
+        );
         reply.map_or_else(
             |error| ControlFlow::Break(Err(error)),
             |reply_score| {
@@ -145,6 +247,27 @@ fn search<E>(
     match stopped {
         ControlFlow::Break(result) => result,
         ControlFlow::Continue(()) => Ok(best_score),
+    }
+}
+
+fn search_move<E>(
+    movement: Move,
+    ply: u8,
+    bounds: (i32, i32),
+    nodes: &mut u64,
+    replies: &mut [Vec<Move>],
+    before_node: &mut impl FnMut() -> Result<(), E>,
+) -> Result<i32, E> {
+    before_node()?;
+    *nodes += 1;
+    search(&movement.play(), ply, bounds, nodes, replies, before_node)
+}
+
+fn terminal_score(position: &Position, ply: u8) -> i32 {
+    if position.is_in_check() {
+        i32::from(ply) - CHECKMATE
+    } else {
+        0
     }
 }
 

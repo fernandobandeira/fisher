@@ -1,8 +1,9 @@
 # Staged by fisher-8hc.4 on 2026-11-26.
 # UCI setoption (April 2006): https://backscattering.de/chess/uci/#gui-setoption.
-# Successor to expectations/uci/handshake.uci. The April 2006 UCI
-# uci/id/option/uciok passages give the response order. D12 (fisher-r6y,
-# 2026-11-24) gives the sole spin option and its default and bounds.
+# The April 2006 UCI uci/id/option/uciok passages give the response order.
+# The fisher-l7f owner decisions (2026-11-22) supply the id name,
+# the {version} placeholder and the id author.
+# D12 (fisher-r6y, 2026-11-24) gives the sole spin option, its default and bounds.
 
 > uci
 < id name fisher {version}

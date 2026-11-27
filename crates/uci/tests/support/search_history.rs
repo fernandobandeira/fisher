@@ -131,14 +131,48 @@ struct Search {
     last_move: Option<String>,
 }
 
+impl Search {
+    fn report_depth(&mut self, depth: &FinishedDepth) -> Result<(), Fault> {
+        if depth.depth == 0 {
+            let Some(score) = depth.terminal_score.filter(|_| depth.variations.is_empty()) else {
+                return Err((3, "invalid terminal depth report"));
+            };
+            self.info
+                .push_back(format!("info depth 0 score {}", score_text(score)));
+            self.last_move = None;
+            return Ok(());
+        }
+
+        if depth.terminal_score.is_some() || depth.variations.is_empty() {
+            return Err((3, "invalid searched depth report"));
+        }
+        for (index, (score, variation)) in depth.variations.iter().enumerate() {
+            if variation.is_empty() {
+                return Err((3, "invalid searched depth report"));
+            }
+            self.info
+                .push_back(info(depth, index + 1, *score, variation));
+        }
+        self.last_move = depth
+            .variations
+            .first()
+            .and_then(|(_, moves)| moves.first())
+            .map(movement);
+        Ok(())
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum CommandResponse {
     Ready,
     PositionRejected,
     InvalidPosition,
     GoRejected,
+    SetOptionRejected,
+    InvalidMultiPv,
     IdName,
     IdAuthor,
+    MultiPvOption,
     UciOk,
 }
 
@@ -242,8 +276,8 @@ impl<'a> Session<'a> {
     }
 
     fn command(&mut self, command: &str) {
-        let mut words = command.split_ascii_whitespace();
-        match words.next() {
+        let mut words = command_tokens(command);
+        match recognized_command(&mut words) {
             Some("go") if self.search.is_some() => {
                 self.command_responses
                     .push_back(CommandResponse::GoRejected);
@@ -273,6 +307,10 @@ impl<'a> Session<'a> {
                         .push_back(CommandResponse::InvalidPosition);
                 }
             }
+            Some("setoption") => {
+                self.command_responses
+                    .extend(multipv_response(words, self.search.is_some()));
+            }
             Some("stop") => {
                 if let Some(search) = &mut self.search {
                     search.stopped = true;
@@ -293,6 +331,7 @@ impl<'a> Session<'a> {
             Some("uci") => self.command_responses.extend([
                 CommandResponse::IdName,
                 CommandResponse::IdAuthor,
+                CommandResponse::MultiPvOption,
                 CommandResponse::UciOk,
             ]),
             _ => {}
@@ -307,10 +346,7 @@ impl<'a> Session<'a> {
             return Err((3, "a search reported after BestMove"));
         }
         match report {
-            SearchReport::FinishedDepth(depth) => {
-                search.info.push_back(info(depth));
-                search.last_move = depth.principal_variation.first().map(movement);
-            }
+            SearchReport::FinishedDepth(depth) => search.report_depth(depth)?,
             SearchReport::BestMove(best_move) => {
                 search.best_move = Some(
                     best_move
@@ -344,6 +380,10 @@ impl<'a> Session<'a> {
         let response = match text {
             "string position rejected: waiting for stop" => CommandResponse::PositionRejected,
             "string go rejected: waiting for stop" => CommandResponse::GoRejected,
+            "string setoption rejected: waiting for stop" => CommandResponse::SetOptionRejected,
+            "string setoption rejected: MultiPV requires an integer from 1 to 255" => {
+                CommandResponse::InvalidMultiPv
+            }
             _ if payload(text, "string position rejected: ") => CommandResponse::InvalidPosition,
             _ if payload(text, "string ") && self.idle_stop => {
                 return Err((4, "idle stop wrote a response"));
@@ -358,6 +398,9 @@ impl<'a> Session<'a> {
     fn reply(&mut self, body: &str) -> Result<(), Fault> {
         let response = match (body, body.strip_prefix("id ")) {
             ("readyok", _) => CommandResponse::Ready,
+            ("option name MultiPV type spin default 1 min 1 max 255", _) => {
+                CommandResponse::MultiPvOption
+            }
             ("uciok", _) => CommandResponse::UciOk,
             (_, Some(text)) if payload(text, "name ") => CommandResponse::IdName,
             (_, Some(text)) if payload(text, "author ") => CommandResponse::IdAuthor,
@@ -435,7 +478,12 @@ impl<'a> Session<'a> {
                 CommandResponse::PositionRejected
                 | CommandResponse::InvalidPosition
                 | CommandResponse::GoRejected => 8,
-                CommandResponse::IdName | CommandResponse::IdAuthor | CommandResponse::UciOk => 10,
+                CommandResponse::SetOptionRejected
+                | CommandResponse::InvalidMultiPv
+                | CommandResponse::IdName
+                | CommandResponse::IdAuthor
+                | CommandResponse::MultiPvOption
+                | CommandResponse::UciOk => 10,
             };
             return Err((rule, "bestmove preceded an outstanding command response"));
         }
@@ -478,11 +526,10 @@ impl<'a> Session<'a> {
         let mut deferred_before_exit = self
             .deferred
             .iter()
-            .copied()
-            .take_while(|command| command.split_ascii_whitespace().next() != Some("quit"));
+            .map(|command| recognized_command(&mut command_tokens(command)))
+            .take_while(|command| *command != Some("quit"));
         if self.command_responses.contains(&CommandResponse::Ready)
-            || deferred_before_exit
-                .any(|text| text.split_ascii_whitespace().next() == Some("isready"))
+            || deferred_before_exit.any(|command| command == Some("isready"))
         {
             return Err((6, "missing readyok"));
         }
@@ -513,7 +560,58 @@ fn payload(text: &str, prefix: &str) -> bool {
         .is_some_and(|value| !value.trim().is_empty())
 }
 
-fn position(words: std::str::SplitAsciiWhitespace<'_>) -> Option<Chess> {
+fn command_tokens(text: &str) -> impl Iterator<Item = &str> {
+    text.split(|ch: char| ch.is_ascii_whitespace() || ch == '\x0b')
+        .filter(|token| !token.is_empty())
+}
+
+fn recognized_command<'a>(words: &mut impl Iterator<Item = &'a str>) -> Option<&'a str> {
+    // An ignored command also ends the search for a command on this line.
+    words.find(|&word| {
+        matches!(
+            word,
+            "uci"
+                | "isready"
+                | "ucinewgame"
+                | "position"
+                | "go"
+                | "quit"
+                | "stop"
+                | "setoption"
+                | "debug"
+                | "ponderhit"
+                | "register"
+        )
+    })
+}
+
+// The name is case insensitive and ends at the value marker. Only a declared
+// name can cause a response, and the busy rejection takes precedence.
+fn multipv_response<'a>(
+    mut words: impl Iterator<Item = &'a str>,
+    busy: bool,
+) -> Option<CommandResponse> {
+    if words.next() != Some("name") || !words.next()?.eq_ignore_ascii_case("MultiPV") {
+        return None;
+    }
+    let valid = match words.next() {
+        Some("value") => {
+            words
+                .next()
+                .is_some_and(|value| value.parse::<std::num::NonZeroU8>().is_ok())
+                && words.next().is_none()
+        }
+        None => false,
+        Some(_) => return None,
+    };
+    if busy {
+        Some(CommandResponse::SetOptionRejected)
+    } else {
+        (!valid).then_some(CommandResponse::InvalidMultiPv)
+    }
+}
+
+fn position<'a>(words: impl Iterator<Item = &'a str>) -> Option<Chess> {
     let mut words = words.peekable();
     let mut position = match words.next()? {
         "startpos" => Chess::default(),
@@ -586,34 +684,25 @@ fn movement(movement: &rules::Move) -> String {
     format!("{}{}{promotion}", movement.from(), movement.to())
 }
 
-// D41 and expectations/README.md specify the fields and their spelling.
-fn info(depth: &FinishedDepth) -> String {
-    let score = match depth.score {
+fn score_text(score: Score) -> String {
+    match score {
         Score::Centipawns(value) => format!("cp {value}"),
         Score::Mate { plies, winning } => {
             let moves = i32::from(plies.div_ceil(2));
             let moves = if winning { moves } else { -moves };
             format!("mate {moves}")
         }
-    };
-    if depth.depth == 0 {
-        return format!("info depth 0 score {score}");
     }
+}
+
+// D41 and expectations/README.md specify the fields and their spelling.
+fn info(depth: &FinishedDepth, multipv: usize, score: Score, variation: &[rules::Move]) -> String {
+    let score = score_text(score);
     let time = depth.elapsed.as_millis().clamp(1, u128::from(u64::MAX));
     let nps = (u128::from(depth.nodes) * 1000 / time).min(u128::from(u64::MAX));
-    let pv = depth
-        .principal_variation
-        .iter()
-        .map(movement)
-        .collect::<Vec<_>>()
-        .join(" ");
-    let pv = if pv.is_empty() {
-        String::new()
-    } else {
-        format!(" pv {pv}")
-    };
+    let pv = variation.iter().map(movement).collect::<Vec<_>>().join(" ");
     format!(
-        "info depth {} multipv 1 score {score} nodes {} nps {nps} time {time}{pv}",
+        "info depth {} multipv {multipv} score {score} nodes {} nps {nps} time {time} pv {pv}",
         depth.depth, depth.nodes
     )
 }

@@ -1,10 +1,9 @@
 # Kingside castling with KK and H
 
 Staged on 2026-11-26 by fisher-vls for fisher-4h7, and given the bare
-`position` command on 2026-11-27 after review. No test reads these
-sessions yet: the runner selects sessions by name directly in `uci/`, so
-the `castling-letters/` directory is not played. fisher-4h7 activates them
-after fisher-b0b.
+`position` command on 2026-11-27 after review. The sessions stay staged
+until fisher-4h7 adds transcript tests that name them as
+`castling-letters/<name>` after fisher-b0b.
 
 ## Owner decision
 
@@ -127,7 +126,7 @@ rows.
 
 ## Activation in fisher-4h7
 
-- Move the three sessions into `uci/` and select them by name in the runner.
+- Add transcript tests that name the three sessions as `castling-letters/<name>`.
 - Change the runner's own castling-field check in
   `crates/fisher/tests/transcripts.rs` (about line 488), which rejects `KK`
   and `H` today. The runner then sets up the reference position from the

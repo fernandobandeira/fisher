@@ -32,7 +32,11 @@ impl TimedSearch {
             while let Ok(step) = receive(&instructions) {
                 match step {
                     Step::Depth(depth) => {
-                        best_move = depth.principal_variation.first().copied();
+                        best_move = depth
+                            .variations
+                            .first()
+                            .and_then(|(_, moves)| moves.first())
+                            .copied();
                         report(SearchReport::FinishedDepth(depth));
                         assert!(sent.send(()).is_ok());
                     }
@@ -95,10 +99,10 @@ impl TimedSearch {
             session,
             FinishedDepth {
                 depth,
-                score: Score::Centipawns(cp),
                 nodes,
                 elapsed: Duration::from_millis(millis),
-                principal_variation: variation,
+                terminal_score: None,
+                variations: vec![(Score::Centipawns(cp), variation)],
             },
             &format!(
                 "info depth {depth} multipv 1 score cp {cp} nodes {nodes} nps {nps} time {millis} pv {}\n",

@@ -1,4 +1,4 @@
-use std::{fmt, iter::Peekable, str::SplitWhitespace};
+use std::{fmt, iter::Peekable, num::NonZeroU8};
 
 use crate::UciMove;
 
@@ -13,6 +13,8 @@ const SETOPTION: &str = "setoption";
 const DEBUG: &str = "debug";
 const PONDERHIT: &str = "ponderhit";
 const REGISTER: &str = "register";
+
+pub(super) const MULTIPV: &str = "MultiPV";
 
 const STARTPOS: &str = "startpos";
 const FEN: &str = "fen";
@@ -36,6 +38,7 @@ pub(super) enum Command {
     Uci,
     IsReady,
     UciNewGame,
+    SetMultiPv(Option<NonZeroU8>),
     Position(Result<PositionCommand, PositionSyntaxError>),
     Go(GoParameters),
     Stop,
@@ -103,10 +106,16 @@ pub(super) struct GoParameters {
     pub(super) infinite: bool,
 }
 
+/// Stockfish reads UCI tokens with the C locale, which includes vertical tab.
+pub(super) fn command_tokens(text: &str) -> impl Iterator<Item = &str> {
+    text.split(|ch: char| ch.is_ascii_whitespace() || ch == '\x0b')
+        .filter(|token| !token.is_empty())
+}
+
 /// Reads one line sent by the GUI. An unknown prefix does not hide a command.
 #[must_use]
 pub(super) fn parse_command(line: &str) -> Input {
-    let mut tokens = line.split_whitespace();
+    let mut tokens = command_tokens(line);
     while let Some(token) = tokens.next() {
         match token {
             UCI => return Input::Handled(Command::Uci),
@@ -116,17 +125,40 @@ pub(super) fn parse_command(line: &str) -> Input {
             GO => return Input::Handled(Command::Go(parse_go(tokens))),
             STOP => return Input::Handled(Command::Stop),
             QUIT => return Input::Handled(Command::Quit),
-            // TODO(fisher-a2q): Declare and accept UCI options.
+            SETOPTION => return parse_setoption(tokens),
+            // TODO(fisher-a2q): Declare and accept the other UCI options.
             // TODO(fisher-p25): Handle the debug command.
             // TODO(fisher-2ha): Handle pondering and ponderhit.
-            SETOPTION | DEBUG | PONDERHIT | REGISTER => return Input::Ignored,
+            DEBUG | PONDERHIT | REGISTER => return Input::Ignored,
             _ => {}
         }
     }
     Input::Unknown
 }
 
-fn parse_position(tokens: SplitWhitespace<'_>) -> Result<PositionCommand, PositionSyntaxError> {
+fn parse_setoption<'a>(mut tokens: impl Iterator<Item = &'a str>) -> Input {
+    if tokens.next() != Some("name")
+        || !tokens
+            .next()
+            .is_some_and(|name| name.eq_ignore_ascii_case(MULTIPV))
+    {
+        return Input::Ignored;
+    }
+    let value = match tokens.next() {
+        Some("value") => tokens
+            .next()
+            .filter(|_| tokens.next().is_none())
+            .and_then(|value| value.parse().ok()),
+        None => None,
+        // The name runs up to the value marker. MultiPV is a one-word name.
+        Some(_) => return Input::Ignored,
+    };
+    Input::Handled(Command::SetMultiPv(value))
+}
+
+fn parse_position<'a>(
+    tokens: impl Iterator<Item = &'a str>,
+) -> Result<PositionCommand, PositionSyntaxError> {
     let mut tokens = tokens.peekable();
     let source = match tokens.next() {
         Some(STARTPOS) => PositionSource::Startpos,
@@ -148,8 +180,8 @@ fn parse_position(tokens: SplitWhitespace<'_>) -> Result<PositionCommand, Positi
     Ok(PositionCommand { source, moves })
 }
 
-fn read_fen_until_moves(
-    tokens: &mut Peekable<SplitWhitespace<'_>>,
+fn read_fen_until_moves<'a>(
+    tokens: &mut Peekable<impl Iterator<Item = &'a str>>,
 ) -> Result<String, PositionSyntaxError> {
     let mut fields = Vec::new();
     while let Some(field) = tokens.next_if(|token| *token != MOVES) {
@@ -161,7 +193,7 @@ fn read_fen_until_moves(
     Ok(fields.join(" "))
 }
 
-fn parse_go(tokens: SplitWhitespace<'_>) -> GoParameters {
+fn parse_go<'a>(tokens: impl Iterator<Item = &'a str>) -> GoParameters {
     let mut tokens = tokens.peekable();
     let mut parameters = GoParameters::default();
     while let Some(token) = tokens.next() {
@@ -199,7 +231,10 @@ fn parse_go(tokens: SplitWhitespace<'_>) -> GoParameters {
     parameters
 }
 
-fn read_number(tokens: &mut Peekable<SplitWhitespace<'_>>, is_clock: bool) -> Option<u64> {
+fn read_number<'a>(
+    tokens: &mut Peekable<impl Iterator<Item = &'a str>>,
+    is_clock: bool,
+) -> Option<u64> {
     let token = tokens.peek()?;
     let negative_clock = is_clock
         && token.strip_prefix('-').is_some_and(|digits| {

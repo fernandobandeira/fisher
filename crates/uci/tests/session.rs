@@ -49,17 +49,17 @@ fn session_reports_the_scripted_search() -> io::Result<()> {
             let reply = legal_move(&best_move.play(), "g1", "f3").unwrap();
             report(SearchReport::FinishedDepth(FinishedDepth {
                 depth: 1,
-                score: Score::Centipawns(17),
                 nodes: 23,
                 elapsed: Duration::from_millis(2),
-                principal_variation: vec![best_move],
+                terminal_score: None,
+                variations: vec![(Score::Centipawns(17), vec![best_move])],
             }));
             report(SearchReport::FinishedDepth(FinishedDepth {
                 depth: 2,
-                score: Score::Centipawns(-6),
                 nodes: 440,
                 elapsed: Duration::from_millis(4),
-                principal_variation: vec![best_move, reply],
+                terminal_score: None,
+                variations: vec![(Score::Centipawns(-6), vec![best_move, reply])],
             }));
             report(SearchReport::BestMove(Some(best_move)));
         },
@@ -82,24 +82,60 @@ fn legal_move(position: &Position, from: &str, to: &str) -> Option<Move> {
 }
 
 fn session_output(
-    input: &'static [u8],
+    input: impl AsRef<[u8]> + Send + 'static,
     search: impl FnMut(deepening::SearchRequest, &mut dyn FnMut(SearchReport)) + Send + 'static,
 ) -> io::Result<String> {
     let mut output = Vec::new();
-    uci::run_session(input, &mut output, "test", search)?;
+    uci::run_session(io::Cursor::new(input), &mut output, "test", search)?;
     String::from_utf8(output).map_err(io::Error::other)
 }
 
 #[test]
+fn rejects_inconsistent_finished_depth_reports() {
+    let movement = Position::starting()
+        .legal_moves()
+        .into_iter()
+        .take(1)
+        .collect();
+    let valid_variation = vec![(Score::Centipawns(0), movement)];
+    let terminal = Some(Score::Centipawns(0));
+    for (depth, terminal_score, variations) in [
+        (1, None, Vec::new()),
+        (1, None, vec![(Score::Centipawns(0), Vec::new())]),
+        (1, terminal, valid_variation.clone()),
+        (0, None, Vec::new()),
+        (0, terminal, valid_variation),
+    ] {
+        let result = session_output(b"go depth 1\nquit\n", move |request, report| {
+            report(SearchReport::FinishedDepth(FinishedDepth {
+                depth,
+                nodes: 20,
+                elapsed: Duration::from_millis(1),
+                terminal_score,
+                variations: variations.clone(),
+            }));
+            report(SearchReport::BestMove(
+                request.position.legal_moves().into_iter().next(),
+            ));
+        });
+        assert_eq!(result.unwrap_err().kind(), io::ErrorKind::InvalidData);
+    }
+}
+
+#[test]
 fn answers_the_handshake_and_quits_before_a_later_command() -> io::Result<()> {
-    // handshake.uci specifies the responses. unknown-input.uci accepts CRLF
+    // multipv/handshake.uci specifies the responses. unknown-input.uci accepts CRLF
     // and a lone CR (the `>CR isready` record).
     assert_eq!(
         session_output(
             b"ucinewgame\nunknown\nuci\r\nisready\rquit\nisready\n",
             |_, _| {}
         )?,
-        "id name fisher test\nid author Fernando Bandeira\nuciok\nreadyok\n"
+        concat!(
+            "id name fisher test\nid author Fernando Bandeira\n",
+            "option name MultiPV type spin default 1 min 1 max 255\n",
+            "uciok\nreadyok\n",
+        )
     );
     Ok(())
 }
@@ -159,6 +195,46 @@ fn rejected_positions_leave_the_last_accepted_position_in_place() -> io::Result<
     }
     assert_eq!(responses.next(), Some("bestmove h8g8"));
     assert_eq!(responses.next(), None);
+    Ok(())
+}
+
+#[test]
+fn no_break_space_in_fen_keeps_the_full_position() -> io::Result<()> {
+    const PREVIOUS: &str = "7k/8/5K1Q/8/8/8/8/8 b - - 13 29";
+    // The rules position tests fix the fragments. The en passant cases
+    // are the two rejected FENs in no-break-space-in-fen.uci.
+    for (fen, diagnostic) in [
+        ("4k3/8/8/8/8/8/8/4K\u{a0}2R w K - 0 1", "piece letter"),
+        ("4k3/8/8/8/8/8/8/4K2R w\u{a0}K K - 0 1", "side to move"),
+        ("4k3/8/8/8/8/8/8/4K2R w K\u{a0}q - 0 1", "K, Q, k, q"),
+        ("4k3/8/8/8/8/8/8/4K2R w K -\u{a0}0 1", "invalid en passant"),
+        ("4k3/8/8/8/8/8/8/4K2R w K -\u{a0}7 42", "invalid en passant"),
+        ("4k3/8/8/8/8/8/8/4K2R w K - 0\u{a0}1 1", "halfmove clock"),
+        ("4k3/8/8/8/8/8/8/4K2R w K - 0 1\u{a0}2", "fullmove number"),
+    ] {
+        let input = format!("position fen {PREVIOUS}\nposition fen {fen}\ngo\n");
+        let output = session_output(input, |request, report| {
+            assert_eq!(
+                request.position.to_fen(),
+                PREVIOUS,
+                "search must receive the full previous position"
+            );
+            report(SearchReport::BestMove(legal_move(
+                &request.position,
+                "h8",
+                "g8",
+            )));
+        })?;
+        let mut responses = output.lines();
+        assert!(
+            responses.next().is_some_and(|line| {
+                line.starts_with("info string ") && line.contains(diagnostic)
+            }),
+            "{fen:?}: expected {diagnostic:?} in the diagnostic, got {output:?}"
+        );
+        assert_eq!(responses.next(), Some("bestmove h8g8"));
+        assert_eq!(responses.next(), None);
+    }
     Ok(())
 }
 
@@ -228,11 +304,11 @@ fn reports_a_flush_failure_on_each_protocol_response() -> io::Result<()> {
     // and the searched and terminal responses are specified in expectations/uci.
     const COMMANDS: &[u8] = b"uci\nisready\nposition\n        position fen 7k/8/5K1Q/8/8/8/8/8 b - - 0 1\n        go infinite\nposition startpos\ngo\nstop\ngo depth\nquit\n";
     let successful = session_output(COMMANDS, finished_search)?;
-    // Two ID responses and uciok, readyok, the position diagnostic, four info lines,
+    // Two ID responses, the MultiPV declaration, uciok, readyok, the position diagnostic, four info lines,
     // two rejected commands, the released move, and four info lines plus the finite bestmove.
-    assert_eq!(successful.lines().count(), 17);
+    assert_eq!(successful.lines().count(), 18);
 
-    for response in 0..17 {
+    for response in 0..18 {
         let error = uci::run_session(
             COMMANDS,
             FailOnFlush(Some(response)),

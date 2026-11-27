@@ -51,5 +51,20 @@ check Clippy 'cargo clippy --locked --workspace --all-targets --all-features -- 
 check Tests 'cargo test --locked --workspace' cargo test --locked --workspace
 check Glossary 'cargo xtask glossary' cargo xtask glossary
 check 'Crate interfaces' 'cargo xtask interfaces' cargo xtask interfaces
-check 'Dependency advisories and sources' 'cargo deny --locked check -D warnings advisories sources' \
-    cargo deny --locked check -D warnings advisories sources
+
+# Populate Cargo's registry and package cache for the offline dependency check.
+check 'Locked dependencies' 'cargo fetch --locked' cargo fetch --locked
+# Git hooks export paths for Fisher's checkout. The advisory database is a separate repository.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_PREFIX \
+    GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_SHALLOW_FILE
+advisory_refresh=${FISHER_ADVISORY_DB_REFRESH_RESULT:-}
+if [ -z "$advisory_refresh" ]; then
+    if [ "${CARGO_NET_OFFLINE:-false}" != true ] && scripts/check-advisory-db refresh; then
+        advisory_refresh=success
+    else
+        advisory_refresh=failure
+    fi
+fi
+scripts/check-advisory-db "$advisory_refresh"
+check 'Dependency advisories and sources' 'cargo deny --locked --offline check -D warnings advisories sources' \
+    cargo deny --locked --offline check -D warnings advisories sources

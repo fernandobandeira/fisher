@@ -31,7 +31,9 @@ Since fisher-5sg.11, `uci` runs the session and `deepening` runs the search for 
 
 ### Dependency sources and advisories
 
-`cargo deny --locked check -D warnings advisories sources` checks dependencies with all workspace features enabled, including development dependencies. Warnings fail the dependency check. Resolve a new advisory by updating or removing the affected dependency. Any exception needs human review of the reason and the protected `deny.toml` change.
+`cargo deny --locked --offline check -D warnings advisories sources` checks dependencies with all workspace features enabled, including development dependencies. Warnings fail the dependency check. Resolve a new advisory by updating or removing the affected dependency. Any exception needs human review of the reason and the protected `deny.toml` change.
+
+`scripts/check` refreshes the RustSec advisory database separately. It verifies the checkout against its Git tree and checks its origin against `deny.toml`. If the refresh fails, it reports the snapshot date and requires a commit at most seven days old. Set `CARGO_NET_OFFLINE=true` to use cached dependencies and a usable snapshot without attempting a refresh. Run `cargo deny --locked fetch db` while online to populate the database. CI restores the database from a daily cache and only `main` saves it after a successful refresh. The weekly Check run requires a successful refresh.
 
 ### Deferred work
 

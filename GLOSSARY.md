@@ -138,6 +138,10 @@ _Avoid_: cut, refutation, witness
 The order in which the search tries the legal moves of a position, so that moves likely to cause a cutoff can be tried first.
 _Avoid_: move ranking, move sort
 
+**Ordering**:
+One rule that changes the move order, such as trying captures first, trying killer moves or using history. Each ordering is judged on its own by comparing nodes and time on the same positions against the revision before it.
+_Avoid_: move ordering (for the whole order, use move order), ordering (for the memory used by a rule, use move order memory)
+
 **Capture**:
 A move that takes an opposing piece, including en passant, which takes a pawn from a square other than the destination square. For move order, captures and promotions to a queen form one group, including promotions to a queen that take no piece.
 _Avoid_: take (as a noun), attack

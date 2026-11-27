@@ -813,8 +813,77 @@ fn fen_clocks_follow_the_engines_existing_decimal_rules() -> io::Result<()> {
     Ok(())
 }
 
+// D46 and fisher-8hc answer 4 specify the MultiPV command responses.
+const SET_MULTIPV: Event<'_> = Command("setoption name mUlTiPv value 2");
+const ZERO_MULTIPV: Event<'_> = Command("setoption name MultiPV value 0");
+const UNKNOWN_OPTION: Event<'_> = Command("setoption name Path value stop");
+const REJECT_SETOPTION: Event<'_> = Response("info string setoption rejected: waiting for stop\n");
+const INVALID_MULTIPV: Event<'_> =
+    Response("info string setoption rejected: MultiPV requires an integer from 1 to 255\n");
+
 #[test]
-fn history_requires_every_variation_before_bestmove() {
+fn setoption_diagnostics_require_the_matching_command_and_state() {
+    for (name, history) in [
+        (
+            "busy rejection while idle",
+            [SET_MULTIPV, REJECT_SETOPTION, QUIT],
+        ),
+        (
+            "bad-value diagnostic for a good value",
+            [SET_MULTIPV, INVALID_MULTIPV, QUIT],
+        ),
+        (
+            "diagnostic for an undeclared option",
+            [UNKNOWN_OPTION, INVALID_MULTIPV, QUIT],
+        ),
+    ] {
+        rejects(10, name, &history);
+    }
+}
+
+#[test]
+fn setoption_diagnostics_must_precede_readyok() {
+    rejects(
+        7,
+        "missing diagnostic for value 0",
+        &[ZERO_MULTIPV, READY, READY_OK, QUIT],
+    );
+    for (name, history) in [
+        (
+            "missing rejection while searching",
+            vec![
+                POSITION_A,
+                INFINITE,
+                SET_MULTIPV,
+                READY,
+                READY_OK,
+                STOP,
+                best_move_report(A),
+                MOVE_A,
+                QUIT,
+            ],
+        ),
+        (
+            "missing rejection while holding the move",
+            vec![
+                POSITION_A,
+                INFINITE,
+                best_move_report(A),
+                SET_MULTIPV,
+                READY,
+                READY_OK,
+                STOP,
+                MOVE_A,
+                QUIT,
+            ],
+        ),
+    ] {
+        rejects(7, name, &history);
+    }
+}
+
+#[test]
+fn multipv_history_requires_exactly_the_reported_variations() {
     let pawn_move = |target| {
         rules::Position::starting()
             .legal_moves()
@@ -834,21 +903,40 @@ fn history_requires_every_variation_before_bestmove() {
     }));
     let first = Response("info depth 1 multipv 1 score cp 0 nodes 20 nps 20000 time 1 pv e2e4\n");
     let second = Response("info depth 1 multipv 2 score cp 0 nodes 20 nps 20000 time 1 pv d2d4\n");
+    let extra = Response("info depth 1 multipv 3 score cp 0 nodes 20 nps 20000 time 1 pv g1f3\n");
     let best_move = Report(SearchReport::BestMove(best_move));
     let bestmove = Response("bestmove e2e4\n");
-    accepts(&[
-        GO,
-        report.clone(),
-        first.clone(),
-        second,
-        best_move.clone(),
-        bestmove.clone(),
-        QUIT,
-    ]);
+
+    let history = |variations: &[Event<'static>]| {
+        let mut events = vec![
+            SET_MULTIPV,
+            ZERO_MULTIPV,
+            INVALID_MULTIPV,
+            INFINITE,
+            report.clone(),
+        ];
+        events.extend_from_slice(variations);
+        events.extend([
+            best_move.clone(),
+            UNKNOWN_OPTION,
+            SET_MULTIPV,
+            REJECT_SETOPTION,
+            STOP,
+            bestmove.clone(),
+            QUIT,
+        ]);
+        events
+    };
+    accepts(&history(&[first.clone(), second.clone()]));
     rejects(
         3,
         "bestmove before variation 2",
-        &[GO, report, first, best_move, bestmove, QUIT],
+        &history(std::slice::from_ref(&first)),
+    );
+    rejects(
+        3,
+        "unreported variation 3",
+        &history(&[first, second, extra]),
     );
 }
 

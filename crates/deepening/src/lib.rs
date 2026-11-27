@@ -8,7 +8,7 @@ use std::{
 };
 
 use rules::{Color, Move, Position};
-use search::{SearchResult, minimax_variations_until_interrupted};
+use search::minimax_variations_until_interrupted;
 
 pub use search::Score;
 
@@ -31,6 +31,7 @@ pub struct Limits {
 pub struct SearchRequest {
     pub position: Position,
     pub limits: Limits,
+    pub requested_variations: NonZeroU8,
     pub interrupt: Arc<AtomicBool>,
     pub started: Instant,
 }
@@ -41,10 +42,12 @@ pub struct SearchRequest {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FinishedDepth {
     pub depth: u8,
-    pub score: Score,
     pub nodes: u64,
     pub elapsed: Duration,
-    pub principal_variation: Vec<Move>,
+    /// The root score at depth 0. A searched depth has no terminal score.
+    pub terminal_score: Option<Score>,
+    /// Exact scores and their variations, best first. Empty only at depth 0.
+    pub variations: Vec<(Score, Vec<Move>)>,
 }
 
 /// Reports from the work of a search, in the order the session consumes them.
@@ -217,10 +220,10 @@ fn run_search<const NODES_BETWEEN_READINGS: u64>(
         let result = search::minimax(&request.position, 1);
         report(SearchReport::FinishedDepth(FinishedDepth {
             depth: 0,
-            score: result.score,
             nodes: result.nodes,
             elapsed: Duration::ZERO,
-            principal_variation: result.principal_variation,
+            terminal_score: Some(result.score),
+            variations: Vec::new(),
         }));
         report(SearchReport::BestMove(None));
         return 0;
@@ -233,24 +236,33 @@ fn run_search<const NODES_BETWEEN_READINGS: u64>(
         let Some(started) = limits.start_depth(&elapsed, last_depth_duration) else {
             break;
         };
-        let Some(result) =
-            minimax_variations_until_interrupted(&request.position, depth, NonZeroU8::MIN, || {
+        let Some(result) = minimax_variations_until_interrupted(
+            &request.position,
+            depth,
+            request.requested_variations,
+            || {
                 before_node();
                 limits.stop_before_node::<NODES_BETWEEN_READINGS>(&elapsed)
-            })
-            .map(SearchResult::from)
-        else {
+            },
+        ) else {
             break;
         };
-        best_move = result.best_move.unwrap_or(best_move);
+        let Some(root_move) = result
+            .variations
+            .first()
+            .and_then(|(_, moves)| moves.first())
+        else {
+            unreachable!("a finished search of a nonterminal root has a principal variation");
+        };
+        best_move = *root_move;
         let finished = elapsed();
         last_depth_duration = Some(finished.saturating_sub(started));
         report(SearchReport::FinishedDepth(FinishedDepth {
             depth,
-            score: result.score,
             nodes: limits.nodes,
             elapsed: finished,
-            principal_variation: result.principal_variation,
+            terminal_score: None,
+            variations: result.variations,
         }));
     }
     report(SearchReport::BestMove(Some(best_move)));

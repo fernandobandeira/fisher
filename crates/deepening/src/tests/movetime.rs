@@ -6,6 +6,7 @@ use super::*;
 
 fn timed_request(position: Position, millis: u64, infinite: bool) -> SearchRequest {
     SearchRequest {
+        requested_variations: std::num::NonZeroU8::MIN,
         position,
         limits: Limits {
             movetime: Some(Duration::from_millis(millis)),
@@ -159,7 +160,48 @@ fn expiry_inside_depth_three_keeps_the_second_variation() -> std::io::Result<()>
     };
     assert_starting_depth(first, 1, 20, 2);
     assert_starting_depth(second, 2, 79, 5);
-    assert_eq!(second.principal_variation.first().copied(), *best_move);
+    assert_eq!(principal_root_move(second), *best_move);
+    Ok(())
+}
+
+#[test]
+fn expiry_after_a_root_move_does_not_report_an_unfinished_depth() -> std::io::Result<()> {
+    let mut request = timed_request(Position::starting(), 50, false);
+    request.requested_variations = NonZeroU8::new(3).ok_or(std::io::ErrorKind::InvalidInput)?;
+    let elapsed = Cell::new(3);
+    let mut reports = Vec::new();
+    let mut checks = 0;
+
+    // Published starting-position perft gives 20 moves. After the 20
+    // depth-1 nodes, the first root move and its 20 replies use 21 more.
+    // Expire before the next root move, with only part of depth 2 searched.
+    let entered = run_search::<42>(
+        &request,
+        &mut |report| reports.push(report),
+        &|| request.started + Duration::from_millis(elapsed.get()),
+        &mut || {
+            checks += 1;
+            if checks == 42 {
+                elapsed.set(40);
+            }
+        },
+        SearchLimits::new(&request, 3),
+    );
+
+    assert_eq!(checks, 42);
+    assert_eq!(entered, 41);
+    let [
+        SearchReport::FinishedDepth(first),
+        SearchReport::BestMove(best_move),
+    ] = reports.as_slice()
+    else {
+        return Err(std::io::Error::other(format!(
+            "unexpected reports: {reports:?}"
+        )));
+    };
+    assert_starting_depth(first, 1, 20, 3);
+    assert_eq!(first.variations.len(), 3);
+    assert_eq!(principal_root_move(first), *best_move);
     Ok(())
 }
 
@@ -189,7 +231,7 @@ fn largest_movetime_survives_thirty_nine_milliseconds() -> std::io::Result<()> {
         )));
     };
     assert_starting_depth(first, 1, 20, 39);
-    assert_eq!(first.principal_variation.first().copied(), *best_move);
+    assert_eq!(principal_root_move(first), *best_move);
     Ok(())
 }
 
@@ -197,10 +239,13 @@ fn assert_starting_depth(report: &FinishedDepth, depth: u8, nodes: u64, millis: 
     assert_eq!(report.depth, depth);
     assert_eq!(report.nodes, nodes);
     assert_eq!(report.elapsed, Duration::from_millis(millis));
-    assert_eq!(report.score, Score::Centipawns(0));
-    assert_eq!(report.principal_variation.len(), usize::from(depth));
+    let [(score, moves), ..] = report.variations.as_slice() else {
+        unreachable!("a searched depth has a principal variation");
+    };
+    assert_eq!(*score, Score::Centipawns(0));
+    assert_eq!(moves.len(), usize::from(depth));
     let mut position = Position::starting();
-    for movement in &report.principal_variation {
+    for movement in moves {
         assert!(
             position
                 .legal_moves()
@@ -306,10 +351,10 @@ fn assert_expired_terminal_root(fen: &str, score: Score) -> Result<(), rules::Fe
             [
                 SearchReport::FinishedDepth(FinishedDepth {
                     depth: 0,
-                    score,
                     nodes: 0,
                     elapsed: Duration::ZERO,
-                    principal_variation: Vec::new(),
+                    terminal_score: Some(score),
+                    variations: Vec::new(),
                 }),
                 SearchReport::BestMove(None),
             ],
@@ -379,5 +424,5 @@ fn explicit_depth_ends_search_before_movetime() {
         unreachable!("expected one finished depth and a best move");
     };
     assert_starting_depth(first, 1, 20, 2);
-    assert_eq!(*best_move, first.principal_variation.first().copied());
+    assert_eq!(*best_move, principal_root_move(first));
 }

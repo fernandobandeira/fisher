@@ -260,10 +260,13 @@ GitHub lists 20 concurrent jobs on Free and 40 on Pro.
 The qualification played 256 pairs of `5c5d6cf` against `8b9c254` in
 4 minutes 59 seconds of elapsed workflow time. The gain test counted 104
 pairs. The last self-match dispatch played 376 pairs in 7 minutes 34
-seconds and the gain test decided at cumulative pair 167. Across the four
-main playing dispatches the playing steps used about 7.3 to 7.7
-runner-seconds per pair at two games at a time. These steps include
-building both engines. The hosted replays took 28 to 32 seconds each.
+seconds and the gain test decided at cumulative pair 167. The last
+self-match dispatch, the predecessor match and the 1,180- and 130-iteration
+matches used about 7.3 to 7.7 runner-seconds per pair at two games at a
+time. This includes building both engines. Treat it as a floor for later
+revisions that use more of their clock. In these matches `5c5d6cf` spent
+about 0.12 seconds per move from a starting allowance of about 0.43 seconds.
+The hosted replays took 28 to 32 seconds each.
 See the [predecessor run](https://github.com/fernandobandeira/fisher/actions/runs/46001457732),
 the [self-match continuation](https://github.com/fernandobandeira/fisher/actions/runs/46000161044)
 and the [qualification rows](sprt-records.tsv).
@@ -295,6 +298,55 @@ cumulative `games.pgn` from the `sprt-record` artifact to
 and the same cumulative range starting at 1. For an opponent reading,
 add `--opponent-view`. See the
 [local replay instructions](../scripts/clocked-sprt.md).
+
+### Qualification on hosted runners
+
+The self-match showed no detectable advantage for either side. Its 95%
+intervals still allow a small advantage.
+
+All slow copies add the same loop once per searched node. Local timing
+divides the median wall time of five `go nodes 3000000` searches from the
+starting position by the baseline median. Hosted timing sums the nodes and
+milliseconds reported in the engine-attributed UCI `info` entries in each
+fastchess log. Divide the baseline's nodes per millisecond by the copy's.
+The overall measurement pools the totals across the eight jobs.
+
+| Loop iterations | Revision | Local slowdown | Hosted slowdown overall (per job) | No-loss result |
+|---:|---|---:|---:|---|
+| 1,180 | `a30d6ba` | 16.26× | 5.09× (4.09–5.56×) | Fail at pair 104, -76.37 Elo ([run 46002462277](https://github.com/fernandobandeira/fisher/actions/runs/46002462277)) |
+| 130 | `998f9a4` | 2.17× | 1.34× (1.23–1.41×) | Fail at pair 135 ([run 46003154219](https://github.com/fernandobandeira/fisher/actions/runs/46003154219)) |
+| 6,400 | `bcd0b83` | 88.41× | 22.40× (17.27–26.57×) | Fail at pair 104 ([run 46013121250](https://github.com/fernandobandeira/fisher/actions/runs/46013121250)) |
+| 380 | `057bf56` | 5.80× | 2.35× (2.02–3.75×) | Fail at pair 104 ([run 46013930062](https://github.com/fernandobandeira/fisher/actions/runs/46013930062)) |
+
+The 1,180- and 130-iteration copies ran about five times and 1.35 times
+slower on the hosted runners. The 6,400-iteration copy met D82's
+requirement of more than fifteen times slower in every job and failed
+the no-loss test. The 380-iteration measurement averaged 2.35 times slower,
+with one job at 3.75 times. Each of the four copies scored exactly half under
+a node limit and played the same moves in both games of all 25 opening pairs.
+
+For measuring the cost of a slowdown, use all the pairs. Stopping at a
+threshold can pull the estimate away from zero.
+
+| Loop iterations | Elo difference at the deciding pair (95% interval) | Elo difference over all 400 pairs (95% interval) |
+|---:|---|---|
+| 130 | -27.08 [-43.93, -10.35] | -23.92 [-33.45, -14.44] |
+| 380 | -33.51 [-51.14, -16.05] | -41.45 [-50.64, -32.33] |
+
+Calibrate a planted slowdown on the machines that play, from the engines'
+own node rates in the fastchess logs.
+
+The lightweight tags `sprt-qualification/slow-1180`,
+`sprt-qualification/slow-130`, `sprt-qualification/slow-6400` and
+`sprt-qualification/slow-380` keep the four recorded commits reachable
+after their branches are deleted. To fetch the commits in a checkout for
+local replay, run:
+
+```sh
+git fetch origin 'refs/tags/sprt-qualification/*:refs/tags/sprt-qualification/*'
+```
+
+### Record and artifacts
 
 The record job replays the joined games with the judge and prints the row
 for [`sprt-records.tsv`](sprt-records.tsv). Save every printed row in that

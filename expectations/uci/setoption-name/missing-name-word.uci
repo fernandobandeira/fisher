@@ -1,0 +1,29 @@
+# fisher-38w, 2026-11-27. Staged for fisher-38w before the engine changes.
+# Stockfish 19 (sf_19, edb0d9d), Homebrew arm64 bottle at /opt/homebrew/bin/stockfish,
+# probed 2026-11-27. OptionsMap::setoption consumes the token in the name
+# position whatever it is, then reads the option name up to the token value.
+# https://github.com/official-stockfish/Stockfish/blob/edb0d9db6731067ec50ce619ff372b463bc4dd5d/src/ucioption.cpp#L43-L60
+# Owner decision on fisher-38w (2026-11-27): follow Stockfish 19.
+# See README.md for each probe input and its output.
+# Searched info spelling and the depth-1 scores: as multipv/settings.uci
+# (fisher-r6y D41, D12, D13, fisher-8hc answers 5 and 6). Every depth-1 score
+# from startpos is cp 0 by material (fisher-2aj rules 2 and 3).
+
+# Stockfish 19: no word stands before the option name. Stockfish consumes
+# MultiPV as the word in the name position, reads an empty name, prints
+# "No such option: " and leaves MultiPV at 1. An empty name is not declared,
+# and fisher ignores setoption for an undeclared name without output
+# (fisher-8hc answer 4, multipv/option-values.uci).
+> setoption MultiPV value 2
+# One readyok and nothing else proves the line above was silent.
+> isready
+< readyok
+> position startpos
+# Stockfish 19 answered go depth 1 with multipv 1 alone, so MultiPV is still
+# 1. A setting of 1 keeps the literal depth-1 node total: 20 root moves from
+# startpos (expectations/perft.epd).
+> go depth 1
+< info depth 1 multipv 1 score cp 0 nodes 20 nps {nps} time {time} pv {pv}
+< bestmove {legal}
+> quit
+! exit

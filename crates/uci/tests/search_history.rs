@@ -1129,6 +1129,51 @@ fn multipv_setoption_uses_stockfish_whitespace() {
 }
 
 #[test]
+fn setoption_consumes_any_token_in_the_name_position() {
+    // Use the accepted commands from expectations/uci/setoption-name/.
+    // The busy diagnostic distinguishes a declared option from one the
+    // checker ignored. An idle valid command is silent in either case.
+    for command in [
+        "setoption foo MultiPV value 2",
+        "setoption \u{a0}name MultiPV value 2",
+        "setoption value MultiPV value 2",
+    ] {
+        accepts(&[
+            POSITION_A,
+            GO,
+            Command(command),
+            REJECT_SETOPTION,
+            best_move_report(A),
+            MOVE_A,
+            QUIT,
+        ]);
+        rejects(
+            7,
+            command,
+            &[
+                POSITION_A,
+                GO,
+                Command(command),
+                READY,
+                READY_OK,
+                best_move_report(A),
+                MOVE_A,
+                QUIT,
+            ],
+        );
+    }
+    // With no word before MultiPV, the declared name is absent even while busy.
+    accepts(&[
+        POSITION_A,
+        GO,
+        Command("setoption MultiPV value 2"),
+        best_move_report(A),
+        MOVE_A,
+        QUIT,
+    ]);
+}
+
+#[test]
 fn setoption_diagnostics_require_the_matching_command_and_state() {
     for (name, history) in [
         (

@@ -1,0 +1,44 @@
+# fisher-82i, 2026-11-26. Staged for fisher-b0b.
+# Token separators observed in Stockfish 19 (sf_19, edb0d9d), Homebrew arm64 bottle:
+# UCIEngine::position reads the FEN tokens with operator>> under the C locale,
+# so U+00A0 stays inside the en passant token.
+# https://github.com/official-stockfish/Stockfish/blob/edb0d9db6731067ec50ce619ff372b463bc4dd5d/src/uci.cpp#L498-L522
+# Stockfish then reads the clocks without requiring the extraction to succeed
+# and shows 0 1 for both commands below; that is permissive clock parsing of a
+# malformed FEN, not acceptance of the clocks.
+# https://github.com/official-stockfish/Stockfish/blob/edb0d9db6731067ec50ce619ff372b463bc4dd5d/src/position.cpp#L420-L433
+# fisher-b0b keeps the joined token and applies fisher's existing FEN field
+# validation, which rejects an en passant field that is neither - nor a square
+# with "invalid en passant square" (rules::Position::from_fen).
+# See README.md for the probes, their output and a hex dump of each send.
+# Owner-approved terminal example from terminal-positions.uci (fisher-2aj.2):
+# Black is checkmated, so a search reports depth 0 and the null move.
+> position fen 7k/6Q1/5K2/8/8/8/8/8 b - - 0 1
+> go
+< info depth 0 score mate 0
+< bestmove 0000
+# The en passant token is the bytes 2D C2 A0 30, followed by the token 1.
+> position fen 4k3/8/8/8/8/8/8/4K2R w K -\xc2\xa00 1
+# Owner decision for rejected position: one diagnostic for a malformed FEN.
+< info string {message:invalid en passant square}
+> isready
+# UCI isready/readyok after the single diagnostic.
+< readyok
+# A rejected position leaves the checkmated position in place.
+> go
+< info depth 0 score mate 0
+< bestmove 0000
+# The en passant token is the bytes 2D C2 A0 37, followed by the token 42.
+> position fen 4k3/8/8/8/8/8/8/4K2R w K -\xc2\xa07 42
+# Owner decision for rejected position: one diagnostic for a malformed FEN.
+< info string {message:invalid en passant square}
+> isready
+# UCI isready/readyok after the single diagnostic.
+< readyok
+# A rejected position leaves the checkmated position in place.
+> go
+< info depth 0 score mate 0
+< bestmove 0000
+# UCI quit.
+> quit
+! exit

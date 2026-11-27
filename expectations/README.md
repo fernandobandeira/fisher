@@ -392,3 +392,9 @@ fisher-82i staged the [whitespace sessions](uci/whitespace/README.md) on
 token separators: U+00A0 stays inside a token, while horizontal and vertical
 tab separate tokens. The README records the probes and a hex dump of every
 send that holds a special byte.
+
+## Castling letters
+
+fisher-vls staged the [sessions for kingside castling with `KK` and `H`](uci/castling-letters/README.md)
+on 2026-11-26, before fisher-4h7 accepts both fields over UCI. The runner
+does not read `uci/castling-letters/` until fisher-4h7 moves them into `uci/`.

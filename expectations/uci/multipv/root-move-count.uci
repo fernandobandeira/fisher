@@ -1,0 +1,56 @@
+# Staged by fisher-8hc.4 on 2026-11-26.
+# UCI setoption (April 2006): https://backscattering.de/chess/uci/#gui-setoption.
+# Searched info spelling: fisher-r6y D41 and Stockfish sf_19 (edb0d9d),
+# UCIEngine::on_update_full and SearchManager::output_pv, read 2026-11-24.
+# D12, D13 and fisher-8hc answers 5 and 6 (2026-11-24) set the requested
+# counts, numbering and bestmove. Ties leave the moves open (D5, D48 and
+# the 2026-11-27 comment on fisher-8hc).
+# Enumeration: python-chess 1.11.2 (https://pypi.org/project/chess/1.11.2/).
+# Published depth-1 perft in expectations/perft.epd and python-chess
+# give 20 root moves from startpos. None captures or promotes, so every
+# depth-1 score is cp 0 by material (fisher-2aj rules 2 and 3).
+# The first position of go-infinite.uci has the sole root move h8g8.
+# It leaves Black down a queen (900 centipawns), so Black scores cp -900
+# at the depth-1 horizon (fisher-2aj rules 2 and 3).
+# At 255 (D12's maximum), D13 caps the reports at 1 and 20 root moves.
+# The first position of terminal-positions.uci has zero root moves and
+# Black is in check. D41 keeps depth 0 score mate 0 without multipv.
+# D42 and UCI Move format give 0000 for the absent best move.
+
+> setoption name MultiPV value 255
+> position fen 7k/8/5K1Q/8/8/8/8/8 b - - 0 1
+> go depth 1
+< info depth 1 multipv 1 score cp -900 nodes {nodes} nps {nps} time {time} pv h8g8
+< bestmove h8g8
+
+> position startpos
+> go depth 1
+< info depth 1 multipv 1 score cp 0 nodes {nodes} nps {nps} time {time} pv {pv}
+< info depth 1 multipv 2 score cp 0 nodes {nodes} nps {nps} time {time} pv {pv}
+< info depth 1 multipv 3 score cp 0 nodes {nodes} nps {nps} time {time} pv {pv}
+< info depth 1 multipv 4 score cp 0 nodes {nodes} nps {nps} time {time} pv {pv}
+< info depth 1 multipv 5 score cp 0 nodes {nodes} nps {nps} time {time} pv {pv}
+< info depth 1 multipv 6 score cp 0 nodes {nodes} nps {nps} time {time} pv {pv}
+< info depth 1 multipv 7 score cp 0 nodes {nodes} nps {nps} time {time} pv {pv}
+< info depth 1 multipv 8 score cp 0 nodes {nodes} nps {nps} time {time} pv {pv}
+< info depth 1 multipv 9 score cp 0 nodes {nodes} nps {nps} time {time} pv {pv}
+< info depth 1 multipv 10 score cp 0 nodes {nodes} nps {nps} time {time} pv {pv}
+< info depth 1 multipv 11 score cp 0 nodes {nodes} nps {nps} time {time} pv {pv}
+< info depth 1 multipv 12 score cp 0 nodes {nodes} nps {nps} time {time} pv {pv}
+< info depth 1 multipv 13 score cp 0 nodes {nodes} nps {nps} time {time} pv {pv}
+< info depth 1 multipv 14 score cp 0 nodes {nodes} nps {nps} time {time} pv {pv}
+< info depth 1 multipv 15 score cp 0 nodes {nodes} nps {nps} time {time} pv {pv}
+< info depth 1 multipv 16 score cp 0 nodes {nodes} nps {nps} time {time} pv {pv}
+< info depth 1 multipv 17 score cp 0 nodes {nodes} nps {nps} time {time} pv {pv}
+< info depth 1 multipv 18 score cp 0 nodes {nodes} nps {nps} time {time} pv {pv}
+< info depth 1 multipv 19 score cp 0 nodes {nodes} nps {nps} time {time} pv {pv}
+< info depth 1 multipv 20 score cp 0 nodes {nodes} nps {nps} time {time} pv {pv}
+< bestmove {legal}
+
+> setoption name MultiPV value 3
+> position fen 7k/6Q1/5K2/8/8/8/8/8 b - - 0 1
+> go depth 1
+< info depth 0 score mate 0
+< bestmove 0000
+> quit
+! exit

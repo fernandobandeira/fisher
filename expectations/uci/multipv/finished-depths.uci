@@ -1,0 +1,28 @@
+# Staged by fisher-8hc.4 on 2026-11-26.
+# UCI setoption (April 2006): https://backscattering.de/chess/uci/#gui-setoption.
+# Searched info spelling: fisher-r6y D41 and Stockfish sf_19 (edb0d9d),
+# UCIEngine::on_update_full and SearchManager::output_pv, read 2026-11-24.
+# D12, D13 and fisher-8hc answers 5 and 6 (2026-11-24) set the requested
+# counts, numbering and bestmove. Ties leave the moves open (D5, D48 and
+# the 2026-11-27 comment on fisher-8hc).
+# Enumeration: python-chess 1.11.2 (https://pypi.org/project/chess/1.11.2/).
+# Position from mate-in-one.uci. Apply fisher-2aj rules 2 to 5 to every
+# root move and every legal reply: at depth 1 all 23 moves leave White
+# up a queen (cp 900), even g6g7, since the horizon scores material.
+# At depth 2 only g6g7 checkmates before the horizon (one ply, mate 1).
+# Seven root moves stalemate (cp 0). After g6g8 or g6h7, Black's king
+# captures the queen (cp 0). The other 13 leave the queen after every
+# reply (cp 900). The best three scores are mate 1, cp 900 and cp 900.
+
+> setoption name MultiPV value 3
+> position fen 7k/8/5KQ1/8/8/8/8/8 w - - 0 1
+> go depth 2
+< info depth 1 multipv 1 score cp 900 nodes {nodes} nps {nps} time {time} pv {pv}
+< info depth 1 multipv 2 score cp 900 nodes {nodes} nps {nps} time {time} pv {pv}
+< info depth 1 multipv 3 score cp 900 nodes {nodes} nps {nps} time {time} pv {pv}
+< info depth 2 multipv 1 score mate 1 nodes {nodes} nps {nps} time {time} pv g6g7
+< info depth 2 multipv 2 score cp 900 nodes {nodes} nps {nps} time {time} pv {pv}
+< info depth 2 multipv 3 score cp 900 nodes {nodes} nps {nps} time {time} pv {pv}
+< bestmove g6g7
+> quit
+! exit

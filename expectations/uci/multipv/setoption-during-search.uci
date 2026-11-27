@@ -1,0 +1,42 @@
+# Staged by fisher-8hc.4 on 2026-11-26.
+# UCI setoption (April 2006): https://backscattering.de/chess/uci/#gui-setoption.
+# Searched info spelling: fisher-r6y D41 and Stockfish sf_19 (edb0d9d),
+# UCIEngine::on_update_full and SearchManager::output_pv, read 2026-11-24.
+# D12, D13 and fisher-8hc answers 5 and 6 (2026-11-24) set the requested
+# counts, numbering and bestmove. Ties leave the moves open (D5, D48 and
+# the 2026-11-27 comment on fisher-8hc).
+# Enumeration: python-chess 1.11.2 (https://pypi.org/project/chess/1.11.2/).
+# Published depth-1 perft in expectations/perft.epd and python-chess
+# give 20 root moves from startpos. None captures or promotes, so every
+# depth-1 score is cp 0 by material (fisher-2aj rules 2 and 3).
+# The first position of go-infinite.uci has the sole root move h8g8.
+# It leaves Black down a queen (900 centipawns), so Black scores cp -900
+# at the depth-1 horizon (fisher-2aj rules 2 and 3).
+# D46 (2026-11-24) rejects a setoption for MultiPV during a search with
+# a diagnostic.
+# Follow go-infinite.uci: allow further reports before each response.
+# A forced root needs only multipv 1 in those repeated records. After
+# stop, startpos distinguishes the retained 3 from the rejected 5.
+
+> setoption name MultiPV value 3
+> position fen 7k/8/5K1Q/8/8/8/8/8 b - - 0 1
+> go infinite
+< info depth 1 multipv 1 score cp -900 nodes {nodes} nps {nps} time {time} pv h8g8
+> setoption name MultiPV value 5
+> isready
+<* info depth {depth} multipv 1 score {score} nodes {nodes} nps {nps} time {time} pv {pv}
+< info string {message:setoption rejected: waiting for stop}
+<* info depth {depth} multipv 1 score {score} nodes {nodes} nps {nps} time {time} pv {pv}
+< readyok
+> stop
+<* info depth {depth} multipv 1 score {score} nodes {nodes} nps {nps} time {time} pv {pv}
+< bestmove h8g8
+
+> position startpos
+> go depth 1
+< info depth 1 multipv 1 score cp 0 nodes {nodes} nps {nps} time {time} pv {pv}
+< info depth 1 multipv 2 score cp 0 nodes {nodes} nps {nps} time {time} pv {pv}
+< info depth 1 multipv 3 score cp 0 nodes {nodes} nps {nps} time {time} pv {pv}
+< bestmove {legal}
+> quit
+! exit

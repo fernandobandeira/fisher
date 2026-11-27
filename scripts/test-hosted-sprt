@@ -272,6 +272,13 @@ class HostedSprt(unittest.TestCase):
                 hosted["collect_artifacts"](plan, "owner/fisher", "2", self.source, {"sprt-1-1"})
             hosted["download_artifacts"].assert_not_called()
 
+    def test_replay_rerun_collects_its_own_source_without_playing_artifacts(self):
+        plan = dict(self.plan, replay=True, source_run="122", ranges=[])
+        download = Mock()
+        with patch.dict(hosted, download_artifacts=download):
+            hosted["collect_artifacts"](plan, "owner/fisher", "2", self.source, {"sprt-source-2"})
+        download.assert_called_once_with("owner/fisher", "123", ["sprt-source-2"], self.source)
+
     def test_first_attempt_without_any_artifacts_records_void(self):
         plan = dict(self.plan, ranges=[{"first": 1, "count": 2}])
         target = self.directory / "record"

@@ -91,7 +91,7 @@ def range_artifacts(plan, attempt, listed):
 
 def collect_artifacts(plan, repository, attempt, directory, listed):
     names = range_artifacts(plan, attempt, listed)
-    if attempt != "1" and not names:
+    if not plan["replay"] and attempt != "1" and not names:
         raise ValueError(f"Attempt {attempt} has no playing artifacts. Dispatch a replay of run {plan['run']}.")
     source_name = f"sprt-source-{attempt}"
     if plan["source_run"]:

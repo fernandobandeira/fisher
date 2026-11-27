@@ -12,6 +12,7 @@ This is a record, not a gate. `scripts/check` does not run it, and nothing here 
 | `measure` | Plays a clocked match by hand under conditions 2. |
 | `summarise.py` | Counts results and queen-ahead games in a PGN. |
 | `openings.epd` | The 200 positions for conditions 1 and 2. |
+| `sprt-records.tsv` | One row per recorded clocked SPRT dispatch. |
 | `series` | Plays and validates ranges, measures speed, and joins the games for a record. |
 | `series-openings.epd` | The 2,000 positions for conditions 3 and 4, in draw order. |
 
@@ -215,3 +216,52 @@ any games were played.
 | First 100 | `e3b9fbc279c52b03e8c2f6ac6a6687f1d1d3fd63a0250ed362b08b5535ee0c42` |
 | First 500 | `4c35b0ae9ae0783d1e344e896666a28a8006f84cfb8947ce4c22145019130130` |
 | All 2,000 | `df2c41c8b88e220050d5de4462b4838f6eaff1a809f4d6f159860624fee7555a` |
+
+## Clocked SPRT
+
+Dispatch **Clocked SPRT** with the measured revision and the gain or no-loss
+test. An explicit opponent overrides the default, which is the merge base
+with `main` (the first parent for a revision already on `main`). Set the
+first opening to 1 for a new test. The default request is 1,000 pairs. Up to
+eight hosted runners play ranges at once, with two games at a time on
+each runner and at most 125 pairs per range. The workflow queues separately
+from the strength series. Both can use the shared hosted runner pool.
+
+After **no verdict yet**, keep the same revisions and test, set the first
+opening to the next unplayed one, and enter the last run's numeric Actions ID
+in `previous_run`. Its artifact contains the cumulative games from opening 1.
+The plan replays that prefix before starting any playing jobs and refuses a
+continuation if the prefix has a verdict or is incomplete. Retain the run
+artifacts before they expire. Use a new dispatch to retry a void run.
+A partial Actions rerun cannot reuse playing artifacts from an earlier attempt.
+
+To read a completed run again, set `replay_run` to its Actions ID, give the
+original revisions in their original order, and request the cumulative
+pair count starting at 1. Select the test to apply. Selecting
+`opponent_view` scores the points taken by the original opponent. This
+dispatch uses the plan and record jobs only. A local replay of the same
+`games.pgn` is described in [the judge's instructions](../scripts/clocked-sprt.md).
+
+The record job replays the joined games with the judge and prints the row
+for [`sprt-records.tsv`](sprt-records.tsv). Save the row in that file in a
+pull request. The workflow makes no commits. Its `sprt-record` artifact has
+the row in `record.tsv`, the judge output, the plan, the current range in
+`range.pgn`, and the cumulative games in `games.pgn`. The replay of the
+entire requested range must succeed before the judge can report a verdict.
+Missing or unreadable games give a void row. An invalid request or a judge
+refusal or error fails the job and leaves the available diagnostics in its
+log and artifact. Cancelling the entire workflow can prevent the record
+job from running.
+
+| Fields | Meaning |
+|---|---|
+| `date`, `run` | UTC date the run was planned and its Actions URL. |
+| `measured`, `opponent`, `view` | Full commits in original playing order and the side scored by this reading. |
+| `test`, `sprt_low_elo`, `sprt_high_elo`, `time_control` | Gain or no-loss, its SPRT bounds in Elo, and the clock for both engines. |
+| `seed`, `draw` | The two full commits separated by a colon and the [SHA-256 method that orders positions](../scripts/clocked-sprt.md#draw-the-openings). |
+| `first`, `pairs_requested` | First opening and length of the range requested in this dispatch. |
+| `pairs_counted`, `pair_counts` | Pairs used by the judge and their counts in order of 0, 0.5, 1, 1.5, and 2 points. |
+| `elo_difference_and_95_interval`, `llr` | Logistic Elo difference with its 95% interval, when estimable, and the log-likelihood ratio at the last pair counted. |
+| `losses_on_time`, `crashes_or_stalls`, `illegal_moves` | Counts across all games the judge read, including games beyond the deciding pair. |
+| `result`, `detail` | Pass, fail, no verdict yet, inconclusive at the pair cap, or void. A void row gives the judge's reason and leaves its observation and ending counts blank. |
+| `prior_runs` | Space-separated Actions IDs of the runs from which this run obtained its earlier games or its replay. Open those IDs in this repository's Actions runs. |

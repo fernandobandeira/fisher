@@ -37,11 +37,12 @@ move exactly. The exhaustive per-ply counts describe the search before
 pruning. Those counts for the starting position matched published perft.
 
 The production search uses cutoffs that leave some legal moves unplayed.
-`fisher bench` runs iterative deepening to depth 5 on each of the six
-published perft positions. It reports each final depth's node count,
-including the earlier depths as in a `go depth 5`, and their total. The
-bench test pins the measured signature for comparison with later revisions
-and bounds each count by the published perft sums for the repeated depths.
+`fisher bench` runs iterative deepening to a fixed depth on each of the six
+published perft positions. For each position it reports the node count of
+the last finished depth, including the earlier depths as in a `go`. It
+also reports the total. The bench test pins the measured signature for
+comparison with later revisions and bounds each count by the published
+perft sums for the repeated depths.
 The search comparison checks the score and best move against fisher's
 test-only plain minimax, bounds the node count by the number of root moves
 and the plain minimax count,

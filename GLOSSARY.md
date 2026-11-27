@@ -91,7 +91,7 @@ _Avoid_: fifty-move counter, draw counter
 ### Search
 
 **Bench signature**:
-The sum of the node counts reported by the last finished depth of iterative deepening to depth 5 on the six published perft positions. Each count includes the earlier depths, as in a `go depth 5`. The total is compared between revisions to show whether a change altered which nodes the search reaches.
+The total of the node counts from the last finished depth of an iterative deepening to a fixed depth on each position in `expectations/perft.epd`. Bench uses `deepening`'s own search, so each count includes the earlier depths as a `go` reports them. The total is compared between revisions to show whether a change altered which nodes the search reaches.
 _Avoid_: benchmark, bench number
 
 **Ply**:

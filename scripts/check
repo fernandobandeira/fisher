@@ -44,6 +44,7 @@ check 'Crate boundary fixtures' 'scripts/check-crate-boundaries --self-test' \
 check 'Guard-Change fixtures' 'scripts/check-guard-change --self-test' \
     scripts/check-guard-change --self-test
 check 'Await merge fixtures' 'scripts/test-await-merge' scripts/test-await-merge
+check 'Clocked SPRT fixtures' 'scripts/test-clocked-sprt' scripts/test-clocked-sprt
 check 'Crate boundaries' 'scripts/check-crate-boundaries' scripts/check-crate-boundaries
 check Clippy 'cargo clippy --locked --workspace --all-targets --all-features -- -D warnings' \
     cargo clippy --locked --workspace --all-targets --all-features -- -D warnings

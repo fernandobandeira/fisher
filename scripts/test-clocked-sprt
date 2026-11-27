@@ -1,0 +1,389 @@
+#!/usr/bin/env python3
+"""Compare the judge to the committed arithmetic and exercise kept PGNs."""
+
+import csv
+from contextlib import contextmanager, redirect_stderr, redirect_stdout
+from http.client import IncompleteRead
+from io import StringIO
+from math import log
+import random
+from runpy import run_path
+import signal
+from subprocess import CalledProcessError
+import sys
+import unittest
+from unittest.mock import patch
+
+sys.dont_write_bytecode = True
+
+from clocked_sprt import (
+    ROOT, TIME_CONTROL, Pair, draw_openings, engine_names, fastchess_runner,
+    fetch_openings, judge, judge_pairs, print_report, read_pairs, read_record,
+)
+from sprt_statistic import ALPHA, BETA, MAX_PAIRS, SPRT_BOUNDS, decide, log_likelihood_ratio, trace, verdict
+
+
+EXPECTATIONS = ROOT / "expectations/sprt-arithmetic"
+FIXTURES = ROOT / "scripts/clocked-sprt-fixtures"
+POINTS = ("0", "0.5", "1", "1.5", "2")
+FASTCHESS = {"CONTINUE": None, "H1": "pass", "H0": "fail"}
+FISHTEST = {"-": None, "accepted": "pass", "rejected": "fail"}
+
+
+def rows(name):
+    with (EXPECTATIONS / name).open(encoding="utf-8", newline="") as stream:
+        yield from csv.DictReader((line for line in stream if not line.startswith("#")), delimiter="\t")
+
+
+def observations():
+    sequences = {}
+    for row in rows("trace.tsv"):
+        sequences.setdefault(row["sequence"], []).append(row)
+    return sequences
+
+
+class Arithmetic(unittest.TestCase):
+    def test_fixed_numbers(self):
+        self.assertEqual({"gain": (0, 10), "no-loss": (-10, 0)}, SPRT_BOUNDS)
+        self.assertEqual((0.05, 0.05), (ALPHA, BETA))
+        self.assertEqual("10+0.1", TIME_CONTROL)
+        self.assertEqual(10_000, MAX_PAIRS)
+
+    def test_thresholds_include_equality(self):
+        self.assertEqual("pass", verdict(log(19)))
+        self.assertEqual("fail", verdict(-log(19)))
+
+    def test_counts(self):
+        for row in rows("counts.tsv"):
+            counts = [int(row[f"points_{points}"]) for points in POINTS]
+            for test in SPRT_BOUNDS:
+                column = test.replace("-", "_")
+                with self.subTest(case=row["case"], test=test):
+                    self.assertAlmostEqual(
+                        float(row[f"{column}_llr"]), log_likelihood_ratio(counts, test),
+                        delta=float(row[f"{column}_tolerance"]),
+                    )
+
+    def test_sequences(self):
+        sequences = observations()
+        for summary in rows("sequences.tsv"):
+            name = summary["sequence"]
+            sequence = sequences[name]
+            self.assertEqual(int(summary["observations"]), len(sequence))
+            scores = [POINTS.index(row["points"]) for row in sequence]
+            for test in SPRT_BOUNDS:
+                column = test.replace("-", "_")
+                with self.subTest(sequence=name, test=test):
+                    self.check_trace(name, test, column, sequence, scores)
+                    observation = decide(trace(scores, test))
+                    ends_at = str(observation.number) if observation.verdict else "-"
+                    self.assertEqual(summary[f"{column}_ends_at"], ends_at)
+                    self.assertEqual(summary[f"{column}_result"], observation.verdict or "none")
+
+    def check_trace(self, name, test, column, sequence, scores):
+        decided = False
+        for row, observation in zip(sequence, trace(scores, test)):
+            label = f"{name}, {test}, observation {row['observation']}"
+            self.assertEqual(int(row["observation"]), observation.number, label)
+            expected = float(row[f"{column}_llr"])
+            self.assertAlmostEqual(
+                expected, observation.llr, delta=0.001 * max(1.0, abs(expected)), msg=label,
+            )
+            if not decided:
+                self.assertEqual(FASTCHESS[row[f"{column}_result_fastchess"]], observation.verdict, label)
+                self.assertEqual(FISHTEST[row[f"{column}_state_fishtest"]], observation.verdict, label)
+                decided = observation.verdict is not None
+
+
+def pgn_game(fen, white, black, result):
+    # The fixture supplies fastchess result records. No engine plays games here.
+    return (
+        f'[Event "Fastchess Tournament"]\n[White "{white}"]\n[Black "{black}"]\n'
+        f'[FEN "{fen}"]\n[Result "{result}"]\n[Termination "normal"]\n'
+        '[TimeControl "10+0.1"]\n[PlyCount "1"]\n\n'
+        f'4. a2a3 {{+0.20/4 0.001s}} {result}\n\n'
+    )
+
+
+def report(pairs, **options):
+    output = StringIO()
+    with redirect_stdout(output):
+        print(f"Result: {print_report(pairs, 'gain', **options)}")
+    return output.getvalue().splitlines()
+
+
+class Reporting(unittest.TestCase):
+    def test_pair_cap(self):
+        # For all-won or all-lost pairs the gain hypotheses give equal
+        # likelihood at a win share near 50.72%. The running share here is
+        # rounded down by less than one win at every prefix.
+        pairs = [
+            Pair(4 * ((n * 5072) // 10_000 - ((n - 1) * 5072) // 10_000), ("normal", "normal"))
+            for n in range(1, 10_001)
+        ]
+        for count, result in ((9_999, "no verdict yet"), (10_000, "inconclusive")):
+            with self.subTest(count=count):
+                output = report(pairs[:count])
+                self.assertIn(f"Pairs counted: {count}", output)
+                self.assertEqual(f"Result: {result}", output[-1])
+
+    def test_interval_with_zero_variance(self):
+        output = report([Pair(4, ("normal", "normal"))] * 2)
+        self.assertIn("Elo difference: +inf (95% interval cannot be estimated from these pairs)", output)
+        self.assertEqual("Result: no verdict yet", output[-1])
+
+    def test_ending_counts_stop_at_the_deciding_observation(self):
+        scores = [POINTS.index(row["points"]) for row in observations()["crosses-and-returns"]]
+        pairs = [Pair(score, ("normal", "normal")) for score in scores]
+        # The reference gain test passes at observation 122.
+        for index in (121, 122):
+            pairs[index] = Pair(scores[index], ("normal", "loss on time"))
+        output = report(pairs)
+        self.assertIn("Pairs counted: 122", output)
+        self.assertIn("Games ending by loss on time among pairs counted: 1", output)
+        self.assertIn("Games ending by loss on time among all games read: 2", output)
+
+
+class Preflight(unittest.TestCase):
+    def test_series_openings_are_verified_before_download(self):
+        with patch("pathlib.Path.read_bytes", return_value=b"changed\n"), patch("clocked_sprt.urlopen") as download:
+            with self.assertRaisesRegex(ValueError, "series-openings.epd SHA-256 mismatch"):
+                fetch_openings("seed")
+            download.assert_not_called()
+
+    def test_fastchess_version_is_checked(self):
+        with patch("clocked_sprt.shutil.which", return_value="/unused/fastchess"), patch(
+            "clocked_sprt.subprocess.check_output"
+        ) as version:
+            version.return_value = "fastchess alpha 1.8.3 compiled for ubuntu-latest 20261107-d7b47e8 (CI)\n"
+            fastchess_runner()
+            version.return_value = "fastchess alpha 1.8.3 compiled for ubuntu-latest 20261107-1111111 (CI)\n"
+            with self.assertRaisesRegex(ValueError, "Expected fastchess alpha 1.8.3"):
+                fastchess_runner()
+
+
+class CommandStatus(unittest.TestCase):
+    def invoke(self, options=(), after_result=None, **overrides):
+        run = run_path(str(ROOT / "scripts/clocked-sprt"))["run"]
+        state = run.__globals__["RunState"]
+        if after_result is not None:
+            finish = state.finish
+
+            def finish_then_interrupt(self, result, status):
+                finish(self, result, status)
+                after_result()
+
+            state.finish = finish_then_interrupt
+        stdout, stderr = StringIO(), StringIO()
+        handlers = {signum: signal.getsignal(signum) for signum in (signal.SIGINT, signal.SIGTERM)}
+        with patch.dict(run.__globals__, overrides), patch(
+            "sys.argv", ["clocked-sprt", *options, "measured", "opponent", "gain", "1", "1", "unused"],
+        ), patch(
+            "clocked_sprt.subprocess.check_output", side_effect=["a" * 40, "b" * 40],
+        ), redirect_stdout(stdout), redirect_stderr(stderr):
+            try:
+                status = run()
+            finally:
+                for signum, handler in handlers.items():
+                    signal.signal(signum, handler)
+        return status, stdout.getvalue(), stderr.getvalue()
+
+    @contextmanager
+    def stand_in_match(self):
+        with patch("pathlib.Path.mkdir"), patch("pathlib.Path.write_bytes"), patch(
+            "pathlib.Path.open", side_effect=lambda *args, **kwargs: StringIO(),
+        ), patch("clocked_sprt.fastchess_runner", return_value="fastchess"), patch(
+            "clocked_sprt.build",
+        ) as build, patch("clocked_sprt.subprocess.Popen") as start, patch("os.killpg") as kill_group:
+            start.return_value.pid = 123
+            yield build, start, kill_group
+
+    def test_failed_download(self):
+        with patch("clocked_sprt.urlopen") as urlopen:
+            response = urlopen.return_value.__enter__.return_value
+            response.read.side_effect = IncompleteRead(b"a", 4095)
+            status, stdout, stderr = self.invoke()
+            self.assertEqual(2, status)
+            self.assertNotIn("Result:", stdout)
+            self.assertIn("Refused: IncompleteRead(1 bytes read, 4095 more expected)", stderr)
+
+            response.read.side_effect = None
+            response.read.return_value = b"a"
+            status, stdout, stderr = self.invoke()
+            self.assertEqual(2, status)
+            self.assertNotIn("Result:", stdout)
+            self.assertIn("Refused: Published openings archive SHA-256 mismatch", stderr)
+
+    def test_interrupts_and_build_failure(self):
+        with self.stand_in_match() as (build, start, _):
+            build.side_effect = KeyboardInterrupt
+            status, stdout, stderr = self.invoke(fetch_openings=lambda seed: ["opening"])
+            self.assertEqual(2, status)
+            self.assertNotIn("Result:", stdout)
+            self.assertEqual("Refused: interrupted while preparing the range\n", stderr)
+            start.assert_not_called()
+
+            build.side_effect = [None, CalledProcessError(5, "cargo")]
+            status, stdout, stderr = self.invoke(fetch_openings=lambda seed: ["opening"])
+            self.assertEqual(2, status)
+            self.assertNotIn("Result:", stdout)
+            self.assertIn("Refused:", stderr)
+            start.assert_not_called()
+
+    def test_interrupt_at_match_cleanup(self):
+        with self.stand_in_match() as (_, start, kill_group):
+            start.return_value.wait.return_value = 0
+            start.return_value.__exit__.side_effect = KeyboardInterrupt
+            self.assert_interrupted_play()
+            kill_group.assert_called_once_with(123, signal.SIGKILL)
+
+    def test_sigterm_during_play(self):
+        def terminate():
+            signal.getsignal(signal.SIGTERM)(signal.SIGTERM, None)
+
+        with self.stand_in_match() as (_, start, kill_group):
+            start.return_value.wait.side_effect = lambda: terminate() if not kill_group.called else 0
+            self.assert_interrupted_play()
+            self.assertTrue(start.call_args.kwargs["start_new_session"])
+            kill_group.assert_called_once_with(123, signal.SIGKILL)
+            self.assertEqual(2, start.return_value.wait.call_count)
+
+    def test_interrupt_during_launch_still_stops_the_group(self):
+        with self.stand_in_match() as (_, start, kill_group):
+            def launch(*args, **kwargs):
+                signal.getsignal(signal.SIGTERM)(signal.SIGTERM, None)
+                return start.return_value
+
+            start.side_effect = launch
+            self.assert_interrupted_play()
+            kill_group.assert_called_once_with(123, signal.SIGKILL)
+
+    def assert_interrupted_play(self):
+        status, stdout, stderr = self.invoke(fetch_openings=lambda seed: ["opening"])
+        self.assertEqual(1, status)
+        self.assertEqual("Result: void (interrupted)", stdout.splitlines()[-1])
+        self.assertEqual(1, stdout.count("Result:"))
+        self.assertEqual("", stderr)
+
+    def test_interrupt_after_replay_result(self):
+        def interrupt():
+            signal.getsignal(signal.SIGINT)(signal.SIGINT, None)
+            raise KeyboardInterrupt
+
+        with patch("pathlib.Path.mkdir"), patch("pathlib.Path.write_bytes"):
+            status, stdout, stderr = self.invoke(
+                options=("--pgn", "kept.pgn"), after_result=interrupt,
+                fetch_openings=lambda seed: ["opening"],
+                read_range=lambda *args: [Pair(2, ("normal", "normal"))],
+            )
+        self.assertEqual(0, status)
+        self.assertEqual("Result: no verdict yet", stdout.splitlines()[-1])
+        self.assertEqual(1, stdout.count("Result:"))
+        self.assertEqual("", stderr)
+
+    def test_interrupt_while_reading_replay(self):
+        def mid_record():
+            yield '[Event "Fastchess Tournament"]\n'
+            yield '[White "measured"]\n'
+            raise KeyboardInterrupt
+
+        with patch("pathlib.Path.mkdir"), patch("pathlib.Path.write_bytes"), patch(
+            "pathlib.Path.open",
+        ) as pgn:
+            pgn.return_value.__enter__.return_value = mid_record()
+            status, stdout, stderr = self.invoke(
+                options=("--pgn", "kept.pgn"), fetch_openings=lambda seed: ["opening"],
+            )
+        self.assertEqual(2, status)
+        self.assertNotIn("Result:", stdout)
+        self.assertEqual("Refused: interrupted while replaying kept games\n", stderr)
+
+    def test_unforeseen_error(self):
+        with patch("clocked_sprt.urlopen", side_effect=RuntimeError("fixture error")):
+            status, stdout, stderr = self.invoke()
+        self.assertEqual(3, status)
+        self.assertNotIn("Result:", stdout)
+        self.assertEqual("Unexpected error (RuntimeError): fixture error\n", stderr)
+
+
+class KeptGames(unittest.TestCase):
+    measured, opponent = "a" * 40, "b" * 40
+    fixture_openings = ["rnbqkb1r/pp1pppp1/5n2/2p4p/2P1P2P/8/PP1P1PP1/RNBQKBNR w KQkq - 0 4"]
+
+    def read_fixture(self, name):
+        with (FIXTURES / f"{name}.pgn").open(encoding="utf-8") as pgn:
+            return read_pairs(pgn, self.fixture_openings, 1, self.measured, self.opponent)
+
+    def test_draw_repeats_excludes_series(self):
+        openings = ["one", "two", "three"]
+        draw = draw_openings(openings, ["two"], "seed")
+        self.assertCountEqual(["one", "three"], draw)
+        self.assertEqual(draw, draw_openings(reversed(openings), ["two"], "seed"))
+
+    def test_shuffled_games_and_missing_game(self):
+        scores = [POINTS.index(row["points"]) for row in observations()["crosses-and-returns"]]
+        openings = (ROOT / "strength/series-openings.epd").read_text(encoding="utf-8").splitlines()[:len(scores)]
+        measured, opponent = "a" * 40, "b" * 40
+        white, black = engine_names(measured, opponent)
+        results = ("0-1", "1/2-1/2", "1-0")
+        games = []
+        for fen, points in zip(openings, scores):
+            white_points = min(points, 2)
+            black_points = points - white_points
+            games.append(pgn_game(fen, white, black, results[white_points]))
+            games.append(pgn_game(fen, black, white, results[2 - black_points]))
+
+        for shuffled in (False, True):
+            with self.subTest(shuffled=shuffled):
+                if shuffled:
+                    random.Random(0).shuffle(games)
+                pgn = StringIO("".join(games))
+                pairs = read_pairs(pgn, openings, 1, measured, opponent)
+                self.assertEqual([Pair(score, ("normal", "normal")) for score in scores], pairs)
+                observation, result = judge((pair.points_in_halves for pair in pairs), "gain")
+                self.assertEqual(("pass", 122), (result, observation.number))
+        pgn = StringIO("".join(games[:-1]))
+        with self.assertRaisesRegex(ValueError, "Missing game at opening"):
+            read_pairs(pgn, openings, 1, measured, opponent)
+
+    def test_abnormal_endings_count_as_losses(self):
+        for fixture, ending in (
+            ("illegal-first", "illegal move"),
+            ("illegal-later", "illegal move"),
+            ("loss-on-time", "loss on time"),
+            ("crash", "crash or stall"),
+        ):
+            with self.subTest(fixture=fixture):
+                self.assertEqual([Pair(4, (ending, ending))], self.read_fixture(fixture))
+
+    def test_opponent_view(self):
+        pairs = self.read_fixture("illegal-first")
+        self.assertIn("Pair counts (0, 0.5, 1, 1.5, 2 points): [0, 0, 0, 0, 1]", report(pairs))
+        self.assertIn(
+            "Pair counts (0, 0.5, 1, 1.5, 2 points): [1, 0, 0, 0, 0]",
+            report(pairs, opponent_view=True),
+        )
+
+    def test_opponent_view_with_mixed_pairs(self):
+        pairs = [
+            Pair(score, ("normal", "normal"))
+            for score, count in enumerate((1, 2, 3, 4, 5))
+            for _ in range(count)
+        ]
+        gain, _ = judge_pairs(pairs, "gain")
+        no_loss, _ = judge_pairs(pairs, "no-loss", opponent_view=True)
+        self.assertEqual((1, 2, 3, 4, 5), gain.counts)
+        self.assertEqual((5, 4, 3, 2, 1), no_loss.counts)
+        self.assertAlmostEqual(gain.llr, -no_loss.llr, places=12)
+
+    def test_illegal_move_still_requires_complete_record(self):
+        games = (FIXTURES / "illegal-later.pgn").read_text(encoding="utf-8")
+        game = games[:games.index('\n[Event ', 1)]
+        with self.assertRaisesRegex(ValueError, "incomplete or invalid UCI movetext"):
+            read_record(game.replace("a7a6", ""))
+        with self.assertRaisesRegex(ValueError, "missing or inconsistent result"):
+            read_record(game.rstrip().removesuffix("0-1"))
+
+
+if __name__ == "__main__":
+    unittest.main()

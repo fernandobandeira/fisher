@@ -51,7 +51,7 @@ These are the starting examples. The grilling for each feature settles the real 
 | Making then unmaking a move loses nothing | The position after unmake differs from the one before make | Invariant |
 | The incremental hash is right | It differs from the hash computed from scratch | Invariant |
 | A canonical FEN survives a round trip | Parsing then formatting changes the canonical string | Invariant |
-| This change does not alter behaviour (a refactor, a speedup) | The bench signature changes: the node count of a fixed search over fixed positions | The previous revision |
+| This change does not alter behaviour (a refactor, a speedup) | The bench signature changes: the total node count of iterative deepening to depth 5 over fixed positions | The previous revision |
 | This change plays stronger | The gain test does not pass | SPRT bounds of 0 and 10 Elo |
 | This change does not play weaker | The no-loss test does not pass | SPRT bounds of -10 and 0 Elo |
 | It never plays an illegal move, crashes or loses on time | A match of many games reports one | The match runner |

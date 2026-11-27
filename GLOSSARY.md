@@ -91,7 +91,7 @@ _Avoid_: fifty-move counter, draw counter
 ### Search
 
 **Bench signature**:
-The total node count of a fixed-depth search over a fixed list of positions, compared between revisions to show whether a change altered which nodes the search reaches.
+The sum of the node counts reported by the last finished depth of iterative deepening to depth 5 on the six published perft positions. Each count includes the earlier depths, as in a `go depth 5`. The total is compared between revisions to show whether a change altered which nodes the search reaches.
 _Avoid_: benchmark, bench number
 
 **Ply**:

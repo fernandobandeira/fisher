@@ -845,10 +845,10 @@ fn the_history_checker_requires_rejections_for_other_castling_fields() -> io::Re
         "r3k3/8/8/8/8/8/8/4K2R w a - 0 1",
         "r3k2r/8/8/8/8/8/8/R3K2R w KQkqq - 0 1",
     ] {
-        check_rejected_castling_fen(fen)?;
+        check_rejected_castling_fen(fen, None)?;
     }
     for field in ["HH", "KH", "HK", "HQ", "KKQ"] {
-        check_rejected_castling_fen(&format!("4k3/8/8/8/8/8/8/R3K2R w {field} - 0 1"))?;
+        check_rejected_castling_fen(&format!("4k3/8/8/8/8/8/8/R3K2R w {field} - 0 1"), None)?;
     }
     Ok(())
 }
@@ -864,7 +864,41 @@ fn the_history_checker_accepts_distinct_standard_castling_letters() {
     ]);
 }
 
-fn check_rejected_castling_fen(fen: &str) -> io::Result<()> {
+#[test]
+fn malformed_fens_with_castling_aliases_keep_the_previous_position() -> io::Result<()> {
+    for (field, castling_error) in [
+        ("KK", "castling rights must not contain duplicates"),
+        ("H", "castling rights must use K, Q, k, q, or -"),
+    ] {
+        for (fen, diagnostic) in [
+            (
+                format!("4k3/8/8/8/8/8/8/4K2R w {field} z9 0 1"),
+                "invalid en passant square",
+            ),
+            (
+                format!("4k3/8/8/8/8/8/8/4K2R w {field} - x 1"),
+                "halfmove clock must be an unsigned decimal integer",
+            ),
+            (
+                format!("4k3/8/8/8/8/8/8/4K2R w {field} - 0 0"),
+                "fullmove number must be a positive decimal integer",
+            ),
+            (
+                format!("4k3/8/8/8/8/8/8/4K3 w {field} - 0 1"),
+                castling_error,
+            ),
+            (
+                format!("4k3/8/8/8/8/8/8/3K3R w {field} - 0 1"),
+                castling_error,
+            ),
+        ] {
+            check_rejected_castling_fen(&fen, Some(diagnostic))?;
+        }
+    }
+    Ok(())
+}
+
+fn check_rejected_castling_fen(fen: &str, expected_diagnostic: Option<&str>) -> io::Result<()> {
     for moves in ["", " moves e1g1"] {
         let command = format!("position fen {fen}{moves}");
         let input = format!("position fen {A}\n{command}\nisready\ngo\nquit\n");
@@ -886,10 +920,13 @@ fn check_rejected_castling_fen(fen: &str) -> io::Result<()> {
                 "{command}: expected three responses, got {text:?}"
             )));
         };
-        assert!(
-            diagnostic.starts_with("info string position rejected: invalid FEN: "),
-            "{command}: {diagnostic}"
-        );
+        let cause = diagnostic
+            .strip_prefix("info string position rejected: invalid FEN: ")
+            .and_then(|cause| cause.strip_suffix('\n'));
+        assert!(cause.is_some(), "{command}: {diagnostic}");
+        if let Some(expected) = expected_diagnostic {
+            assert_eq!(cause, Some(expected), "{command}");
+        }
         accepts(&[
             POSITION_A,
             Command(&command),

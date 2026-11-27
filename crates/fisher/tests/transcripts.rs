@@ -1777,6 +1777,52 @@ fn the_runner_tracks_kingside_castling_spellings() -> Result<(), String> {
 }
 
 #[test]
+fn the_runner_keeps_the_position_after_a_malformed_fen_with_a_castling_alias() -> io::Result<()> {
+    for (field, castling_error) in [
+        ("KK", "castling rights must not contain duplicates"),
+        ("H", "castling rights must use K, Q, k, q, or -"),
+    ] {
+        for (fen, diagnostic) in [
+            (
+                format!("4k3/8/8/8/8/8/8/4K2R w {field} z9 0 1"),
+                "invalid en passant square",
+            ),
+            (
+                format!("4k3/8/8/8/8/8/8/4K2R w {field} - x 1"),
+                "halfmove clock must be an unsigned decimal integer",
+            ),
+            (
+                format!("4k3/8/8/8/8/8/8/4K2R w {field} - 0 0"),
+                "fullmove number must be a positive decimal integer",
+            ),
+            (
+                format!("4k3/8/8/8/8/8/8/4K3 w {field} - 0 1"),
+                castling_error,
+            ),
+            (
+                format!("4k3/8/8/8/8/8/8/3K3R w {field} - 0 1"),
+                castling_error,
+            ),
+        ] {
+            assert!(
+                reference_position(command_tokens(&format!("fen {fen}"))).is_err(),
+                "{fen}"
+            );
+            let transcript = format!(
+                "> position fen 7k/8/5K1Q/8/8/8/8/8 b - - 0 1\n\
+                 > position fen {fen}\n> isready\n\
+                 < info string position rejected: invalid FEN: {diagnostic}\n< readyok\n\
+                 > go depth 1\n\
+                 < info depth 1 multipv 1 score cp -900 nodes 1 nps {{nps}} time {{time}} pv h8g8\n\
+                 < bestmove {{legal}}\n> quit\n! exit\n"
+            );
+            run_transcript(&fen, &transcript, HANG_TIMEOUT, Engine::start)?;
+        }
+    }
+    Ok(())
+}
+
+#[test]
 fn a_position_fisher_rejects_leaves_the_position_in_place() {
     // The last rank of the rejected FEN has seven files.
     let transcript = "> position fen 7k/8/5K1Q/8/8/8/8/8 b - - 0 1\n\

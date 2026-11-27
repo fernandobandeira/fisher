@@ -2,12 +2,13 @@
 """Compare the judge to the committed arithmetic and exercise kept PGNs."""
 
 import csv
-from contextlib import redirect_stderr, redirect_stdout
+from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from http.client import IncompleteRead
 from io import StringIO
 from math import log
 import random
 from runpy import run_path
+import signal
 from subprocess import CalledProcessError
 import sys
 import unittest
@@ -17,7 +18,7 @@ sys.dont_write_bytecode = True
 
 from clocked_sprt import (
     ROOT, TIME_CONTROL, Pair, draw_openings, engine_names, fastchess_runner,
-    fetch_openings, judge, judge_pairs, print_result, read_pairs, read_record,
+    fetch_openings, judge, judge_pairs, print_report, read_pairs, read_record,
 )
 from sprt_statistic import ALPHA, BETA, MAX_PAIRS, SPRT_BOUNDS, decide, log_likelihood_ratio, trace, verdict
 
@@ -107,7 +108,7 @@ def pgn_game(fen, white, black, result):
 def report(pairs, **options):
     output = StringIO()
     with redirect_stdout(output):
-        print_result(pairs, "gain", **options)
+        print(f"Result: {print_report(pairs, 'gain', **options)}")
     return output.getvalue().splitlines()
 
 
@@ -162,16 +163,40 @@ class Preflight(unittest.TestCase):
 
 
 class CommandStatus(unittest.TestCase):
-    def invoke(self, **overrides):
+    def invoke(self, options=(), after_result=None, **overrides):
         run = run_path(str(ROOT / "scripts/clocked-sprt"))["run"]
+        state = run.__globals__["RunState"]
+        if after_result is not None:
+            finish = state.finish
+
+            def finish_then_interrupt(self, result, status):
+                finish(self, result, status)
+                after_result()
+
+            state.finish = finish_then_interrupt
         stdout, stderr = StringIO(), StringIO()
+        handlers = {signum: signal.getsignal(signum) for signum in (signal.SIGINT, signal.SIGTERM)}
         with patch.dict(run.__globals__, overrides), patch(
-            "sys.argv", ["clocked-sprt", "measured", "opponent", "gain", "1", "1", "unused"],
+            "sys.argv", ["clocked-sprt", *options, "measured", "opponent", "gain", "1", "1", "unused"],
         ), patch(
             "clocked_sprt.subprocess.check_output", side_effect=["a" * 40, "b" * 40],
         ), redirect_stdout(stdout), redirect_stderr(stderr):
-            status = run()
+            try:
+                status = run()
+            finally:
+                for signum, handler in handlers.items():
+                    signal.signal(signum, handler)
         return status, stdout.getvalue(), stderr.getvalue()
+
+    @contextmanager
+    def stand_in_match(self):
+        with patch("pathlib.Path.mkdir"), patch("pathlib.Path.write_bytes"), patch(
+            "pathlib.Path.open", side_effect=lambda *args, **kwargs: StringIO(),
+        ), patch("clocked_sprt.fastchess_runner", return_value="fastchess"), patch(
+            "clocked_sprt.build",
+        ) as build, patch("clocked_sprt.subprocess.Popen") as start, patch("os.killpg") as kill_group:
+            start.return_value.pid = 123
+            yield build, start, kill_group
 
     def test_failed_download(self):
         with patch("clocked_sprt.urlopen") as urlopen:
@@ -190,16 +215,12 @@ class CommandStatus(unittest.TestCase):
             self.assertIn("Refused: Published openings archive SHA-256 mismatch", stderr)
 
     def test_interrupts_and_build_failure(self):
-        with patch("pathlib.Path.mkdir"), patch("pathlib.Path.write_bytes"), patch(
-            "pathlib.Path.open", return_value=StringIO(),
-        ), patch("clocked_sprt.fastchess_runner", return_value="fastchess"), patch(
-            "clocked_sprt.build",
-        ) as build, patch("clocked_sprt.subprocess.Popen") as start:
+        with self.stand_in_match() as (build, start, _):
             build.side_effect = KeyboardInterrupt
             status, stdout, stderr = self.invoke(fetch_openings=lambda seed: ["opening"])
             self.assertEqual(2, status)
             self.assertNotIn("Result:", stdout)
-            self.assertEqual("Refused: interrupted before play\n", stderr)
+            self.assertEqual("Refused: interrupted while preparing the range\n", stderr)
             start.assert_not_called()
 
             build.side_effect = [None, CalledProcessError(5, "cargo")]
@@ -209,15 +230,73 @@ class CommandStatus(unittest.TestCase):
             self.assertIn("Refused:", stderr)
             start.assert_not_called()
 
-            build.side_effect = None
-            match = start.return_value
-            match.wait.side_effect = KeyboardInterrupt
-            status, stdout, stderr = self.invoke(fetch_openings=lambda seed: ["opening"])
-            self.assertEqual(1, status)
-            self.assertEqual("Result: void (interrupted)", stdout.splitlines()[-1])
-            self.assertEqual("", stderr)
-            start.assert_called_once()
-            match.kill.assert_called_once()
+    def test_interrupt_at_match_cleanup(self):
+        with self.stand_in_match() as (_, start, kill_group):
+            start.return_value.wait.return_value = 0
+            start.return_value.__exit__.side_effect = KeyboardInterrupt
+            self.assert_interrupted_play()
+            kill_group.assert_called_once_with(123, signal.SIGKILL)
+
+    def test_sigterm_during_play(self):
+        def terminate():
+            signal.getsignal(signal.SIGTERM)(signal.SIGTERM, None)
+
+        with self.stand_in_match() as (_, start, kill_group):
+            start.return_value.wait.side_effect = lambda: terminate() if not kill_group.called else 0
+            self.assert_interrupted_play()
+            self.assertTrue(start.call_args.kwargs["start_new_session"])
+            kill_group.assert_called_once_with(123, signal.SIGKILL)
+            self.assertEqual(2, start.return_value.wait.call_count)
+
+    def test_interrupt_during_launch_still_stops_the_group(self):
+        with self.stand_in_match() as (_, start, kill_group):
+            def launch(*args, **kwargs):
+                signal.getsignal(signal.SIGTERM)(signal.SIGTERM, None)
+                return start.return_value
+
+            start.side_effect = launch
+            self.assert_interrupted_play()
+            kill_group.assert_called_once_with(123, signal.SIGKILL)
+
+    def assert_interrupted_play(self):
+        status, stdout, stderr = self.invoke(fetch_openings=lambda seed: ["opening"])
+        self.assertEqual(1, status)
+        self.assertEqual("Result: void (interrupted)", stdout.splitlines()[-1])
+        self.assertEqual(1, stdout.count("Result:"))
+        self.assertEqual("", stderr)
+
+    def test_interrupt_after_replay_result(self):
+        def interrupt():
+            signal.getsignal(signal.SIGINT)(signal.SIGINT, None)
+            raise KeyboardInterrupt
+
+        with patch("pathlib.Path.mkdir"), patch("pathlib.Path.write_bytes"):
+            status, stdout, stderr = self.invoke(
+                options=("--pgn", "kept.pgn"), after_result=interrupt,
+                fetch_openings=lambda seed: ["opening"],
+                read_range=lambda *args: [Pair(2, ("normal", "normal"))],
+            )
+        self.assertEqual(0, status)
+        self.assertEqual("Result: no verdict yet", stdout.splitlines()[-1])
+        self.assertEqual(1, stdout.count("Result:"))
+        self.assertEqual("", stderr)
+
+    def test_interrupt_while_reading_replay(self):
+        def mid_record():
+            yield '[Event "Fastchess Tournament"]\n'
+            yield '[White "measured"]\n'
+            raise KeyboardInterrupt
+
+        with patch("pathlib.Path.mkdir"), patch("pathlib.Path.write_bytes"), patch(
+            "pathlib.Path.open",
+        ) as pgn:
+            pgn.return_value.__enter__.return_value = mid_record()
+            status, stdout, stderr = self.invoke(
+                options=("--pgn", "kept.pgn"), fetch_openings=lambda seed: ["opening"],
+            )
+        self.assertEqual(2, status)
+        self.assertNotIn("Result:", stdout)
+        self.assertEqual("Refused: interrupted while replaying kept games\n", stderr)
 
     def test_unforeseen_error(self):
         with patch("clocked_sprt.urlopen", side_effect=RuntimeError("fixture error")):
@@ -286,11 +365,15 @@ class KeptGames(unittest.TestCase):
         )
 
     def test_opponent_view_with_mixed_pairs(self):
-        pairs = [Pair(score, ("normal", "normal")) for score in (0, 1, 2, 3, 3, 4, 4, 4)]
+        pairs = [
+            Pair(score, ("normal", "normal"))
+            for score, count in enumerate((1, 2, 3, 4, 5))
+            for _ in range(count)
+        ]
         gain, _ = judge_pairs(pairs, "gain")
         no_loss, _ = judge_pairs(pairs, "no-loss", opponent_view=True)
-        self.assertEqual((1, 1, 1, 2, 3), gain.counts)
-        self.assertEqual((3, 2, 1, 1, 1), no_loss.counts)
+        self.assertEqual((1, 2, 3, 4, 5), gain.counts)
+        self.assertEqual((5, 4, 3, 2, 1), no_loss.counts)
         self.assertAlmostEqual(gain.llr, -no_loss.llr, places=12)
 
     def test_illegal_move_still_requires_complete_record(self):

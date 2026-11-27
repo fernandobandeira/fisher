@@ -25,13 +25,17 @@ any supplied earlier games.
 | Status | Meaning | Output |
 |---|---|---|
 | 0 | Pass, fail, no verdict yet, or inconclusive | `Result: …` on stdout |
-| 1 | A game is missing or unreadable after play starts or while reading kept games | `Result: void (…)` on stdout |
-| 2 | Play was refused before asking fastchess for games, or preflight failed | `Refused: …` on stderr |
+| 1 | A game is missing or unreadable, or an interrupt arrives once fastchess is launched for play | `Result: void (…)` on stdout |
+| 2 | Play was refused, preflight failed, or an interrupt arrived before launch or during replay | `Refused: …` on stderr |
 | 3 | An unforeseen error | `Unexpected error (…): …` on stderr |
 
-An interruption before play is a refusal. An interruption after fastchess has
-started play gives `Result: void (interrupted)`. Only statuses 0 and 1 report
-a result for a play or replay request. `--help` prints usage information.
+SIGINT and SIGTERM follow the same rule. The launch stage begins immediately
+before starting fastchess and continues through reading the games, including
+after fastchess exits. If interrupted in that stage, the command stops the
+fastchess process group and prints `Result: void (interrupted)`. Once the
+`Result:` line is written, a signal changes neither the output nor the status.
+Only statuses 0 and 1 report a result for a play or replay request. `--help`
+prints usage information.
 
 Replay a range by supplying its original fastchess PGN and a fresh directory.
 Replay downloads the same pinned published openings and reads the PGN results

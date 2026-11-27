@@ -128,7 +128,7 @@ def fastchess_runner():
     return runner
 
 
-def play(out, measured, opponent, openings, concurrency):
+def play(out, measured, opponent, openings, concurrency, start_match):
     with preflight():
         runner = fastchess_runner()
         build(measured, out / "measured")
@@ -138,7 +138,7 @@ def play(out, measured, opponent, openings, concurrency):
     measured_name, opponent_name = engine_names(measured, opponent)
     with log:
         with preflight():
-            match = subprocess.Popen(
+            match = start_match(
                 [
                     runner,
                     "-engine", "cmd=./measured", f"name={measured_name}",
@@ -152,11 +152,7 @@ def play(out, measured, opponent, openings, concurrency):
                 cwd=out, stdout=log, stderr=subprocess.STDOUT,
             )
         with match:
-            try:
-                return match.wait()
-            except KeyboardInterrupt:
-                match.kill()
-                raise UnreadableGames("interrupted") from None
+            return match.wait()
 
 
 def read_record(record):
@@ -257,7 +253,7 @@ def judge_pairs(pairs, test, opponent_view=False):
     return judge(scores, test)
 
 
-def print_result(pairs, test, have_prefix=True, opponent_view=False):
+def print_report(pairs, test, have_prefix=True, opponent_view=False):
     observation, result = judge_pairs(pairs if have_prefix else (), test, opponent_view)
     print(f"Pairs counted: {observation.number}")
     print(f"Pair counts (0, 0.5, 1, 1.5, 2 points): {list(observation.counts)}")
@@ -276,4 +272,4 @@ def print_result(pairs, test, have_prefix=True, opponent_view=False):
     for ending in ("loss on time", "crash or stall", "illegal move"):
         print(f"Games ending by {ending} among pairs counted: {counted[ending]}")
         print(f"Games ending by {ending} among all games read: {total[ending]}")
-    print(f"Result: {result}")
+    return result

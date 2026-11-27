@@ -1,0 +1,38 @@
+# Staged by fisher-2ou on 2026-11-27. See README.md in this directory.
+# Rejection from Stockfish 19 (sf_19, edb0d9d), Homebrew arm64 bottle,
+# probed 2026-11-27: https://github.com/official-stockfish/Stockfish/releases/tag/sf_19
+# src/position.cpp lines 219-268 read the piece placement and know no
+# promoted-piece marker: a ~ after the eighth file fails with "Invalid file
+# reached", and a ~ inside a rank fails with "Invalid piece: ~".
+# Over UCI fisher answers a rejected position as the owner decided in
+# rejected-position.uci: one info string diagnostic, the earlier position kept.
+# Stockfish instead exits after the error; fisher keeps running.
+# The earlier position: Black to move, h8g8 is the sole legal move.
+> position fen 7k/8/5K1Q/8/8/8/8/8 b - - 0 1
+# Stockfish 19 rejects this board: "Invalid FEN. Invalid file reached."
+# Owner decision for rejected position: one diagnostic. The wording is open.
+> position fen 4k3/8/8/8/8/8/8/4K2R~ w K - 0 1
+< info string {message}
+> isready
+# UCI isready/readyok.
+< readyok
+# Stockfish 19 rejects this board: "Invalid FEN. Invalid piece: ~".
+# The R~ counts one file, so the rank adds up to eight with or without the ~.
+# Owner decision for rejected position: one diagnostic. The wording is open.
+> position fen 4k3/8/8/8/8/8/8/R~3K3 w Q - 0 1
+< info string {message}
+> isready
+# UCI isready/readyok.
+< readyok
+> go depth 1
+# The earlier position is still in place. Rules 2 and 3 score the horizon by
+# material: Black has a king against White's queen (cp -900). Rule 7 and the
+# depth-1 totals in expectations/README.md: one legal move, so nodes 1, as in
+# rejected-position.uci.
+< info depth 1 multipv 1 score cp -900 nodes 1 nps {nps} time {time} pv {pv}
+# Owner-approved example in rejected-position.uci: the original position
+# still has its sole legal move. Either rejected board would give White a move.
+< bestmove h8g8
+# UCI quit.
+> quit
+! exit

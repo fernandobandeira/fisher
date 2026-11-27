@@ -73,7 +73,7 @@ pub fn minimax_until_interrupted(
 /// Searches one depth for up to `requested` variations.
 /// A zero request returns the best score without a variation. At depth zero
 /// and at a root with no legal move, the result has no variations.
-/// Returns `None` if `interrupted` returns true before any node.
+/// Calls `interrupted` before each node and returns `None` on the first refusal.
 #[must_use]
 pub fn minimax_variations_until_interrupted(
     position: &Position,

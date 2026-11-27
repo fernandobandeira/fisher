@@ -1,5 +1,7 @@
 name: Clocked SPRT
 on:
+  pull_request:
+    types: [opened, synchronize]
   workflow_dispatch:
     inputs:
       measured:
@@ -34,7 +36,7 @@ on:
         default: false
 
 concurrency:
-  group: clocked-sprt
+  group: clocked-sprt-trial-${{ github.sha }}
   queue: max
 
 permissions:
@@ -63,14 +65,14 @@ jobs:
       - name: Plan ranges and check any previous games
         id: plan
         env:
-          MEASURED: ${{ inputs.measured }}
-          OPPONENT: ${{ inputs.opponent }}
-          TEST: ${{ inputs.test }}
-          FIRST: ${{ inputs.first }}
-          PAIRS: ${{ inputs.pairs }}
-          PREVIOUS_RUN: ${{ inputs.previous_run }}
-          REPLAY_RUN: ${{ inputs.replay_run }}
-          OPPONENT_VIEW: ${{ inputs.opponent_view }}
+          MEASURED: ${{ '5c5d6cf' }}
+          OPPONENT: ${{ '8b9c254' }}
+          TEST: ${{ 'gain' }}
+          FIRST: ${{ 1 }}
+          PAIRS: ${{ github.event.action == 'synchronize' && 16 || 192 }}
+          PREVIOUS_RUN: ${{ '' }}
+          REPLAY_RUN: ${{ '' }}
+          OPPONENT_VIEW: ${{ false }}
         run: |
           scripts/hosted-sprt plan -- "$MEASURED" "$OPPONENT" "$TEST" "$FIRST" "$PAIRS" \
             "$PREVIOUS_RUN" "$REPLAY_RUN" "$OPPONENT_VIEW" "$RUNNER_TEMP/source" >> "$GITHUB_OUTPUT"
@@ -122,7 +124,7 @@ jobs:
           OPPONENT: ${{ fromJSON(needs.plan.outputs.plan).opponent }}
           TEST: ${{ fromJSON(needs.plan.outputs.plan).test }}
           FIRST: ${{ matrix.first }}
-          COUNT: ${{ matrix.count }}
+          COUNT: ${{ github.event.action == 'synchronize' && matrix.first == 1 && 1 || matrix.count }}
         run: |
           scripts/clocked-sprt --concurrency 2 -- "$MEASURED" "$OPPONENT" "$TEST" \
             "$FIRST" "$COUNT" "$RUNNER_TEMP/sprt"

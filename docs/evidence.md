@@ -19,7 +19,7 @@ Best first:
 1. **A published result.** Perft counts for the standard positions; the solutions to a mate or tactics suite.
 2. **An independent implementation.** Another engine or library is asked the same question: which moves are legal here, what is the perft count at this depth.
 3. **An invariant the human approved.** "Unmaking a move restores the position exactly", checked over many generated positions.
-4. **A statistical test whose bounds were fixed beforehand.** SPRT, for "this plays stronger".
+4. **A statistical test with SPRT bounds fixed before play.** The gain and no-loss tests for claims of strength.
 5. **An example the human approved**, written from the requirement by someone who has not seen the patch.
 
 These are not evidence:
@@ -52,11 +52,18 @@ These are the starting examples. The grilling for each feature settles the real 
 | The incremental hash is right | It differs from the hash computed from scratch | Invariant |
 | A canonical FEN survives a round trip | Parsing then formatting changes the canonical string | Invariant |
 | This change does not alter behaviour (a refactor, a speedup) | The bench signature changes: the node count of a fixed search over fixed positions | The previous revision |
-| This change plays stronger | SPRT against the previous revision does not accept the improvement | Statistical test |
+| This change plays stronger | The gain test does not pass | SPRT bounds of 0 and 10 Elo |
+| This change does not play weaker | The no-loss test does not pass | SPRT bounds of -10 and 0 Elo |
 | It never plays an illegal move, crashes or loses on time | A match of many games reports one | The match runner |
 | It speaks UCI | A scripted session differs from the expected transcript, or a match runner cannot finish a game | The protocol specification |
 
 Choosing the right observation is the part to argue about. A test that passes under the wrong conditions answers a different question: a perft run that never reaches an en passant capture says nothing about en passant.
+
+## Claims of strength
+
+The gain test settles "this change plays stronger". The no-loss test settles "this change does not play weaker". Both run on a clock against the revision the change is based on. Only a pass accepts the claim. If the test reaches 10,000 pairs without a verdict, the result is inconclusive.
+
+The node-limited series is the repeatable record and judges no claim of strength. See [Clocked SPRT](../strength/README.md#clocked-sprt) for how to run or replay the test.
 
 ## The claims table
 

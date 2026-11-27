@@ -44,9 +44,9 @@ uses published perft sums as upper bounds. The search comparison checks
 the score and best move against fisher's test-only plain minimax, bounds
 the node count by the number of root moves and the plain minimax count,
 and checks the principal variation by replaying it with `shakmaty` and
-checking each prefix's score against plain minimax. Strength claims use
-SPRT, a statistical test over games against the previous revision with
-decision bounds fixed before play. See [Evidence](../evidence.md).
+checking each prefix's score against plain minimax. Strength claims use the
+clocked SPRT against the revision the change is based on. The SPRT bounds
+are fixed before play. See [Evidence](../evidence.md).
 
 In fisher-j07, deleting the line that checks a king's attacks along its
 rank and file from `is_attacked` passed every test in `scripts/check` at

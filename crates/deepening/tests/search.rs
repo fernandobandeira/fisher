@@ -84,15 +84,43 @@ fn reports_the_finished_depth_before_the_best_move() -> Result<(), Box<dyn Error
 
 #[test]
 fn interrupt_before_the_root_of_a_terminal_position() -> Result<(), Box<dyn std::error::Error>> {
+    assert_interrupted_terminal_reports(
+        "7k/6Q1/5K2/8/8/8/8/8 b - - 0 1",
+        Score::Mate {
+            plies: 0,
+            winning: false,
+        },
+    )
+}
+
+#[test]
+fn interrupt_before_the_root_of_a_stalemate() -> Result<(), Box<dyn Error>> {
+    assert_interrupted_terminal_reports("7k/5K2/6Q1/8/8/8/8/8 b - - 0 1", Score::Centipawns(0))
+}
+
+fn assert_interrupted_terminal_reports(fen: &str, score: Score) -> Result<(), Box<dyn Error>> {
+    // Positions and scores from expectations/uci/terminal-positions.uci.
     let request = SearchRequest {
-        position: Position::from_fen("7k/6Q1/5K2/8/8/8/8/8 b - - 0 1")?,
+        position: Position::from_fen(fen)?,
         limits: Limits::default(),
         interrupt: Arc::new(AtomicBool::new(true)),
         started: Instant::now(),
     };
     let mut reports = Vec::new();
     search(request, &mut |report| reports.push(report));
-    assert_eq!(reports, [SearchReport::BestMove(None)]);
+    assert_eq!(
+        reports,
+        [
+            SearchReport::FinishedDepth(FinishedDepth {
+                depth: 0,
+                score,
+                nodes: 0,
+                elapsed: std::time::Duration::ZERO,
+                principal_variation: Vec::new(),
+            }),
+            SearchReport::BestMove(None),
+        ]
+    );
     Ok(())
 }
 

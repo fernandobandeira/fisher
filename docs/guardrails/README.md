@@ -77,7 +77,7 @@ Give each claim about what the engine does an observation that could prove it wr
 | Weekly real-clock match | Losses on time, abnormal endings, illegal or incomplete PGN records, missing match completion and unrecognized fastchess output | [Real-clock match workflow](../../.github/workflows/clock-match.yml) | Weekly and on manual dispatch |
 | Seeded reference comparison | Differences in legal moves, resulting positions, check detection or search results | [Rules comparison](../../crates/rules/tests/positions.rs), [search comparison](../../crates/search/tests/search.rs) | In `scripts/check`, including the first ten published mates. All 100 run in the weekly published suite |
 | UCI transcripts | Incorrect responses, process exits or search reports | [Transcript runner](../../crates/fisher/tests/transcripts.rs), [expected transcripts](../../expectations/uci) | In `scripts/check` |
-| Bench signature | A changed fixed-search node count | [Signature test](../../crates/bench/tests/signature.rs), [`fisher bench` and commit record](../process.md#recording-the-bench-signature) | Signature test each commit and CI run. Commit record in review |
+| Bench signature | A changed depth-5 iterative deepening node count | [Signature test](../../crates/bench/tests/signature.rs), [`fisher bench` and commit record](../process.md#recording-the-bench-signature) | Signature test each commit and CI run. Commit record in review |
 | Strength record | Unsupported claims about playing strength | [`strength/measure` and records](../../strength/README.md) | When claiming a strength change |
 
 See [evidence of behaviour](behaviour-evidence.md) for what each check shows and when to run the full mate suite.

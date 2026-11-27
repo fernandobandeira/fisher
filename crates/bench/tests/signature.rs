@@ -1,7 +1,7 @@
 use std::{error::Error, ffi::OsStr};
 
 #[test]
-fn reports_the_depth_four_signature_within_the_published_bounds() -> Result<(), Box<dyn Error>> {
+fn reports_the_depth_five_signature_within_the_published_bounds() -> Result<(), Box<dyn Error>> {
     let mut output = Vec::new();
     assert!(bench::run_if_requested(
         Some(OsStr::new("bench")),
@@ -10,15 +10,23 @@ fn reports_the_depth_four_signature_within_the_published_bounds() -> Result<(), 
 
     let output = String::from_utf8(output)?;
     let mut lines = output.lines();
-    // Published perft sums through depth 4 and the ceiling set in D39.
-    let exhaustive = [206_603, 4_185_552, 46_255, 432_070, 2_167_396, 3_986_609];
+    // fisher-707.2 gives the published perft sums for depths 1 through 5
+    // repeated in iterative deepening, and the total ceiling set in D39.
+    let exhaustive = [
+        5_288_577,
+        202_163_878,
+        770_370,
+        16_707_445,
+        94_341_469,
+        172_142_955,
+    ];
     let mut total = 0;
     for (index, upper_bound) in exhaustive.into_iter().enumerate() {
         let line = lines.next().ok_or("missing position line")?;
         let nodes = assert_position_signature(index + 1, line, upper_bound)?;
         total += nodes;
     }
-    assert!(total <= 1_102_448, "{total}");
+    assert!(total <= 49_141_469, "{total}");
     assert_eq!(
         lines.next(),
         Some(format!("Nodes searched  : {total}").as_str())
@@ -30,13 +38,13 @@ fn reports_the_depth_four_signature_within_the_published_bounds() -> Result<(), 
     assert_eq!(
         output,
         concat!(
-            "Position 1: 2315\n",
-            "Position 2: 10714\n",
-            "Position 3: 1137\n",
-            "Position 4: 6165\n",
-            "Position 5: 22595\n",
-            "Position 6: 51252\n",
-            "Nodes searched  : 94178\n",
+            "Position 1: 47210\n",
+            "Position 2: 924617\n",
+            "Position 3: 13537\n",
+            "Position 4: 73647\n",
+            "Position 5: 756217\n",
+            "Position 6: 2586344\n",
+            "Nodes searched  : 4401572\n",
         )
     );
     Ok(())

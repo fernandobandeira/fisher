@@ -390,5 +390,5 @@ omitted FEN fields and fisher's responses to the equivalent six-field commands.
 fisher-82i staged the [whitespace sessions](uci/whitespace/README.md) on
 2026-11-26 before fisher-b0b activates them. They follow Stockfish 19's
 token separators: U+00A0 stays inside a token, while horizontal and vertical
-tab separate tokens. The README records the probes and a hex dump of each
-send.
+tab separate tokens. The README records the probes and a hex dump of every
+send that holds a special byte.

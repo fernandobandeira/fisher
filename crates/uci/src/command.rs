@@ -1,4 +1,4 @@
-use std::{fmt, iter::Peekable};
+use std::{fmt, iter::Peekable, num::NonZeroU8};
 
 use crate::UciMove;
 
@@ -13,6 +13,8 @@ const SETOPTION: &str = "setoption";
 const DEBUG: &str = "debug";
 const PONDERHIT: &str = "ponderhit";
 const REGISTER: &str = "register";
+
+pub(super) const MULTIPV: &str = "MultiPV";
 
 const STARTPOS: &str = "startpos";
 const FEN: &str = "fen";
@@ -36,6 +38,7 @@ pub(super) enum Command {
     Uci,
     IsReady,
     UciNewGame,
+    SetMultiPv(Option<NonZeroU8>),
     Position(Result<PositionCommand, PositionSyntaxError>),
     Go(GoParameters),
     Stop,
@@ -122,14 +125,35 @@ pub(super) fn parse_command(line: &str) -> Input {
             GO => return Input::Handled(Command::Go(parse_go(tokens))),
             STOP => return Input::Handled(Command::Stop),
             QUIT => return Input::Handled(Command::Quit),
-            // TODO(fisher-a2q): Declare and accept UCI options.
+            SETOPTION => return parse_setoption(tokens),
+            // TODO(fisher-a2q): Declare and accept the other UCI options.
             // TODO(fisher-p25): Handle the debug command.
             // TODO(fisher-2ha): Handle pondering and ponderhit.
-            SETOPTION | DEBUG | PONDERHIT | REGISTER => return Input::Ignored,
+            DEBUG | PONDERHIT | REGISTER => return Input::Ignored,
             _ => {}
         }
     }
     Input::Unknown
+}
+
+fn parse_setoption<'a>(mut tokens: impl Iterator<Item = &'a str>) -> Input {
+    if tokens.next() != Some("name")
+        || !tokens
+            .next()
+            .is_some_and(|name| name.eq_ignore_ascii_case(MULTIPV))
+    {
+        return Input::Ignored;
+    }
+    let value = match tokens.next() {
+        Some("value") => tokens
+            .next()
+            .filter(|_| tokens.next().is_none())
+            .and_then(|value| value.parse().ok()),
+        None => None,
+        // The name runs up to the value marker. MultiPV is a one-word name.
+        Some(_) => return Input::Ignored,
+    };
+    Input::Handled(Command::SetMultiPv(value))
 }
 
 fn parse_position<'a>(

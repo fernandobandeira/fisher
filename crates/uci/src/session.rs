@@ -1,6 +1,7 @@
 use std::{
     collections::VecDeque,
     io::{self, BufRead, BufReader, Read, Write},
+    num::NonZeroU8,
     panic::{self, AssertUnwindSafe},
     sync::{
         Arc,
@@ -11,11 +12,11 @@ use std::{
     time::{Duration, Instant},
 };
 
-use deepening::{FinishedDepth, Limits, Score, SearchReport, SearchRequest};
+use deepening::{FinishedDepth, Limits, SearchReport, SearchRequest};
 use rules::Position;
 
 use crate::{
-    Response, SearchScore, UciMove,
+    Response, UciMove,
     command::{
         Command, GoParameters, Input, PositionCommand, PositionSource, PositionSyntaxError,
         command_tokens, parse_command,
@@ -32,7 +33,7 @@ use crate::{
 ///
 /// Returns an error if a thread cannot start, the search dies or returns
 /// without a best move, the search reports after its best move, input cannot
-/// be read, or output cannot be written or flushed.
+/// be read, a finished depth is invalid, or output cannot be written or flushed.
 pub fn run_session(
     input: impl Read + Send + 'static,
     mut output: impl Write,
@@ -54,6 +55,7 @@ pub fn run_session(
     })?;
     let mut session = Session {
         position: Position::starting(),
+        requested_variations: NonZeroU8::MIN,
         active: Active::Idle,
         deferred: VecDeque::new(),
         events,
@@ -139,6 +141,7 @@ impl Active {
 
 struct Session {
     position: Position,
+    requested_variations: NonZeroU8,
     active: Active,
     deferred: VecDeque<Event>,
     events: mpsc::Receiver<Event>,
@@ -179,14 +182,35 @@ impl Session {
             Command::Uci => {
                 send(output, &Response::IdName(&format!("fisher {version}")))?;
                 send(output, &Response::IdAuthor("Fernando Bandeira"))?;
+                send(output, &Response::MultiPvOption)?;
                 send(output, &Response::UciOk)
             }
             Command::IsReady => send(output, &Response::ReadyOk),
+            Command::SetMultiPv(value) => self.set_multipv(output, value),
             Command::Position(command) => self.position(output, command),
             Command::Go(parameters) => self.go(output, &parameters),
             Command::Stop | Command::Quit => self.release(output),
             Command::UciNewGame => Ok(()),
         }
+    }
+
+    fn set_multipv(&mut self, output: &mut dyn Write, value: Option<NonZeroU8>) -> io::Result<()> {
+        if !matches!(self.active, Active::Idle) {
+            return send(
+                output,
+                &Response::InfoString("setoption rejected: waiting for stop"),
+            );
+        }
+        let Some(value) = value else {
+            return send(
+                output,
+                &Response::InfoString(
+                    "setoption rejected: MultiPV requires an integer from 1 to 255",
+                ),
+            );
+        };
+        self.requested_variations = value;
+        Ok(())
     }
 
     fn position(
@@ -222,7 +246,7 @@ impl Session {
                 &Response::InfoString("go rejected: waiting for stop"),
             );
         }
-        let request = search_request(self.position, parameters);
+        let request = search_request(self.position, parameters, self.requested_variations);
         self.active = Active::Searching {
             interrupt: Arc::clone(&request.interrupt),
             infinite: parameters.infinite,
@@ -272,11 +296,16 @@ impl Session {
     }
 }
 
-fn search_request(position: Position, parameters: &GoParameters) -> SearchRequest {
+fn search_request(
+    position: Position,
+    parameters: &GoParameters,
+    requested_variations: NonZeroU8,
+) -> SearchRequest {
     // TODO(fisher-7vo): Obey searchmoves and mate.
     // TODO(fisher-2ha): Wait for ponderhit when pondering.
     SearchRequest {
         position,
+        requested_variations,
         limits: Limits {
             depth: parameters.depth,
             nodes: parameters.nodes,
@@ -296,29 +325,54 @@ fn search_request(position: Position, parameters: &GoParameters) -> SearchReques
 /// Terminal positions report `info depth 0 score mate 0` for checkmate
 /// or `info depth 0 score cp 0` for stalemate.
 fn send_search_info(output: &mut dyn Write, result: &FinishedDepth) -> io::Result<()> {
+    if result.depth == 0 {
+        let score = result
+            .terminal_score
+            .filter(|_| result.variations.is_empty())
+            .ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidData, "invalid terminal depth report")
+            })?;
+        return send(
+            output,
+            &Response::SearchInfo {
+                depth: 0,
+                multipv: None,
+                score: score.into(),
+                nodes: None,
+                time_ms: None,
+                nps: None,
+                pv: &[],
+            },
+        );
+    }
+
+    if result.terminal_score.is_some()
+        || result.variations.is_empty()
+        || result.variations.iter().any(|(_, moves)| moves.is_empty())
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "invalid searched depth report",
+        ));
+    }
     let time_ms = u64::try_from(result.elapsed.as_millis().max(1)).unwrap_or(u64::MAX);
-    let pv: Vec<_> = result
-        .principal_variation
-        .iter()
-        .copied()
-        .map(UciMove::from)
-        .collect();
-    let nodes = (result.depth > 0).then_some(result.nodes);
-    let score = match result.score {
-        Score::Centipawns(value) => SearchScore::Centipawns(value),
-        Score::Mate { plies, winning } => SearchScore::Mate { plies, winning },
-    };
-    send(
-        output,
-        &Response::SearchInfo {
-            depth: result.depth,
-            score,
-            nodes,
-            time_ms: nodes.map(|_| time_ms),
-            nps: nodes.map(|nodes| nodes_per_second(nodes, time_ms)),
-            pv: if result.depth == 0 { &[] } else { &pv },
-        },
-    )
+    let nps = nodes_per_second(result.nodes, time_ms);
+    for (index, (score, moves)) in result.variations.iter().enumerate() {
+        let pv: Vec<_> = moves.iter().copied().map(UciMove::from).collect();
+        send(
+            output,
+            &Response::SearchInfo {
+                depth: result.depth,
+                multipv: Some(index + 1),
+                score: (*score).into(),
+                nodes: Some(result.nodes),
+                time_ms: Some(time_ms),
+                nps: Some(nps),
+                pv: &pv,
+            },
+        )?;
+    }
+    Ok(())
 }
 
 fn nodes_per_second(nodes: u64, time_ms: u64) -> u64 {

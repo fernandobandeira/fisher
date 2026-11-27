@@ -155,10 +155,10 @@ impl Script {
                 depth += 1;
                 report(SearchReport::FinishedDepth(FinishedDepth {
                     depth,
-                    score: Score::Centipawns(0),
                     nodes: 1,
                     elapsed: Duration::from_millis(1),
-                    principal_variation: best_move.into_iter().collect(),
+                    terminal_score: None,
+                    variations: vec![(Score::Centipawns(0), best_move.into_iter().collect())],
                 }));
                 let _sent = sent.send(());
             }
@@ -172,6 +172,123 @@ impl Script {
         self.steps.send(report).map_err(io::Error::other)?;
         receive(&self.reported)
     }
+}
+
+#[test]
+fn multipv_reaches_the_search_and_a_busy_setting_is_rejected() -> io::Result<()> {
+    // D13 gives the output order. D46 keeps the setting for this go and the next.
+    // Hold the worker before it reports so setoption runs during the search.
+    let (started, requests) = mpsc::channel();
+    let (release, proceed) = mpsc::channel();
+    let session = Session::start(move |request, report| {
+        if started.send(request.requested_variations.get()).is_err()
+            || proceed.recv_timeout(HANG_TIMEOUT).is_err()
+        {
+            return;
+        }
+        report_scripted_variations(request.position, report);
+    });
+
+    session.command("setoption name MultiPV value 3")?;
+    session.command("go depth 1")?;
+    assert_eq!(receive(&requests)?, 3);
+    session.command("setoption name MultiPV value 5")?;
+    assert_eq!(
+        session.reply()?,
+        "info string setoption rejected: waiting for stop\n"
+    );
+    release.send(()).map_err(io::Error::other)?;
+    assert_scripted_result(&session)?;
+
+    session.command("setoption name MultiPV value 0")?;
+    assert_eq!(
+        session.reply()?,
+        "info string setoption rejected: MultiPV requires an integer from 1 to 255\n"
+    );
+    session.command("go depth 1")?;
+    assert_eq!(receive(&requests)?, 3);
+    release.send(()).map_err(io::Error::other)?;
+    assert_scripted_result(&session)?;
+    session.command("quit")?;
+    assert_eq!(session.finish()?, Vec::<String>::new());
+    Ok(())
+}
+
+#[test]
+fn multipv_setting_is_rejected_while_the_move_is_held() -> io::Result<()> {
+    let (finished, requests) = mpsc::channel();
+    let session = Session::start(move |request, report| {
+        // The scripted search finishes at its depth cap, including BestMove.
+        report_scripted_variations(request.position, report);
+        assert!(finished.send(request.requested_variations.get()).is_ok());
+    });
+
+    session.command("setoption name MultiPV value 3")?;
+    session.command("go infinite")?;
+    assert_eq!(receive(&requests)?, 3);
+    assert_scripted_variations(&session)?;
+    // The BestMove report was queued before this command. A readyok here
+    // confirms the session has consumed it and is holding the move.
+    session.command("isready")?;
+    assert_eq!(session.reply()?, "readyok\n");
+
+    session.command("setoption name MultiPV value 5")?;
+    session.command("isready")?;
+    assert_eq!(
+        session.reply()?,
+        "info string setoption rejected: waiting for stop\n"
+    );
+    assert_eq!(session.reply()?, "readyok\n");
+    session.command("stop")?;
+    assert_eq!(session.reply()?, "bestmove e2e4\n");
+
+    session.command("go depth 1")?;
+    assert_eq!(receive(&requests)?, 3);
+    assert_scripted_result(&session)?;
+    session.command("quit")?;
+    assert_eq!(session.finish()?, Vec::<String>::new());
+    Ok(())
+}
+
+fn report_scripted_variations(position: rules::Position, report: &mut dyn FnMut(SearchReport)) {
+    let variations: Vec<_> = [(17, "e2e4"), (8, "d2d4"), (-5, "g1f3")]
+        .into_iter()
+        .map(|(score, movement)| {
+            (
+                Score::Centipawns(score),
+                scripted_variation(position, &[movement]),
+            )
+        })
+        .collect();
+    let best_move = variations
+        .first()
+        .and_then(|(_, moves)| moves.first())
+        .copied();
+    report(SearchReport::FinishedDepth(FinishedDepth {
+        depth: 1,
+        nodes: 30,
+        elapsed: Duration::from_millis(2),
+        terminal_score: None,
+        variations,
+    }));
+    report(SearchReport::BestMove(best_move));
+}
+
+fn assert_scripted_result(session: &Session) -> io::Result<()> {
+    assert_scripted_variations(session)?;
+    assert_eq!(session.reply()?, "bestmove e2e4\n");
+    Ok(())
+}
+
+fn assert_scripted_variations(session: &Session) -> io::Result<()> {
+    for expected in [
+        "info depth 1 multipv 1 score cp 17 nodes 30 nps 15000 time 2 pv e2e4\n",
+        "info depth 1 multipv 2 score cp 8 nodes 30 nps 15000 time 2 pv d2d4\n",
+        "info depth 1 multipv 3 score cp -5 nodes 30 nps 15000 time 2 pv g1f3\n",
+    ] {
+        assert_eq!(session.reply()?, expected);
+    }
+    Ok(())
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -543,10 +660,10 @@ fn reports_after_best_move_are_errors_with_input_still_open() -> io::Result<()> 
         SearchReport::BestMove(None),
         SearchReport::FinishedDepth(FinishedDepth {
             depth: 1,
-            score: Score::Centipawns(0),
             nodes: 1,
             elapsed: Duration::from_millis(1),
-            principal_variation: Vec::new(),
+            terminal_score: None,
+            variations: vec![(Score::Centipawns(0), Vec::new())],
         }),
     ] {
         let session = Session::start(move |_, report| {
@@ -579,10 +696,10 @@ fn holds_the_move_at_the_depth_cap_until_a_release_command() -> io::Result<()> {
                 let best_move = principal_variation.first().copied();
                 report(SearchReport::FinishedDepth(FinishedDepth {
                     depth,
-                    score: Score::Centipawns(cp),
                     nodes,
                     elapsed: Duration::from_millis(1),
-                    principal_variation,
+                    terminal_score: None,
+                    variations: vec![(Score::Centipawns(cp), principal_variation)],
                 }));
                 if depth == 2 {
                     report(SearchReport::BestMove(best_move));
@@ -660,18 +777,21 @@ fn starting_position_reports_time_and_nps_at_the_depth_cap() -> io::Result<()> {
         let principal_variation = scripted_variation(request.position, &["e2e4", "e7e5"]);
         report(SearchReport::FinishedDepth(FinishedDepth {
             depth: 1,
-            score: Score::Centipawns(0),
             nodes: 20,
             elapsed: Duration::from_millis(2),
-            principal_variation: scripted_variation(request.position, &["e2e4"]),
+            terminal_score: None,
+            variations: vec![(
+                Score::Centipawns(0),
+                scripted_variation(request.position, &["e2e4"]),
+            )],
         }));
         let best_move = principal_variation.first().copied();
         report(SearchReport::FinishedDepth(FinishedDepth {
             depth: 2,
-            score: Score::Centipawns(0),
             nodes: 440,
             elapsed: Duration::from_millis(5),
-            principal_variation,
+            terminal_score: None,
+            variations: vec![(Score::Centipawns(0), principal_variation)],
         }));
         report(SearchReport::BestMove(best_move));
         assert!(held.send(()).is_ok());

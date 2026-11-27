@@ -7,7 +7,7 @@ use std::{
 };
 
 use rules::{Color, Move, Position};
-use search::minimax_until_interrupted;
+use search::{SearchResult, minimax_variations_until_interrupted};
 
 pub use search::Score;
 
@@ -237,10 +237,13 @@ fn run_search<const NODES_BETWEEN_READINGS: u64>(
         let Some(started) = limits.start_depth(&elapsed, last_depth_duration) else {
             break;
         };
-        let Some(result) = minimax_until_interrupted(&request.position, depth, || {
-            before_node();
-            limits.stop_before_node::<NODES_BETWEEN_READINGS>(&elapsed)
-        }) else {
+        let Some(result) =
+            minimax_variations_until_interrupted(&request.position, depth, 1, || {
+                before_node();
+                limits.stop_before_node::<NODES_BETWEEN_READINGS>(&elapsed)
+            })
+            .map(SearchResult::from)
+        else {
             break;
         };
         best_move = result.best_move.unwrap_or(best_move);

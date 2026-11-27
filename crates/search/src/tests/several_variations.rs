@@ -444,18 +444,11 @@ fn plain_minimax_passes_the_comparison_corpus() -> TestResult {
     })
 }
 
-// TODO(fisher-8hc.9): Pass the requested count to search and enable this test.
 #[test]
-#[ignore = "fisher-8hc.9 supplies the search that accepts a requested count"]
 fn search_passes_the_comparison_corpus() -> TestResult {
-    check_comparison_corpus(|root, depth, _requested| {
-        crate::minimax_until_interrupted(root, depth, || false).map(|single| {
-            if single.principal_variation.is_empty() {
-                Vec::new()
-            } else {
-                vec![(single.score, single.principal_variation)]
-            }
-        })
+    check_comparison_corpus(|root, depth, requested| {
+        crate::minimax_variations_until_interrupted(root, depth, requested, || false)
+            .map(|result| result.variations)
     })
 }
 

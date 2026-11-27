@@ -9,7 +9,7 @@ use std::error::Error;
 
 use perft::check_perft;
 use rules::Position;
-use search::{Score, SearchResult, minimax};
+use search::{Score, SearchResult, minimax, minimax_variations_until_interrupted};
 use shakmaty::{CastlingMode, Chess, Position as _, fen::Fen};
 
 type TestResult = Result<(), Box<dyn Error>>;
@@ -279,4 +279,82 @@ fn does_not_check_for_an_interrupt_at_the_root() {
         minimax_until_interrupted(&position, 0, || true),
         Some(minimax(&position, 0))
     );
+}
+
+#[test]
+fn several_variations_keep_legal_move_order_on_ties() -> TestResult {
+    let root = Position::starting();
+    let legal_moves = root.legal_moves();
+    for requested in [2, 3, 255] {
+        let result = minimax_variations_until_interrupted(&root, 2, requested, || false)
+            .ok_or("expected a finished result")?;
+        // Every root move in the starting position still has equal material
+        // after every reply at depth two. D48 keeps legal move order.
+        let expected: Vec<_> = legal_moves
+            .iter()
+            .take(usize::from(requested))
+            .map(Some)
+            .collect();
+        let actual: Vec<_> = result
+            .variations
+            .iter()
+            .map(|(_, moves)| moves.first())
+            .collect();
+        assert_eq!(actual, expected);
+    }
+    Ok(())
+}
+
+#[test]
+fn one_requested_variation_matches_the_single_search() -> TestResult {
+    let root = Position::starting();
+    let result = minimax_variations_until_interrupted(&root, 2, 1, || false)
+        .ok_or("expected a finished result")?;
+    assert_eq!(result.variations.len(), 1);
+    assert_eq!(SearchResult::from(result), minimax(&root, 2));
+    Ok(())
+}
+
+#[test]
+fn refuses_a_partial_set_of_variations() -> TestResult {
+    let root = Position::starting();
+    for requested in [1, 2, 3, 255] {
+        let mut checks = 0;
+        let finished = minimax_variations_until_interrupted(&root, 2, requested, || {
+            checks += 1;
+            false
+        })
+        .ok_or("expected a finished result")?;
+        assert_eq!(finished.nodes, checks);
+        for interrupt_at in [1, finished.nodes] {
+            let mut checks = 0;
+            let result = minimax_variations_until_interrupted(&root, 2, requested, || {
+                checks += 1;
+                checks >= interrupt_at
+            });
+            assert!(result.is_none(), "setting {requested}, node {interrupt_at}");
+            assert_eq!(checks, interrupt_at);
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn a_finished_root_can_have_no_variations() -> TestResult {
+    let starting = Position::starting();
+    let checkmate = Position::from_fen("k7/1Q6/2K5/8/8/8/8/8 b - - 0 1")?;
+    let stalemate = Position::from_fen("7k/5Q2/6K1/8/8/8/8/8 b - - 0 1")?;
+    for (root, depth) in [(starting, 0), (checkmate, 1), (stalemate, 1)] {
+        for requested in [1, 2, 3, 255] {
+            let result = minimax_variations_until_interrupted(&root, depth, requested, || true)
+                .ok_or("expected a finished result")?;
+            assert_eq!(result.variations, []);
+            assert_eq!(SearchResult::from(result), minimax(&root, depth));
+        }
+    }
+    let result = minimax_variations_until_interrupted(&starting, 2, 0, || false)
+        .ok_or("expected a finished result")?;
+    assert_eq!(result.variations, []);
+    assert_eq!(result.score, minimax(&starting, 2).score);
+    Ok(())
 }

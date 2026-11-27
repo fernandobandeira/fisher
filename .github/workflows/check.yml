@@ -32,7 +32,31 @@ jobs:
         with:
           tool: cargo-deny@0.22.0
           fallback: none
+      - name: Set advisory database cache inputs
+        id: advisory-cache-inputs
+        run: |
+          echo "day=$(date -u +%F)" >> "$GITHUB_OUTPUT"
+          echo "path=${CARGO_HOME:-$HOME/.cargo}/advisory-dbs" >> "$GITHUB_OUTPUT"
+      - name: Restore the RustSec advisory database
+        id: advisory-cache
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: ${{ steps.advisory-cache-inputs.outputs.path }}
+          key: rustsec-advisory-db-v2-${{ steps.advisory-cache-inputs.outputs.day }}
+          restore-keys: rustsec-advisory-db-v2-
+      - name: Refresh the RustSec advisory database
+        id: advisory-refresh
+        continue-on-error: ${{ github.event_name != 'schedule' }}
+        run: timeout --kill-after=5s 90s scripts/check-advisory-db refresh
+      - name: Save the refreshed RustSec advisory database
+        if: github.ref == 'refs/heads/main' && steps.advisory-refresh.outcome == 'success' && steps.advisory-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: ${{ steps.advisory-cache-inputs.outputs.path }}
+          key: ${{ steps.advisory-cache.outputs.cache-primary-key }}
       - run: scripts/check
+        env:
+          FISHER_ADVISORY_DB_REFRESH_RESULT: ${{ steps.advisory-refresh.outcome }}
 
   mutation-part:
     runs-on: ubuntu-latest

@@ -1,0 +1,65 @@
+#!/bin/sh
+set -eu
+
+cd "$(dirname "$0")/.."
+rustsec_url=https://github.com/RustSec/advisory-db
+# cargo-deny 0.22.0 derives this directory from the configured database URL.
+db=${CARGO_HOME:-$HOME/.cargo}/advisory-dbs/advisory-db-3157b0e258782691
+max_age_seconds=$((7 * 24 * 60 * 60))
+
+fail() {
+    printf 'RustSec advisory database: %s\n' "$*" >&2
+    exit 1
+}
+
+verify_checkout() {
+    [ -d "$db/.git" ] ||
+        fail "no usable cached copy at $db. Run cargo deny --locked fetch db while online."
+    if [ "$(git -C "$db" rev-parse --show-toplevel)" != "$(cd "$db" && pwd -P)" ]; then
+        fail "unexpected Git working tree ($db)."
+    fi
+    if [ "$(git -C "$db" config --local --get-all remote.origin.url)" != "$rustsec_url" ] ||
+        [ "$(git -C "$db" remote get-url --all origin)" != "$rustsec_url" ]; then
+        fail "origin must be exactly $rustsec_url ($db)."
+    fi
+    # Reject index flags that can hide missing or modified files from status.
+    tracked=$(git -C "$db" ls-files -v) || fail "cannot read the index ($db)."
+    if printf '%s\n' "$tracked" | grep -q '^[a-zS] '; then
+        fail "index hides tracked files ($db)."
+    fi
+    changes=$(git -C "$db" -c core.fsmonitor=false -c core.untrackedCache=false \
+        status --porcelain --untracked-files=all --ignored --ignore-submodules=none) ||
+        fail "cannot inspect the working tree ($db)."
+    [ -z "$changes" ] || fail "working tree differs from HEAD ($db)."
+    git -C "$db" fsck --no-dangling || fail "Git object validation failed ($db)."
+}
+
+grep -Fxq "db-urls = [\"$rustsec_url\"]" deny.toml ||
+    fail 'update the cache path and URL validation to match deny.toml.'
+
+case "${1:-}" in
+    refresh)
+        if [ -e "$db" ]; then
+            verify_checkout
+        fi
+        GIT_TERMINAL_PROMPT=0 cargo deny --locked fetch db
+        verify_checkout
+        ;;
+    success)
+        verify_checkout
+        ;;
+    failure)
+        verify_checkout
+        # A failed git fetch can still update the mtime of .git/FETCH_HEAD.
+        snapshot_time=$(git -C "$db" show -s --format=%ct HEAD)
+        snapshot_date=$(git -C "$db" show -s --format=%cI HEAD)
+        age=$(($(date +%s) - snapshot_time))
+        if [ "$age" -lt 0 ] || [ "$age" -gt "$max_age_seconds" ]; then
+            fail "cached snapshot dated $snapshot_date is outside the 7-day fallback window."
+        fi
+        printf 'RustSec refresh unavailable. Using cached advisory database dated %s.\n' "$snapshot_date" >&2
+        ;;
+    *)
+        fail 'expected refresh, success or failure.'
+        ;;
+esac

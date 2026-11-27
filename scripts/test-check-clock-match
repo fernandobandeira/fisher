@@ -41,7 +41,8 @@ PGN = (
     '[Termination "normal"]\n\n4. Na3 e5 1/2-1/2\n'
 )
 FINISH = {
-    "event": "game_finished", "game": 1, "plies": 2, "result": "1/2-1/2", "termination": "normal",
+    "event": "game_finished", "game": 1, "plies": 2, "result": "1/2-1/2",
+    "termination": "normal", "reason": "Draw by 3-fold repetition",
 }
 # Run 45683651168, fastchess.log. The two totals of 290 include these aborts.
 ABORTS = (
@@ -65,7 +66,7 @@ class ClockMatchTests(unittest.TestCase):
         return terminations, report
 
     def verify_match(self, *lines, finish=None, pgn=PGN):
-        evidence = self.directory / "match"
+        evidence = Path(tempfile.mkdtemp(dir=self.directory)) / "match"
 
         def stand_in(command, output):
             (output / "fastchess.log").write_text("\n".join((
@@ -92,6 +93,29 @@ class ClockMatchTests(unittest.TestCase):
         self.assertIn("Repetition warnings: 1\n", summary)
         self.assertIn("Fifty-move warnings: 1\n", summary)
 
+    def test_warnings_reject_invalid_positions(self):
+        info, _, moves = DIAGNOSTICS
+        for warning in (REPETITION, FIFTY_MOVE):
+            with self.subTest(warning=warning):
+                verdict, _ = self.verify_match(warning, info, "Position; fen / w - - 0 1", moves)
+                self.assertEqual(verdict, 1, "invalid FEN passed the match")
+
+    def test_warnings_reject_colour_escapes(self):
+        # Logger::print at d7b47e8 writes these groups verbatim, and neither
+        # archived match contains ESC. The red/reset pair from compliance.hpp
+        # belongs to the separate compliance command, even around a whole line.
+        info, position, moves = DIAGNOSTICS
+        for warning in (REPETITION, FIFTY_MOVE):
+            for line in (
+                ("embedded warning", warning[:29] + "\x1b[1;31m" + warning[29:],
+                 info, position, moves),
+                ("wrapped warning", "\x1b[1;31m" + warning + "\x1b[0m", info, position, moves),
+                ("embedded detail", warning, info.replace("depth", "de\x1b[1;31mpth"), position, moves),
+            ):
+                with self.subTest(warning=warning, case=line[0]):
+                    verdict, _ = self.verify_match(*line[1:])
+                    self.assertEqual(verdict, 1, "colour escape passed in a warning group")
+
     def test_other_warnings_fail(self):
         for warning in (
             FIFTY_MOVE + " extra",
@@ -109,6 +133,28 @@ class ClockMatchTests(unittest.TestCase):
         self.assertEqual(verdict, 1, summary)
         self.assertIn("Losses on time: 1\n", summary)
 
+    def test_finish_faults_cannot_be_hidden_by_normal_termination(self):
+        timeout = "White loses on time (202ms overrun)"
+        for reason in (timeout, "White makes an illegal move", "Black disconnects", "Game interrupted"):
+            for source in ("console", "event", "both"):
+                with self.subTest(reason=reason, source=source):
+                    console = f"Finished game 1 (fisher-a vs fisher-b): 1/2-1/2 {{{reason}}}"
+                    lines = (console,) if source in ("console", "both") else ()
+                    finish = dict(FINISH, reason=reason) if source in ("event", "both") else FINISH
+                    verdict, summary = self.verify_match(REPETITION, *DIAGNOSTICS, *lines, finish=finish)
+                    self.assertEqual(verdict, 1, f"{source} fault passed: {reason}")
+                    if reason == timeout:
+                        self.assertIn("Losses on time: 1\n", summary)
+
+    def test_console_result_must_agree_with_finish_event(self):
+        for result, expected in (("1/2-1/2", 0), ("0-1", 1)):
+            with self.subTest(result=result):
+                verdict, _ = self.verify_match(
+                    FIFTY_MOVE, *DIAGNOSTICS,
+                    f"Finished game 1 (fisher-a vs fisher-b): {result} {{Draw by 3-fold repetition}}",
+                )
+                self.assertEqual(verdict, expected, "console result disagrees with finish event")
+
     def test_abnormal_finish_still_fails(self):
         verdict, summary = self.verify_match(finish=dict(FINISH, termination="crash"))
         self.assertEqual(verdict, 1, summary)
@@ -120,76 +166,112 @@ class ClockMatchTests(unittest.TestCase):
         self.assertEqual(verdict, 1, summary)
         self.assertIn("PGN replay or record errors: 1\n", summary)
 
+    def test_unrecognized_mainline_token_fails_replay(self):
+        verdict, summary = self.verify_match()
+        self.assertEqual(verdict, 0, summary)
+        verdict, summary = self.verify_match(pgn=PGN.replace("Na3 e5", "Na3 e5 Qz9"))
+        self.assertEqual(verdict, 1, "Qz9 was skipped during replay")
+        self.assertIn("PGN replay or record errors: 1\n", summary)
+
     def test_empty_history_requires_its_space(self):
         for history, unexpected in (("Moves; ", 0), ("Moves;", 1), ("Moves;  ", 1)):
             with self.subTest(history=history):
                 _, report = self.read_log(REPETITION, *DIAGNOSTICS[:2], history)
                 self.assertEqual(bool(report["unexpected"]), bool(unexpected), repr(history))
 
-    def test_forced_cleanup_kills_the_descendant(self):
-        # The child holds the stdout pipe open. It writes its PID only after
-        # both processes are ready. Controlled wait calls reach the two
-        # deadlines independently of startup time. Pipe EOF proves cleanup.
-        command = [sys.executable, "-c", (
-            "import os, signal\n"
-            "signal.signal(signal.SIGINT, signal.SIG_IGN)\n"
-            "if os.fork() == 0:\n"
-            "    print(os.getpid(), flush=True)\n"
-            "while True:\n"
-            "    signal.pause()\n"
-        )]
+    def run_process_fixture(self, parent_exit):
+        # Grandchild readiness proves the process tree exists before simulated
+        # deadlines. The grace case releases the parent through stdin.
+        command = [sys.executable, "-c", """
+import os, signal, sys
+signal.signal(signal.SIGINT, signal.SIG_DFL if sys.argv[1] == "SIGINT" else signal.SIG_IGN)
+if os.fork() == 0:
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+    child = os.getpid()
+    if os.fork() == 0:
+        print(child, os.getpid(), flush=True)
+    while True:
+        signal.pause()
+sys.stdin.buffer.read(1)
+""", parent_exit]
         popen = subprocess.Popen
         waits = []
         signals = []
         hang_timeout = 30
 
+        def stop(pid):
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(pid, signal.SIGKILL)
+
         def start(args, **options):
-            options["stdout"] = subprocess.PIPE
+            options.update(stdin=subprocess.PIPE, stdout=subprocess.PIPE)
             process = popen(args, **options)
+            original_wait = process.wait
             self.addCleanup(process.stdout.close)
-            self.addCleanup(process.wait, timeout=hang_timeout)
+            self.addCleanup(process.stdin.close)
+            self.addCleanup(original_wait, timeout=hang_timeout)
             self.addCleanup(stop, process.pid)
             self.assertTrue(select.select([process.stdout], [], [], hang_timeout)[0],
                             "stand-in did not signal readiness")
-            descendant = int(process.stdout.readline())
-            self.addCleanup(stop, descendant)
-            original_wait = process.wait
+            for pid in map(int, process.stdout.readline().split()):
+                self.addCleanup(stop, pid)
+            self.process_output = os.fdopen(os.dup(process.stdout.fileno()), "rb")
+            self.addCleanup(self.process_output.close)
             original_send_signal = process.send_signal
-            expected = iter((3600, 10, None, None))
 
             def wait(timeout=None):
+                if timeout is None:
+                    return original_wait(timeout=hang_timeout)
                 waits.append(timeout)
-                self.assertEqual(timeout, next(expected))
-                if timeout is not None:
+                if waits == [3600]:
+                    if parent_exit == "Ctrl-C":
+                        raise KeyboardInterrupt
                     raise subprocess.TimeoutExpired(args, timeout)
+                self.assertEqual(waits, [3600, 10])
+                if parent_exit == "stays":
+                    raise subprocess.TimeoutExpired(args, timeout)
+                if parent_exit == "grace":
+                    process.stdin.write(b"x")
+                    process.stdin.flush()
                 return original_wait(timeout=hang_timeout)
-
-            process.wait = wait
 
             def send_signal(signum):
                 signals.append(signum)
                 original_send_signal(signum)
 
+            process.wait = wait
             process.send_signal = send_signal
-            self.process_output = os.fdopen(os.dup(process.stdout.fileno()), "rb")
-            self.addCleanup(self.process_output.close)
             return process
-
-        def stop(pid):
-            with contextlib.suppress(ProcessLookupError):
-                os.kill(pid, signal.SIGKILL)
 
         with patch.object(subprocess, "Popen", side_effect=start), \
                 patch.object(os, "killpg", wraps=os.killpg) as kill_group:
-            status, deadline, _ = MATCH.run_match(command, self.directory)
-        self.assertTrue(deadline)
-        self.assertEqual(status, -signal.SIGKILL)
-        self.assertEqual(waits, [3600, 10, None, None])
+            if parent_exit == "Ctrl-C":
+                with self.assertRaises(KeyboardInterrupt):
+                    MATCH.run_match(command, self.directory)
+                self.assertEqual(waits, [3600])
+            else:
+                status, deadline, _ = MATCH.run_match(command, self.directory)
+                self.assertTrue(deadline)
+                self.assertEqual(status, {"stays": -signal.SIGKILL, "grace": 0, "SIGINT": -signal.SIGINT}[parent_exit])
+                self.assertEqual(waits, [3600, 10])
+
         timeout = hang_timeout if kill_group.called else 0
         self.assertTrue(select.select([self.process_output], [], [], timeout)[0],
-                        "descendant kept the pipe open after forced cleanup")
+                        f"grandchild kept the pipe open after {parent_exit}")
         self.assertEqual(self.process_output.read(1), b"")
-        self.assertEqual(signals, [signal.SIGINT])
+        self.assertEqual(signals, [] if parent_exit == "Ctrl-C" else [signal.SIGINT])
+
+    def test_forced_cleanup_kills_the_descendant(self):
+        self.run_process_fixture("stays")
+
+    def test_cleanup_after_parent_exits_during_grace(self):
+        self.run_process_fixture("grace")
+
+    def test_cleanup_after_parent_exits_on_sigint(self):
+        self.run_process_fixture("SIGINT")
+
+    def test_ctrl_c_cleans_up_and_reraises(self):
+        self.run_process_fixture("Ctrl-C")
 
     def test_workflow_leaves_time_for_evidence(self):
         workflow = (ROOT / ".github/workflows/clock-match.yml").read_text()
@@ -268,20 +350,11 @@ class ClockMatchTests(unittest.TestCase):
         self.assertEqual(terminations["interrupted"], 2)
         self.assertEqual(terminations["time_forfeit"], 0)
 
-    def test_evidence_page_describes_pinned_verdicts_and_cleanup(self):
+    def test_evidence_page_lists_recognized_events(self):
         page = (ROOT / "docs/guardrails/behaviour-evidence.md").read_text()
-        section = page.split("## Real-clock match", 1)[1].split("To repeat it locally", 1)[0]
-        self.assertEqual(set(re.findall(r"`(move|[a-z]+_[a-z]+)`", section)), {
-            "tournament_started", "game_started", "move", "game_finished",
-            "tournament_finished", "game_aborted",
-        }, "event inventory differs from the archived runs")
-        self.assertIn('reason `completed`', section)
-        self.assertIn("`game_aborted` event fails", section)
-        self.assertIn("threefold repetition or the fifty-move rule", section)
-        self.assertIn("`Info;`, `Position;`, and `Moves;`", section)
-        self.assertIn("sends `stop` to a started engine", section)
-        self.assertIn("up to ten seconds if the first read yielded no usable `bestmove`", section)
-        self.assertIn("What consumed the full allowance in individual games remains unknown.", section)
+        section = page.split("## Real-clock match", 1)[1]
+        documented = set(re.findall(r"`(move|[a-z]+_[a-z]+)`", section))
+        self.assertEqual(documented, MATCH.EVENT_KINDS)
 
 
 if __name__ == "__main__":

@@ -14,7 +14,9 @@ scripts/check                                                 # run the local ch
 
 The scripts use Python 3.8 or newer for the crate boundary check and fixtures. The pre-commit hook runs the local gate. Rust comes from [rustup](https://rustup.rs). The version is pinned in `rust-toolchain.toml`.
 
-If the RustSec refresh fails, the gate reports the date of the cached snapshot and uses it if its checkout is intact and the later of its HEAD commit time and last successful refresh is at most seven days old. After verifying the refreshed checkout, the gate records the refresh time and HEAD commit beside the checkout in Cargo's `advisory-dbs` directory. A refresh marker applies only to that commit. Missing, malformed or future-dated markers fall back to the commit time. The checkout must configure the exact RustSec HTTPS origin. A global Git rewrite to the same repository over SSH is accepted.
+If the RustSec refresh fails, the gate reports the date of the cached snapshot and uses it if its checkout is intact and the later of its HEAD commit time and last successful refresh is at most seven days old. After verifying the refreshed checkout, the gate records the refresh time and HEAD commit beside the checkout in Cargo's `advisory-dbs` directory. A refresh marker applies only to that commit. Missing, malformed or future-dated markers fall back to the commit time.
+
+The checkout must configure the exact RustSec HTTPS origin. Global and system Git rewrites are accepted when the effective URL still points to the same RustSec repository. The gate rejects rewrites from local, worktree and command-scope config, including settings inherited through local config includes.
 
 Set `CARGO_NET_OFFLINE=true` to check with a usable snapshot and cached Cargo dependencies. CI uses `FISHER_ADVISORY_DB_REFRESH_RESULT` (`success` or `failure`) to pass the outcome of its separate refresh step to `scripts/check`. The gate reads this variable only when `CI=true`. Local runs attempt their own refresh unless offline mode is set.
 

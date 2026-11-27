@@ -22,7 +22,9 @@ verify_checkout() {
     if [ "$(git -C "$db" config --local --get-all remote.origin.url)" != "$rustsec_url" ]; then
         fail "origin must be exactly $rustsec_url ($db)."
     fi
-    # An unscoped config query follows includes and reports where each rewrite came from.
+    # Git reports included settings under the scope that included them.
+    # Reject local, worktree and command-scope rewrites. Global and system
+    # rewrites are allowed when the effective URL still points to RustSec.
     rewrite_scopes=$(git -C "$db" config --show-scope --name-only \
         --get-regexp '^url\..*\.(insteadof|pushinsteadof)$') ||
         [ "$?" -eq 1 ] || fail "cannot check origin rewrites ($db)."

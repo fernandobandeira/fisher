@@ -308,10 +308,10 @@ fn forwards_only_whites_clock_with_black_to_move() -> io::Result<()> {
             &session,
             FinishedDepth {
                 depth,
-                score: Score::Mate { plies: 2, winning: false },
                 nodes,
                 elapsed: Duration::from_millis(2000),
-                principal_variation: vec![forced, mate],
+                terminal_score: None,
+                variations: vec![(Score::Mate { plies: 2, winning: false }, vec![forced, mate])],
             },
             &format!("info depth {depth} multipv 1 score mate -1 nodes {nodes} nps {nps} time 2000 pv h8g8 h6g7\n"),
         )?;

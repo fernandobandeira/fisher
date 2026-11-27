@@ -11,16 +11,18 @@ pub use session::run_session;
 enum Response<'a> {
     IdName(&'a str),
     IdAuthor(&'a str),
+    MultiPvOption,
     UciOk,
     ReadyOk,
     BestMove(UciMove),
     InfoString(&'a str),
-    /// A searched `info` line in Stockfish's spelling: depth, `multipv 1`,
+    /// A searched `info` line in Stockfish's spelling: depth, `multipv`,
     /// score, nodes, nps, time and pv, each optional field written only when
     /// present. A depth of 0 is the response for a root with no legal move and
     /// carries no `multipv`.
     SearchInfo {
         depth: u8,
+        multipv: Option<usize>,
         score: SearchScore,
         nodes: Option<u64>,
         time_ms: Option<u64>,
@@ -54,12 +56,18 @@ impl fmt::Display for Response<'_> {
         match self {
             Self::IdName(name) => write!(output, "id name {name}"),
             Self::IdAuthor(author) => write!(output, "id author {author}"),
+            Self::MultiPvOption => write!(
+                output,
+                "option name {} type spin default 1 min 1 max 255",
+                command::MULTIPV
+            ),
             Self::UciOk => output.write_str("uciok"),
             Self::ReadyOk => output.write_str("readyok"),
             Self::BestMove(uci_move) => write!(output, "bestmove {uci_move}"),
             Self::InfoString(message) => write!(output, "info string {message}"),
             Self::SearchInfo {
                 depth,
+                multipv,
                 score,
                 nodes,
                 time_ms,
@@ -67,8 +75,8 @@ impl fmt::Display for Response<'_> {
                 pv,
             } => {
                 write!(output, "info depth {depth}")?;
-                if *depth > 0 {
-                    output.write_str(" multipv 1")?;
+                if let Some(multipv) = multipv {
+                    write!(output, " multipv {multipv}")?;
                 }
                 output.write_str(" score ")?;
                 write!(output, "{score}")?;
@@ -89,6 +97,15 @@ impl fmt::Display for Response<'_> {
                 }
                 Ok(())
             }
+        }
+    }
+}
+
+impl From<deepening::Score> for SearchScore {
+    fn from(score: deepening::Score) -> Self {
+        match score {
+            deepening::Score::Centipawns(value) => Self::Centipawns(value),
+            deepening::Score::Mate { plies, winning } => Self::Mate { plies, winning },
         }
     }
 }
@@ -184,6 +201,7 @@ mod tests {
         ] {
             let response = Response::SearchInfo {
                 depth: 4,
+                multipv: Some(1),
                 score: SearchScore::Mate { plies, winning },
                 nodes: Some(20),
                 time_ms: None,
@@ -202,6 +220,7 @@ mod tests {
         ];
         let response = Response::SearchInfo {
             depth: 2,
+            multipv: Some(1),
             score: SearchScore::Centipawns(-15),
             nodes: Some(420),
             time_ms: Some(3),
@@ -218,6 +237,7 @@ mod tests {
     fn terminal_search_info_reports_mate_zero() {
         let response = Response::SearchInfo {
             depth: 0,
+            multipv: None,
             score: SearchScore::Mate {
                 plies: 0,
                 winning: false,

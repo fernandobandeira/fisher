@@ -1,0 +1,12 @@
+# D73. Each entry gives the setting followed by a FEN. Both positions were
+# reasoned by hand from the rules and material.
+#
+# Ba8 pins the d5 pawn to Kh1. c4xd5 wins a pawn at depth 1 and comes before
+# Ba8xd5 in legal order. At depth 2 e6xd5 takes the pawn back, so c4xd5 ties
+# quiet king moves that preserve the material. The tie spans places 2 and 3.
+2 B7/8/4p3/3p4/2P5/8/8/K6k w - - 0 1
+#
+# Rd8 pins the d5 pawn to Kd1. c4xd5 wins a pawn at depth 1 and comes before
+# Rd8xd5. At depth 2 e6xd5 takes the pawn back, and quiet king moves again
+# preserve the material. Setting 255 asks for every legal root move.
+255 3R4/8/4p3/3p4/2P5/8/8/K2k4 w - - 0 1

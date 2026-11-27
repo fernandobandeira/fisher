@@ -134,12 +134,18 @@ as it merged in `3a4ce0d`.
   three sessions as `castling-letters/<name>`.
 - Done: the runner's own FEN check, `check_fen_text` in
   `crates/fisher/tests/transcripts.rs`, accepts the complete fields `KK`
-  and `H` and still rejects `KKK` (`the_runner_sets_up_the_fens_fisher_accepts`).
-  The runner sets up the reference position from the same field, which the
+  and `H` and still rejects `KKK`. `the_runner_sets_up_the_fens_fisher_accepts`
+  shows `KK` accepted and `KKK` rejected, and
+  `the_runner_tracks_kingside_castling_spellings` shows `H` accepted. The
+  runner sets up the reference position from the same field, which the
   first command's `{pv}` and `{legal}` need
   (`the_runner_tracks_kingside_castling_spellings`).
 - Changed, not kept: the staging asked to keep the history checker's
-  behaviour, and fisher-4h7 changed it. `position` in
+  behaviour. At staging, `position` in
+  `crates/uci/tests/support/search_history.rs` read the field with shakmaty
+  in standard castling mode and already accepted `K`, `KK` and `H` with 15
+  legal moves before `e1g1` (a review of this staging compiled it
+  unchanged). fisher-4h7 changed it in pull request #114. `position` in
   `crates/uci/tests/support/search_history.rs` now checks the castling
   field itself before shakmaty reads it in standard castling mode. It
   reads only the complete fields `KK` and `H` as `K`, and otherwise allows

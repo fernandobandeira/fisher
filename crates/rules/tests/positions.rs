@@ -154,6 +154,9 @@ fn rejected_fens_identify_the_problem() {
         ("k3k3/8/8/8/8/8/8/4K3 w - - 0 1", "one king for Black"),
         ("4k3/8/8/8/8/8/8/P3K3 w - - 0 1", "pawn on rank"),
         ("P3k3/8/8/8/8/8/8/4K3 w - - 0 1", "pawn on rank"),
+        // Stockfish 19 rejects both boards (fisher-2ou).
+        ("4k3/8/8/8/8/P7/PPPPPPPP/4K2R w K - 0 1", "eight pawns"),
+        ("4k3/pppppppp/p7/8/8/8/8/4K3 b - - 0 1", "eight pawns"),
         ("4k3/4K3/8/8/8/8/8/8 w - - 0 1", "adjacent kings"),
         ("4k3/8/8/8/8/8/8/4K3 w K - 0 1", "home squares"),
         ("4k3/8/8/8/8/8/8/3K3R w K - 0 1", "home squares"),

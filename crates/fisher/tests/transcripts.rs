@@ -16,7 +16,8 @@ use std::{
 };
 
 use shakmaty::{
-    CastlingMode, Chess, EnPassantMode, Move, Position, PositionError, fen::Fen, uci::UciMove,
+    CastlingMode, Chess, Color, EnPassantMode, Move, Position, PositionError, fen::Fen,
+    uci::UciMove,
 };
 use wait_timeout::ChildExt;
 
@@ -71,6 +72,8 @@ mod transcript_documents {
             kingside_k => "castling-letters/kingside-k",
             kingside_kk => "castling-letters/kingside-kk",
             kingside_h => "castling-letters/kingside-h",
+            promoted_marker => "fen-boards/promoted-marker",
+            nine_pawns => "fen-boards/nine-pawns",
             go_parameters => "go-parameters",
             go_depth => "go-depth",
             startpos_depth_two => "startpos-depth-2",
@@ -388,11 +391,19 @@ impl Tracked {
     fn from_fen(fen: &str) -> Result<Self, String> {
         let (halfmove, fullmove) =
             check_fen_text(fen).map_err(|error| format!("invalid FEN {fen:?}: {error}"))?;
-        // fisher does not reject an impossible check or too much material,
-        // so the runner accepts them too.
-        let chess = fen
+        let parsed = fen
             .parse::<Fen>()
-            .map_err(|error| format!("invalid FEN {fen:?}: {error}"))?
+            .map_err(|error| format!("invalid FEN {fen:?}: {error}"))?;
+        let board = &parsed.as_setup().board;
+        for color in Color::ALL {
+            if (board.pawns() & board.by_color(color)).count() > 8 {
+                return Err(format!(
+                    "invalid FEN {fen:?}: a color cannot have more than eight pawns"
+                ));
+            }
+        }
+        // The pawn limit is narrower than shakmaty's material rule.
+        let chess = parsed
             .into_position(CastlingMode::Standard)
             .or_else(PositionError::ignore_too_much_material)
             .or_else(PositionError::ignore_impossible_check)
@@ -450,7 +461,7 @@ fn reference_position<'a>(mut tokens: impl Iterator<Item = &'a str>) -> Result<T
         let mover = movement
             .from()
             .and_then(|square| position.chess.board().color_at(square));
-        if mover == Some(shakmaty::Color::Black) {
+        if mover == Some(Color::Black) {
             position.fullmove = position.fullmove.saturating_add(1);
         }
         position.chess.play_unchecked(movement);
@@ -463,8 +474,8 @@ fn reference_position<'a>(mut tokens: impl Iterator<Item = &'a str>) -> Result<T
 /// Shakmaty also reads missing fields,
 /// pockets, promoted pieces, check counters, `_` between fields, castling by
 /// file, clocks beyond `u32` and a fullmove number of 0. The rules about
-/// kings, pawns, castling pieces and the en passant pawn are the same in both
-/// and are left to shakmaty. Returns the move counters as fisher reads them.
+/// kings, pawns on ranks 1 and 8, castling pieces and the en passant pawn
+/// are left to shakmaty. Returns the move counters as fisher reads them.
 fn check_fen_text(fen: &str) -> Result<(u64, u64), &'static str> {
     let [pieces, color, castling, en_passant, halfmove, fullmove] =
         command_tokens(fen).collect::<Vec<_>>()[..]
@@ -1579,7 +1590,7 @@ fn the_runner_sets_up_the_fens_fisher_accepts() {
         (format!("{board} w KQkq - 0"), true),
         (format!("{board} w qkQK - 01 1"), true),
         (format!("{board} w KQkq - 99999999999 1"), true),
-        // Too much material and an impossible check: fisher does not check.
+        // Extra queens and an impossible check are accepted by fisher.
         ("k7/8/8/8/8/8/PPPPPPPP/QQQQQQQK w - - 0 1".to_owned(), true),
         ("4k3/8/3N1N2/8/8/8/8/4K3 b - - 0 1".to_owned(), true),
         (format!("{board} w KQkq - 0 0"), false),
@@ -1608,6 +1619,20 @@ fn the_runner_sets_up_the_fens_fisher_accepts() {
             accepted,
             "{fen}"
         );
+    }
+}
+
+#[test]
+fn the_runner_rejects_invalid_fen_boards() {
+    // Stockfish 19 verdicts recorded in expectations for fisher-2ou.
+    for (fen, accepted) in [
+        ("4k3/8/8/8/8/8/8/4K2R~ w K - 0 1", false),
+        ("4k3/8/8/8/8/8/8/R~3K3 w Q - 0 1", false),
+        ("4k3/8/8/8/8/P7/PPPPPPPP/4K2R w K - 0 1", false),
+        ("4k3/pppppppp/p7/8/8/8/8/4K3 b - - 0 1", false),
+        ("4k3/8/8/8/8/8/PPPPPPPP/4K2R w K - 0 1", true),
+    ] {
+        assert_eq!(Tracked::from_fen(fen).is_ok(), accepted, "{fen}");
     }
 }
 

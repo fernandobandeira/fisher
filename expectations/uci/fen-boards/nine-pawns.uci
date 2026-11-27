@@ -1,0 +1,50 @@
+# Staged by fisher-2ou on 2026-11-27. See README.md in this directory.
+# Rejection from Stockfish 19 (sf_19, edb0d9d), Homebrew arm64 bottle,
+# probed 2026-11-27: https://github.com/official-stockfish/Stockfish/releases/tag/sf_19
+# src/position.cpp lines 279-283 reject a board on which either color has
+# more than eight pawns: "Unsupported position. WHITE has more than 8 pawns."
+# Over UCI fisher answers a rejected position as the owner decided in
+# rejected-position.uci: one info string diagnostic, the earlier position kept.
+# Stockfish instead exits after the error; fisher keeps running.
+# The earlier position: Black to move, h8g8 is the sole legal move.
+> position fen 7k/8/5K1Q/8/8/8/8/8 b - - 0 1
+# Stockfish 19 rejects this board: "WHITE has more than 8 pawns."
+# Owner decision for rejected position: one diagnostic. The wording is open.
+> position fen 4k3/8/8/8/8/P7/PPPPPPPP/4K2R w K - 0 1
+< info string {message}
+> isready
+# UCI isready/readyok.
+< readyok
+# Stockfish 19 rejects this board: "BLACK has more than 8 pawns."
+# Owner decision for rejected position: one diagnostic. The wording is open.
+> position fen 4k3/pppppppp/p7/8/8/8/8/4K3 b - - 0 1
+< info string {message}
+> isready
+# UCI isready/readyok.
+< readyok
+> go depth 1
+# The earlier position is still in place. Rules 2 and 3 score the horizon by
+# material: Black has a king against White's queen (cp -900). Rule 7 and the
+# depth-1 totals in expectations/README.md: one legal move, so nodes 1, as in
+# rejected-position.uci.
+< info depth 1 multipv 1 score cp -900 nodes 1 nps {nps} time {time} pv {pv}
+# Owner-approved example in rejected-position.uci: the original position
+# still has its sole legal move. On the black board Black would have pawn moves.
+< bestmove h8g8
+# The control: the same white board with eight pawns. Stockfish 19 accepts it
+# and prints Fen: 4k3/8/8/8/8/8/PPPPPPPP/4K2R w K - 0 1.
+> position fen 4k3/8/8/8/8/8/PPPPPPPP/4K2R w K - 0 1
+> isready
+# UCI isready/readyok, with no diagnostic before it.
+< readyok
+> go depth 1
+# Rule 7 and the depth-1 totals: Stockfish 19 go perft 1 counts 21 legal
+# moves (16 pawn pushes, h1f1, h1g1, e1d1, e1f1, e1g1). Rule 2: no move
+# captures, so every move leaves White eight pawns and a rook up (cp 1300).
+# The move stays open: rule 6 picks by the order of legal moves, which no
+# expectation fixes (D48).
+< info depth 1 multipv 1 score cp 1300 nodes 21 nps {nps} time {time} pv {pv}
+< bestmove {legal}
+# UCI quit.
+> quit
+! exit

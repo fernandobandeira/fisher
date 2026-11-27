@@ -785,6 +785,54 @@ fn a_joined_en_passant_field_is_rejected_by_the_history_checker() {
 }
 
 #[test]
+fn the_history_checker_rejects_promoted_piece_markers() {
+    // Stockfish 19 rejects these boards (fisher-2ou).
+    for fen in [
+        "4k3/8/8/8/8/8/8/4K2R~ w K - 0 1",
+        "4k3/8/8/8/8/8/8/R~3K3 w Q - 0 1",
+    ] {
+        check_fen_board_rejection(fen);
+    }
+}
+
+#[test]
+fn the_history_checker_rejects_more_than_eight_pawns_of_a_color() {
+    // Stockfish 19 rejects these boards and accepts the control (fisher-2ou).
+    for fen in [
+        "4k3/8/8/8/8/P7/PPPPPPPP/4K2R w K - 0 1",
+        "4k3/pppppppp/p7/8/8/8/8/4K3 b - - 0 1",
+    ] {
+        check_fen_board_rejection(fen);
+    }
+    accepts(&[
+        Command("position fen 4k3/8/8/8/8/8/PPPPPPPP/4K2R w K - 0 1"),
+        READY,
+        READY_OK,
+        QUIT,
+    ]);
+}
+
+fn check_fen_board_rejection(fen: &str) {
+    let command = format!("position fen {fen}");
+    accepts(&[
+        POSITION_A,
+        Command(&command),
+        READY,
+        Response("info string position rejected: invalid FEN\n"),
+        READY_OK,
+        GO,
+        best_move_report(A),
+        MOVE_A,
+        QUIT,
+    ]);
+    rejects(
+        7,
+        "missing position rejection",
+        &[POSITION_A, Command(&command), READY, READY_OK, QUIT],
+    );
+}
+
+#[test]
 fn kingside_castling_spellings_agree_with_the_history_checker() -> io::Result<()> {
     // Stockfish 19 printed these positions for all three fields in fisher-4h7.
     for field in ["K", "KK", "H"] {

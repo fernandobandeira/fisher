@@ -16,7 +16,8 @@ The 15 searched transcripts that expect an `info` line come from fisher-2aj.2.
 ## UCI transcripts
 
 The runner plays a session under `uci/` when a transcript test names it.
-Transcript tests name the `whitespace/` and `castling-letters/` sessions too.
+Transcript tests also name the `whitespace/`, `castling-letters/` and
+`fen-boards/` sessions.
 Each `.uci` file describes one session with a fresh fisher process. Read
 the records top to bottom. Blank lines and lines starting with `#` are
 comments. The header gives the sources and date. A comment above a command
@@ -409,3 +410,9 @@ staged on 2026-11-27 before the engine changes and activated by fisher-38w
 in pull request #125. They follow Stockfish 19, which consumes whatever
 token stands in the name position. Transcript tests play each session by
 naming it as `setoption-name/<name>`.
+
+## Boards a FEN may hold
+
+fisher-2ou staged the [sessions for a promoted-piece marker and nine pawns](uci/fen-boards/README.md)
+on 2026-11-27 and activated them in pull request #128. Transcript tests
+name them as `fen-boards/promoted-marker` and `fen-boards/nine-pawns`.

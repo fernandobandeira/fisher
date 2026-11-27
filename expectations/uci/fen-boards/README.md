@@ -1,9 +1,7 @@
 # A promoted-piece marker and nine pawns in a FEN board
 
-Staged on 2026-11-27 by fisher-2ou. No test reads these sessions yet: they
-sit outside `uci/`, as the [cutoff sessions](../uci-cutoff/README.md) did
-before fisher-4yn.2 moved them, because every document under `uci/` must
-be played or listed as staged (fisher-my3).
+Staged on 2026-11-27 by fisher-2ou and activated in pull request #128.
+Both sessions moved unchanged into `uci/fen-boards/`.
 
 ## The two boards
 
@@ -42,9 +40,9 @@ from PATH as `strength/measure` selects it. Its first line of output is
   Stockfish rejects both boards, so fisher rejects both.
 - **A rejected position** gets one `info string` diagnostic and leaves the
   earlier position in place, under the owner decision in
-  [`rejected-position.uci`](../uci/rejected-position.uci) and fisher-9vk.
+  [`rejected-position.uci`](../rejected-position.uci) and fisher-9vk.
   Stockfish exits instead; fisher keeps running, as the
-  [castling-letter sessions](../uci/castling-letters/README.md) record.
+  [castling-letter sessions](../castling-letters/README.md) record.
 - **The boards fisher-l7f.5 requires `rules::Position::from_fen` to reject**
   (a color without exactly one king, a pawn on rank 1 or 8, adjacent kings,
   castling rights without their king and rook) are not an exhaustive list.
@@ -87,29 +85,17 @@ The second row shows that the runner needs its own change.
 
 ## Activation in fisher-2ou
 
-The implementer changes three things, then moves the two sessions
-unchanged into `expectations/uci/fen-boards/` and registers them as
-transcript tests named `fen-boards/promoted-marker` and
-`fen-boards/nine-pawns`.
+The transcript tests play both sessions as `fen-boards/promoted-marker`
+and `fen-boards/nine-pawns`.
 
-1. **Engine.** Reject a board on which either color has more than eight
-   pawns. Today `rules::Position::from_fen` accepts it. The `~` board is
-   already rejected; keep it so.
-2. **Transcript runner** (`crates/fisher/tests/transcripts.rs`). `Tracked::from_fen`
-   calls `ignore_too_much_material`, so its reference accepts nine pawns.
-   It must reject them as fisher will. Shakmaty's `TOO_MUCH_MATERIAL`
-   also counts promoted pieces by bishop color, which is not Stockfish's
-   rule and not part of this ticket, so the runner cannot simply stop
-   ignoring it.
-3. **History checker** (`crates/uci/tests/support/search_history.rs`).
-   `fen_position` passes the board to shakmaty, which reads `~` as a
-   Crazyhouse promoted piece and accepts it. It must reject any `~` in the
-   board. It already rejects nine pawns. The expected verdict for every
-   board above is rejection, and acceptance for the control.
+- The engine rejects a FEN with more than eight pawns of either color.
+  The existing piece parser rejects a promoted-piece marker.
+- The transcript runner checks the pawn count and keeps
+  `ignore_too_much_material` for shakmaty's broader material rule.
+- The UCI history checker rejects a promoted-piece marker before shakmaty
+  parses the FEN. Shakmaty already rejects nine pawns.
 
-Other boards on which Stockfish, shakmaty and fisher may differ, such as
-Stockfish's `Too many pieces for WHITE.` (more extra pieces than missing
-pawns) and shakmaty's impossible check, are out of scope here.
+Other FEN validation differences are tracked in fisher-qy2.
 
 <details>
 <summary>Stockfish 19 input and output</summary>

@@ -72,6 +72,8 @@ mod transcript_documents {
             kingside_k => "castling-letters/kingside-k",
             kingside_kk => "castling-letters/kingside-kk",
             kingside_h => "castling-letters/kingside-h",
+            promoted_marker => "fen-boards/promoted-marker",
+            nine_pawns => "fen-boards/nine-pawns",
             go_parameters => "go-parameters",
             go_depth => "go-depth",
             startpos_depth_two => "startpos-depth-2",

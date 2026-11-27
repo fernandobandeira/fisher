@@ -3,13 +3,16 @@
 
 import argparse
 from collections import Counter, defaultdict
+from contextlib import redirect_stderr, redirect_stdout
 from hashlib import sha256
+from io import StringIO
 import json
 import re
 from pathlib import Path
 import subprocess
 import sys
 from tempfile import TemporaryDirectory, mkdtemp
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parent.parent
 CONFIG = ".cargo/mutation-gate.json"
@@ -171,19 +174,20 @@ def reviewed_results(results):
         }, outcome, mutation_site(mutant["diff"])
 
 
-def test_merge_parts():
-    def write_part(path, mutant):
-        path.mkdir(exist_ok=True)
-        (path / "mutants.json").write_text(json.dumps([{**mutant, "diff": "diff\n"}]))
-        (path / "change.diff").write_text("diff\n")
-        (path / "outcomes.json").write_text(json.dumps({
-            "end_time": "finished",
-            "outcomes": [
-                {"scenario": "Baseline", "summary": "Success"},
-                {"scenario": {"Mutant": mutant}, "summary": "CaughtMutant", "diff_path": "change.diff"},
-            ],
-        }))
+def write_test_part(path, mutant, summary="CaughtMutant"):
+    path.mkdir(exist_ok=True)
+    (path / "mutants.json").write_text(json.dumps([{**mutant, "diff": "diff\n"}]))
+    (path / "change.diff").write_text("diff\n")
+    (path / "outcomes.json").write_text(json.dumps({
+        "end_time": "finished",
+        "outcomes": [
+            {"scenario": "Baseline", "summary": "Success"},
+            {"scenario": {"Mutant": mutant}, "summary": summary, "diff_path": "change.diff"},
+        ],
+    }))
 
+
+def test_merge_parts():
     def expect_failure(directory, expected, message):
         try:
             merge_parts(directory, 2, expected)
@@ -196,13 +200,28 @@ def test_merge_parts():
         directory = Path(temporary)
         first, second = {"name": "first mutant"}, {"name": "second mutant"}
         expected = [{**mutant, "diff": "diff\n"} for mutant in (first, second)]
-        write_part(directory / "mutation-part-0", first)
+        write_test_part(directory / "mutation-part-0", first)
         expect_failure(directory, expected, "Missing mutation parts: mutation-part-1")
-        write_part(directory / "mutation-part-1", first)
+        write_test_part(directory / "mutation-part-1", first)
         expect_failure(directory, expected, "duplicate mutants ['first mutant']")
-        write_part(directory / "mutation-part-1", second)
+        write_test_part(directory / "mutation-part-1", second)
         expect_failure(directory, [*expected, {"name": "third mutant"}], "missing mutants ['third mutant']")
         assert [mutant for mutant, _ in merge_parts(directory, 2, expected)] == expected
+
+
+def test_shard_notice():
+    with TemporaryDirectory() as temporary:
+        write_test_part(Path(temporary) / "mutants.out", {"name": "planted mutant"}, "MissedMutant")
+        args = ["--shard", "0/2", "--output", temporary]
+        stderr = StringIO()
+        with (patch(__name__ + ".check_version"),
+              patch.object(subprocess, "run", return_value=subprocess.CompletedProcess([], 2)),
+              redirect_stdout(StringIO()), redirect_stderr(stderr)):
+            status = main(args)
+        assert status == 0, stderr.getvalue()
+        notice = stderr.getvalue()
+        assert "gives no verdict" in notice, f"Missing verdict notice in {notice!r}"
+        assert "scripts/check-mutants without arguments" in notice, notice
 
 
 def self_test():
@@ -245,6 +264,7 @@ def self_test():
     assert any("timed out" in problem for problem in
                reconcile([(mutant, "timeout", site)], reviewed)[1])
     test_merge_parts()
+    test_shard_notice()
 
 
 def check_version():
@@ -299,7 +319,7 @@ def check_results(results, log_directory):
     return int(bool(problems))
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--jobs", type=int, default=4)
     parser.add_argument("--output", type=Path, default=ROOT / "target/mutation")
@@ -308,7 +328,7 @@ def main():
     mode.add_argument("--shard", help="Test one zero-based k/n shard and write its report to --output")
     mode.add_argument("--merge", type=Path, help="Reconcile the downloaded mutation parts in this directory")
     parser.add_argument("--parts", type=int, help="Number of parts expected by --merge")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     if (args.merge is not None) != (args.parts is not None) or (args.parts is not None and args.parts < 1):
         parser.error("--merge requires a positive --parts, and --parts requires --merge")
     if args.self_test:
@@ -326,6 +346,11 @@ def main():
             return check_results(results, "the mutation-part artifacts under log/")
         report, results = run_mutants(args)
         if args.shard is not None:
+            print(
+                "This part of the mutation check gives no verdict. "
+                "Run scripts/check-mutants without arguments for a verdict.",
+                file=sys.stderr,
+            )
             return 0
         return check_results(results, report / "log")
     except (OSError, subprocess.CalledProcessError, ValueError, KeyError) as error:

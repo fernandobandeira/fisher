@@ -1,8 +1,7 @@
 # Whitespace between the tokens of a command
 
-Staged by fisher-82i on 2026-11-26 for fisher-b0b. No test reads these
-sessions yet: the transcript runner selects sessions by name directly in
-`expectations/uci/`, and this folder sits below it. fisher-b0b activates them.
+Staged by fisher-82i on 2026-11-26. The sessions stay staged until
+fisher-b0b adds transcript tests that name them as `whitespace/<name>`.
 
 | Session | What it covers |
 |---|---|

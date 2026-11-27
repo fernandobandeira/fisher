@@ -51,7 +51,8 @@ fn node_rate_uses_reported_milliseconds() {
 
 #[test]
 fn search_info_uses_reported_elapsed_time() -> io::Result<()> {
-    assert_search_info_time(3250, 3, 68_867_666)
+    // fisher-r6y D41 rounds elapsed milliseconds down.
+    assert_search_info_time(3750, 3, 68_867_666)
 }
 
 #[test]

@@ -237,7 +237,7 @@
         {"after_send": 3, "events": [[0, "stdout", "bestmove e2e4"]]},
         {"after_send": 4, "events": [[0, "eof", null], [0, "exit", 0]]}
       ],
-      "expected": {"verdict": "accept", "reason": "The required reply arrives inside the read bound."}
+      "expected": {"verdict": "accept", "reason": "The required reply arrives inside the read timeout."}
     },
     {
       "name": "delimiter-at-5100ms",
@@ -247,7 +247,7 @@
         {"after_send": 3, "events": [[0, "stdout", "bestmove e2e4"]]},
         {"after_send": 4, "events": [[0, "eof", null], [0, "exit", 0]]}
       ],
-      "expected": {"verdict": "run-reject", "reason": "The read bound expires before the required reply."}
+      "expected": {"verdict": "run-reject", "reason": "The read timeout expires before the required reply."}
     },
     {
       "name": "flood-without-delimiter",
@@ -321,7 +321,7 @@
         {"after_send": 3, "events": [[0, "stdout", "bestmove e2e4"]]},
         {"after_send": 4, "events": [[0, "eof", null], [0, "exit", 0]]}
       ],
-      "expected": {"verdict": "run-reject", "reason": "The read bound expires despite a matching line every 100 ms."}
+      "expected": {"verdict": "run-reject", "reason": "The read timeout expires despite a matching line every 100 ms."}
     },
     {
       "name": "mandatory-depth-before-repetition",
@@ -374,12 +374,12 @@
       "expected": {"verdict": "run-reject", "reason": "The first nonmatch before exit must be stdout EOF."}
     },
     {
-      "name": "separate-exit-status-bound",
+      "name": "separate-exit-status-timeout",
       "transcript": ["> go infinite", "> quit", "<* info depth {depth} score {score} nodes {nodes}", "! exit"],
       "script": [
         {"after_send": 2, "events": [[0, "stdout", "info depth 1 score cp 0 nodes 20"], [4900, "eof", null], [5100, "exit", 0]], "clock": "observation"}
       ],
-      "expected": {"verdict": "accept", "reason": "EOF arrives within the read bound and status 0 arrives within the separate exit-status bound."}
+      "expected": {"verdict": "accept", "reason": "EOF arrives within the read timeout and status 0 arrives within the separate exit timeout."}
     },
     {
       "name": "two-repetitions",

@@ -54,7 +54,13 @@ def artifact_names(repository, run):
     pages = github_json(
         "--paginate", "--slurp", f"repos/{repository}/actions/runs/{run}/artifacts?per_page=100",
     )
-    return {artifact["name"] for page in pages for artifact in page["artifacts"]}
+    artifacts = [artifact for page in pages for artifact in page["artifacts"]]
+    distinct_ids = {artifact["id"] for artifact in artifacts}
+    totals = {page["total_count"] for page in pages}
+    if totals != {len(distinct_ids)}:
+        raise ValueError(f"Inconsistent artifact inventory for run {run}: "
+                         f"GitHub reported totals {sorted(totals)}, found {len(distinct_ids)} distinct IDs.")
+    return {artifact["name"] for artifact in artifacts}
 
 
 def download_artifacts(repository, run, names, directory):
@@ -85,6 +91,8 @@ def range_artifacts(plan, attempt, listed):
 
 def collect_artifacts(plan, repository, attempt, directory, listed):
     names = range_artifacts(plan, attempt, listed)
+    if attempt != "1" and not names:
+        raise ValueError(f"Attempt {attempt} has no playing artifacts. Dispatch a replay of run {plan['run']}.")
     source_name = f"sprt-source-{attempt}"
     if plan["source_run"]:
         if source_name not in listed:

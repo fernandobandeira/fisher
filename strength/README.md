@@ -268,14 +268,16 @@ this workflow merged.
 
 When the record job finishes handling a judge result, it prints a row
 for pass, fail, no verdict yet, inconclusive, or void. Missing or unreadable games give a void row.
-A failed transfer of a listed artifact fails the job without a row.
+An inconsistent GitHub artifact inventory or a failed transfer of a
+listed artifact fails the job without a row.
 An invalid request, judge refusal, or unforeseen error also fails the job.
 
 If the record job failed or was cancelled before printing, dispatch a
 replay of the original run. The replay can reconstruct the cumulative
 games from the saved plan, the uploaded ranges, and any saved earlier
-games. “Re-run failed jobs” would look for playing artifacts from its
-new attempt and cannot reuse those from the original attempt.
+games. “Re-run failed jobs” looks for playing artifacts from its new
+attempt. If it finds none it stops without a row and directs you to
+dispatch a replay.
 
 | Fields | Meaning |
 |---|---|

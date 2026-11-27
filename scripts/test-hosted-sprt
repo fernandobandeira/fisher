@@ -149,6 +149,7 @@ class HostedSprt(unittest.TestCase):
         judge = Mock(return_value=report([Pair(2, ("normal", "normal"))]))
         for changes, message in (
             ({"count": 2}, "immediately after"),
+            ({"first": 1}, "immediately after"),
             ({"measured": "c" * 40}, "same original engine revisions"),
             ({"opponent": "c" * 40}, "same original engine revisions"),
             ({"test": "no-loss"}, "same test"),
@@ -208,6 +209,9 @@ class HostedSprt(unittest.TestCase):
             "event": "workflow_dispatch", "head_sha": "c" * 40,
             "repository": {"full_name": "owner/fisher"}, "head_repository": {"full_name": "owner/fisher"},
         }
+        saved = self.source / "sprt-record"
+        saved.mkdir()
+        (saved / "record.tsv").touch()
         for changes in (
             {"id": 121}, {"repository": {"full_name": "owner/other"}},
             {"head_repository": {"full_name": "other/fisher"}},
@@ -215,11 +219,13 @@ class HostedSprt(unittest.TestCase):
             {"head_branch": "trial"},
         ):
             with self.subTest(changes=changes), patch.dict(
-                hosted, github_json=Mock(return_value=dict(info, **changes)), artifact_names=Mock(),
-            ):
+                hosted, github_json=Mock(return_value=dict(info, **changes)),
+                artifact_names=Mock(return_value={"sprt-record"}), download_artifacts=Mock(),
+            ), patch("subprocess.run", return_value=CompletedProcess([], 0)) as ancestor:
                 with self.assertRaisesRegex(ValueError, "default branch"):
                     hosted["fetch_source"]("owner/fisher", "122", "main", self.source)
                 hosted["artifact_names"].assert_not_called()
+                ancestor.assert_not_called()
         with patch.dict(hosted, github_json=Mock(return_value=info)), patch(
             "subprocess.run", return_value=CompletedProcess([], 0),
         ) as ancestor:
@@ -234,15 +240,62 @@ class HostedSprt(unittest.TestCase):
         plan = dict(self.plan, ranges=[{"first": 1, "count": 2}])
         collect = hosted["collect_artifacts"]
         with patch("subprocess.run") as download:
-            collect(plan, "owner/fisher", "2", self.source, {"sprt-1-1"})
-            download.assert_not_called()
             with self.assertRaisesRegex(ValueError, r"sprt-2-1.*did not arrive"):
                 collect(plan, "owner/fisher", "2", self.source, {"sprt-2-1"})
             download.side_effect = CalledProcessError(1, "gh download")
             with self.assertRaisesRegex(ValueError, r"transfer failed.*sprt-2-1"):
                 collect(plan, "owner/fisher", "2", self.source, {"sprt-2-1"})
-            with self.assertRaisesRegex(ValueError, r"transfer failed.*sprt-source-2"):
-                collect(dict(plan, source_run="122"), "owner/fisher", "2", self.source, {"sprt-source-2"})
+            with self.assertRaisesRegex(ValueError, r"transfer failed.*sprt-source-1"):
+                collect(dict(plan, source_run="122"), "owner/fisher", "1", self.source, {"sprt-source-1"})
+
+    def test_inventory_requires_all_distinct_ids_and_agreeing_totals(self):
+        artifacts = [{"id": i, "name": f"sprt-1-{1 + i * 24}"} for i in range(7)]
+        artifacts.extend([{"id": 7, "name": "sprt-1-169"}, {"id": 8, "name": "sprt-record"}])
+        for pages in (
+            [{"total_count": 9, "artifacts": artifacts[:7] + artifacts[8:]}],
+            [{"total_count": 9, "artifacts": artifacts[:7] + artifacts[8:] + artifacts[:1]}],
+            [{"total_count": 8, "artifacts": artifacts[:4]}, {"total_count": 9, "artifacts": artifacts[4:]}],
+            [],
+        ):
+            with self.subTest(pages=pages), patch.dict(hosted, github_json=Mock(return_value=pages)):
+                with self.assertRaisesRegex(ValueError, "Inconsistent artifact inventory for run 123"):
+                    hosted["artifact_names"]("owner/fisher", "123")
+        pages = [{"total_count": 9, "artifacts": part} for part in (artifacts[:4], artifacts[4:])]
+        with patch.dict(hosted, github_json=Mock(return_value=pages)):
+            self.assertEqual({artifact["name"] for artifact in artifacts},
+                             hosted["artifact_names"]("owner/fisher", "123"))
+
+    def test_rerun_without_its_own_playing_artifacts_refuses_collection(self):
+        plan = dict(self.plan, ranges=[{"first": 1, "count": 2}])
+        with patch.dict(hosted, download_artifacts=Mock()):
+            with self.assertRaisesRegex(ValueError, "Dispatch a replay of run 123"):
+                hosted["collect_artifacts"](plan, "owner/fisher", "2", self.source, {"sprt-1-1"})
+            hosted["download_artifacts"].assert_not_called()
+
+    def test_first_attempt_without_any_artifacts_records_void(self):
+        plan = dict(self.plan, ranges=[{"first": 1, "count": 2}])
+        target = self.directory / "record"
+        args = argparse.Namespace(plan=json.dumps(plan), source=self.source, shards=self.directory, output=target)
+        environment = {
+            "GITHUB_RUN_ATTEMPT": "1", "GITHUB_SERVER_URL": "https://github.com",
+            "GITHUB_REPOSITORY": "owner/fisher",
+        }
+
+        def replay(plan, pgn, first, count, directory, previous):
+            try:
+                read_range(pgn, ["first", "second"], first, plan["measured"], plan["opponent"])
+            except UnreadableGames as error:
+                return report([], 1, f"void ({error})")
+            self.fail("The judge accepted a PGN without games.")
+
+        pages = [{"total_count": 0, "artifacts": []}]
+        with patch.dict(hosted, github_json=Mock(return_value=pages), judge=replay), patch.dict(
+            os.environ, environment,
+        ), redirect_stdout(StringIO()):
+            listed = hosted["artifact_names"]("owner/fisher", "123")
+            hosted["collect_artifacts"](plan, "owner/fisher", "1", self.directory, listed)
+            hosted["record_run"](args)
+        self.assertIn("\tvoid\tMissing game at opening 1", (target / "record.tsv").read_text())
 
     def test_replay_recovers_from_uploaded_inputs_when_no_record_was_printed(self):
         earlier = dict(self.plan, run="122", source_run="121", first=3, count=2,

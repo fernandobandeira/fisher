@@ -3,7 +3,7 @@
 
 import argparse
 from collections import Counter, defaultdict
-from contextlib import redirect_stderr, redirect_stdout
+from contextlib import ExitStack, redirect_stderr, redirect_stdout
 from hashlib import sha256
 from io import StringIO
 import json
@@ -214,9 +214,11 @@ def test_shard_notice():
         write_test_part(Path(temporary) / "mutants.out", {"name": "planted mutant"}, "MissedMutant")
         args = ["--shard", "0/2", "--output", temporary]
         stderr = StringIO()
-        with (patch(__name__ + ".check_version"),
-              patch.object(subprocess, "run", return_value=subprocess.CompletedProcess([], 2)),
-              redirect_stdout(StringIO()), redirect_stderr(stderr)):
+        with ExitStack() as stack:
+            stack.enter_context(patch(__name__ + ".check_version"))
+            stack.enter_context(patch.object(subprocess, "run", return_value=subprocess.CompletedProcess([], 2)))
+            stack.enter_context(redirect_stdout(StringIO()))
+            stack.enter_context(redirect_stderr(stderr))
             status = main(args)
         assert status == 0, stderr.getvalue()
         notice = stderr.getvalue()

@@ -5,6 +5,7 @@ Usage: scripts/check-clock-match FASTCHESS NEW_EVIDENCE_DIRECTORY
 Install the pinned PGN replay library and its build tool as in .github/workflows/clock-match.yml.
 """
 import collections
+import contextlib
 import io
 import json
 import os
@@ -29,21 +30,36 @@ ENGINE = r"fisher-[ab]"
 PAIR = rf"\({ENGINE} vs {ENGINE}\)"
 NUMBER = r"-?(?:\d+(?:\.\d+)?|inf|nan)"
 IDS = set(range(1, GAME_COUNT + 1))
-REPETITION = re.compile(rf"Warning; PV continues after threefold repetition - move {MOVE} from {ENGINE}")
+PV_WARNING = re.compile(
+    rf"Warning; PV continues after (threefold repetition|fifty-move rule) - move {MOVE} from {ENGINE}"
+)
+WARNING_COUNTS = {"threefold repetition": "repetition_warnings", "fifty-move rule": "fifty_move_warnings"}
+DIAGNOSTICS = tuple(map(re.compile, (
+    r"Info; info depth \d+ multipv \d+ score (?:cp|mate) -?\d+ "
+    rf"nodes \d+ nps \d+ time \d+ pv {MOVE}(?: {MOVE})*",
+    r"Position; fen ([prnbqkPRNBQK1-8/]+ [wb] (?:[KQkq]+|-) (?:[a-h][36]|-) \d+ \d+)",
+    rf"Moves; (?:{MOVE}(?: {MOVE})*)?",
+)))
+LOSS_ON_TIME = re.compile(r"(?:White|Black) loses on time \(\d+ms overrun\)")
+NORMAL_FINISH = re.compile(
+    r"(?:White|Black) mates|Draw by (?:3-fold repetition|insufficient mating material|fifty moves rule|stalemate)"
+)
+CONSOLE_FINISH = re.compile(rf"Finished game (\d+) {PAIR}: ({RESULT}) \{{([^{{}}]+)\}}")
+PASSIVE_EVENTS = {"tournament_started", "game_started", "move"}
+GAME_ABORTED = "game_aborted"
+GAME_FINISHED = "game_finished"
+TOURNAMENT_FINISHED = "tournament_finished"
+EVENT_KINDS = PASSIVE_EVENTS | {GAME_ABORTED, GAME_FINISHED, TOURNAMENT_FINISHED}
 RESULT_MARKER = re.compile(rf"(?:^|\s)({RESULT})$")
+PGN_HEADERS = re.compile(r"(?:\[[^\n]*\]\n|[ \t]*\n)*")
+RESULT_HEADER = re.compile(r'(?m)^\[Result[ \t]+"([^"\n]*)"\][ \t]*$')
+PGN_TOKENS = re.compile(r"(?P<comment>\{[^}]*\})|[^\s{}]+|[{}]")
 # These are the console shapes reviewed for the pinned fastchess release.
 # Review the list when deliberately changing the pin. Everything else fails.
 CONSOLE = tuple(map(re.compile, (
     r"",
     r"-{50}",
     rf"Started game \d+ of {GAME_COUNT} {PAIR}",
-    rf"Finished game \d+ {PAIR}: {RESULT} \{{(?:White mates|Black mates|"
-    r"Draw by (?:3-fold repetition|insufficient mating material|fifty moves rule|stalemate)|"
-    r"(?:White|Black) loses on time \(\d+ms overrun\))\}",
-    r"Info; info depth \d+ multipv \d+ score (?:cp|mate) -?\d+ "
-    rf"nodes \d+ nps \d+ time \d+ pv {MOVE}(?: {MOVE})*",
-    rf"Moves;(?: {MOVE})*",
-    r"Position; fen [prnbqkPRNBQK1-8/]+ [wb] (?:[KQkq]+|-) (?:[a-h][36]|-) \d+ \d+",
     r"Results of fisher-a vs fisher-b \(10/1, NULL, NULL, openings\.epd\):",
     rf"Elo: {NUMBER} \+/- {NUMBER}, nElo: {NUMBER} \+/- {NUMBER}",
     rf"LOS: {NUMBER} %, DrawRatio: {NUMBER} %, PairsRatio: {NUMBER}",
@@ -55,7 +71,6 @@ CONSOLE = tuple(map(re.compile, (
     r"Finished match",
     r"Total Time: \d+:\d{2}:\d{2} \(hours:minutes:seconds\)",
 )))
-ANSI_COLOR = re.compile(r"\x1b\[[0-9;]*m")
 
 
 def runner_cores():
@@ -64,33 +79,97 @@ def runner_cores():
     return os.cpu_count() or 1
 
 
+def kill_match_group(process):
+    with contextlib.suppress(ProcessLookupError):
+        os.killpg(process.pid, signal.SIGKILL)
+
+
 def run_match(command, evidence):
     started = time.monotonic()
     deadline_reached = False
     with (evidence / "fastchess.log").open("w") as stream:
-        with subprocess.Popen(command, cwd=evidence, stdout=stream, stderr=subprocess.STDOUT) as process:
+        with subprocess.Popen(
+            command, cwd=evidence, stdout=stream, stderr=subprocess.STDOUT, start_new_session=True,
+        ) as process:
             try:
-                process.wait(timeout=MATCH_SECONDS)
-            except subprocess.TimeoutExpired:
-                deadline_reached = True
-                process.send_signal(signal.SIGINT)
                 try:
-                    process.wait(timeout=STOP_SECONDS)
+                    process.wait(timeout=MATCH_SECONDS)
                 except subprocess.TimeoutExpired:
-                    process.kill()
+                    deadline_reached = True
+                    process.send_signal(signal.SIGINT)
+                    with contextlib.suppress(subprocess.TimeoutExpired):
+                        process.wait(timeout=STOP_SECONDS)
+                    kill_match_group(process)
                     process.wait()
+            except KeyboardInterrupt:
+                kill_match_group(process)
+                raise
     return process.returncode, deadline_reached, time.monotonic() - started
+
+
+def finish_kind(reason):
+    if isinstance(reason, str):
+        if NORMAL_FINISH.fullmatch(reason):
+            return "normal"
+        if LOSS_ON_TIME.fullmatch(reason):
+            return "time_forfeit"
+    return "abnormal"
+
+
+def valid_diagnostics(lines):
+    if len(lines) != len(DIAGNOSTICS):
+        return False
+    info, position, moves = (shape.fullmatch(line) for shape, line in zip(DIAGNOSTICS, lines))
+    if not (info and position and moves):
+        return False
+    fen = position[1]
+    if not fen.isascii():
+        return False
+    try:
+        board = chess.Board(fen)
+    except ValueError:
+        return False
+    return board.is_valid() and board.fen(en_passant="fen") == fen
+
+
+def unexpected_output(report, raw):
+    report["unexpected"] += 1
+    if len(report["unexpected_examples"]) < 5:
+        report["unexpected_examples"].append(raw)
 
 
 def read_log(path, report):
     terminations = collections.Counter()
     events = {}
     finish_reasons = []
+    finished_kinds = {}
+    console_finishes = {}
+    losses_on_time = set()
 
-    for raw in path.read_text(errors="replace").split("\n"):
-        line = ANSI_COLOR.sub("", raw).rstrip("\r")
-        if REPETITION.fullmatch(line):
-            report["repetition_warnings"] += 1
+    lines = path.read_text(errors="replace").split("\n")
+    next_line = 0
+    for index, raw in enumerate(lines):
+        if index < next_line:
+            continue
+        # The pinned logger prints weekly diagnostic and console lines without colour.
+        line = raw.rstrip("\r")
+        warning = PV_WARNING.fullmatch(line)
+        if warning:
+            end = index + 1 + len(DIAGNOSTICS)
+            if valid_diagnostics([detail.rstrip("\r") for detail in lines[index + 1:end]]):
+                report[WARNING_COUNTS[warning[1]]] += 1
+                next_line = end
+                continue
+        console = CONSOLE_FINISH.fullmatch(line)
+        if console:
+            number = int(console[1])
+            kind = finish_kind(console[3])
+            if kind == "time_forfeit":
+                losses_on_time.add(number)
+            if number in console_finishes:
+                unexpected_output(report, raw)
+            else:
+                console_finishes[number] = (console[2], kind, raw)
             continue
         if any(shape.fullmatch(line) for shape in CONSOLE):
             continue
@@ -99,26 +178,80 @@ def read_log(path, report):
         except ValueError:
             event = {}
         kind = event.get("event") if isinstance(event, dict) else None
-        if kind in ("tournament_started", "game_started", "move"):
+        if not isinstance(kind, str) or kind not in EVENT_KINDS:
+            unexpected_output(report, raw)
             continue
-        if kind == "game_aborted":
+        if kind in PASSIVE_EVENTS:
+            continue
+        if kind == GAME_ABORTED:
             terminations["interrupted"] += 1
+            number = event.get("game")
+            if type(number) is int and finish_kind(event.get("reason")) == "time_forfeit":
+                losses_on_time.add(number)
             continue
-        if kind == "tournament_finished":
+        if kind == TOURNAMENT_FINISHED:
             finish_reasons.append(event.get("reason"))
             continue
-        if kind == "game_finished" and (
+        if kind == GAME_FINISHED and (
             type(event.get("game")) is int and event["game"] not in events
             and type(event.get("plies")) is int and isinstance(event.get("result"), str)
             and isinstance(event.get("termination"), str)
         ):
-            events[event["game"]] = (event["plies"], event["result"])
-            terminations[event["termination"]] += 1
+            number = event["game"]
+            events[number] = (event["plies"], event["result"])
+            termination = event["termination"]
+            reason_kind = finish_kind(event.get("reason"))
+            if "time_forfeit" in (termination, reason_kind):
+                losses_on_time.add(number)
+                finished_kinds[number] = "time_forfeit"
+            else:
+                finished_kinds[number] = reason_kind if termination == "normal" else termination
             continue
-        report["unexpected"] += 1
-        if len(report["unexpected_examples"]) < 5:
-            report["unexpected_examples"].append(raw)
+        unexpected_output(report, raw)
+
+    for number, (result, kind, raw) in console_finishes.items():
+        if number not in events or events[number][1] != result:
+            unexpected_output(report, raw)
+        if kind != "normal" and finished_kinds.get(number) == "normal":
+            finished_kinds[number] = kind
+    terminations.update(finished_kinds.values())
+    if losses_on_time:
+        terminations["time_forfeit"] = len(losses_on_time)
     return terminations, events, finish_reasons
+
+
+def pgn_mainline(record, result):
+    headers = PGN_HEADERS.match(record)
+    marker = RESULT_MARKER.search(record.rstrip())
+    if RESULT_HEADER.findall(headers[0]) != [result] or not marker or marker[1] != result:
+        return None
+
+    # The pinned PGN writer emits move numbers, SAN, brace comments and a
+    # final result. Keep every other token for comparison with legal replay.
+    tokens = []
+    for match in PGN_TOKENS.finditer(record, headers.end()):
+        if match.start() == marker.start(1) and match[0] == result:
+            return tokens
+        if not match["comment"]:
+            tokens.append(match[0])
+
+
+def matches_mainline(game, tokens, plies):
+    moves = list(game.mainline_moves())
+    if len(moves) != plies:
+        return False
+    position = game.board()
+    expected = []
+    for index, move in enumerate(moves):
+        if not position.is_legal(move):
+            return False
+        if position.turn == chess.WHITE:
+            expected.append(f"{position.fullmove_number}.")
+        elif index == 0:
+            expected.append(f"{position.fullmove_number}...")
+        expected.append(position.san(move))
+        position.push(move)
+    return tokens == expected
 
 
 def replay_pgn(path, events):
@@ -131,7 +264,8 @@ def replay_pgn(path, events):
     preamble, *records = re.split(r"(?m)(?=^\[Event )", path.read_text(errors="replace"))
     replay_errors += bool(preamble.strip())
     for record in records:
-        game = chess.pgn.read_game(io.StringIO(record))
+        stream = io.StringIO(record)
+        game = chess.pgn.read_game(stream)
         if game is None:
             replay_errors += 1
             continue
@@ -146,17 +280,11 @@ def replay_pgn(path, events):
             continue
         game_ids.add(number)
         result = game.headers["Result"]
-        marker = RESULT_MARKER.search(record.rstrip())
-        plies = 0
-        position = game.board()
-        for move in game.mainline_moves():
-            if not position.is_legal(move):
-                break
-            position.push(move)
-            plies += 1
-        else:
-            if marker and marker[1] == result and events.get(number) == (plies, result):
-                continue
+        tokens = pgn_mainline(record, result)
+        plies, finish_result = events.get(number, (None, None))
+        if (tokens is not None and not stream.read().strip()
+                and finish_result == result and matches_mainline(game, tokens, plies)):
+            continue
         replay_errors += 1
     return game_ids, terminations, replay_errors
 
@@ -196,7 +324,7 @@ def main():
     ]
     (evidence / "command.sh").write_text(shlex.join(command) + "\n")
     status, deadline_reached, duration = run_match(command, evidence)
-    report = {"repetition_warnings": 0, "unexpected": 0, "unexpected_examples": []}
+    report = {"repetition_warnings": 0, "fifty_move_warnings": 0, "unexpected": 0, "unexpected_examples": []}
     terminations, events, finish_reasons = read_log(evidence / "fastchess.log", report)
     pgn_ids, pgn_terminations, replay_errors = replay_pgn(evidence / "games.pgn", events)
     finished = len(events)
@@ -212,6 +340,7 @@ def main():
         f"Tournament finish reasons: {finish_reasons}",
         f"Unexpected output lines: {report['unexpected']}",
         f"Repetition warnings: {report['repetition_warnings']}",
+        f"Fifty-move warnings: {report['fifty_move_warnings']}",
         f"Terminations by kind: {dict(terminations)}",
         f"Match duration: {duration:.2f} seconds",
         f"Match deadline reached ({MATCH_SECONDS} seconds): {'yes' if deadline_reached else 'no'}",
@@ -223,7 +352,7 @@ def main():
     (evidence / "summary.txt").write_text(output)
     print(output, end="")
     passed = (
-        status == 0 and not deadline_reached and not abnormal
+        status == 0 and not deadline_reached and not abnormal and not terminations["time_forfeit"]
         and not terminations["interrupted"] and not report["unexpected"]
         and not replay_errors and pgn_terminations == {"normal": GAME_COUNT}
         and events.keys() == pgn_ids == IDS and finish_reasons == ["completed"]

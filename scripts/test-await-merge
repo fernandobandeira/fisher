@@ -1,14 +1,19 @@
 #!/usr/bin/env python3
 """Exercise await-merge with a stand-in gh and no network."""
 
+from contextlib import redirect_stderr, redirect_stdout
+import io
 import json
 import os
 from pathlib import Path
+import runpy
 import subprocess
 import sys
 import tempfile
 import textwrap
+from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 
 SCRIPT = Path(__file__).resolve().with_name("await-merge")
@@ -56,6 +61,21 @@ CLOCK = """\
         Path("sleeps").write_text(json.dumps(sleeps))
 """
 
+EXPIRED_CLOCK = """\
+    import itertools
+    import runpy
+    import subprocess
+    import sys
+    import time
+    from unittest.mock import patch
+
+    sys.argv.pop(0)
+    # The time limit elapses between its calculation and the first poll.
+    with patch.object(time, "monotonic", itertools.count().__next__):
+        with patch.object(subprocess, "run", side_effect=AssertionError("gh called after expiry")):
+            runpy.run_path(sys.argv[0], run_name="__main__")
+"""
+
 
 def pull(state="OPEN", merge_state="BLOCKED", mergeable="MERGEABLE",
          head="first-head", checks=(), base="main", draft=False):
@@ -95,6 +115,50 @@ class AwaitMergeTest(unittest.TestCase):
                 self.assertEqual(json.loads((root / "sleeps").read_text()), expected_sleeps)
             calls = [json.loads(line) for line in (root / "calls").read_text().splitlines()]
             return result, calls
+
+    def run_with_controlled_time(self, steps, *, timeout, interval, expected_sleeps,
+                                 expected_timeouts):
+        calls = []
+        sleeps = []
+        timeouts = []
+
+        # Fail during a runaway poll even when simulated time stops advancing.
+        def sleep(seconds):
+            self.assertLess(len(sleeps), len(expected_sleeps),
+                            f"Unexpected extra sleep of {seconds} seconds")
+            sleeps.append(seconds)
+
+        def run_gh(command, *, timeout, text, capture_output, check):
+            executable, *args = command
+            self.assertEqual(executable, "gh")
+            self.assertTrue(check, "Expected subprocess.run(check=True)")
+            self.assertLess(len(calls), len(expected_timeouts),
+                            f"Unexpected extra gh call {args[:2]} with {timeout} seconds remaining")
+            expected, output = steps[min(len(calls), len(steps) - 1)]
+            self.assertEqual(args, expected)
+            calls.append(args)
+            timeouts.append(timeout)
+            if isinstance(output, dict) and "error" in output:
+                raise subprocess.CalledProcessError(1, command, stderr=output["error"])
+            stdout = output if isinstance(output, str) else json.dumps(output)
+            return subprocess.CompletedProcess(command, 0, stdout=stdout, stderr="")
+
+        main = runpy.run_path(str(SCRIPT))["main"]
+        main.__globals__["time"] = SimpleNamespace(monotonic=lambda: sum(sleeps), sleep=sleep)
+        args = [str(SCRIPT), "42", "--timeout", timeout, "--interval", interval]
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with patch.object(sys, "argv", args), patch.object(subprocess, "run", run_gh):
+            with redirect_stdout(stdout), redirect_stderr(stderr), self.assertRaises(SystemExit) as exit:
+                main()
+        # Translate a SystemExit message as the Python command line does.
+        status = exit.exception.code
+        if isinstance(status, str):
+            stderr.write(f"{status}\n")
+            status = 1
+        self.assertEqual(sleeps, expected_sleeps)
+        self.assertEqual(timeouts, expected_timeouts)
+        return subprocess.CompletedProcess(args, status, stdout.getvalue(), stderr.getvalue()), calls
 
     def assert_steps(self, steps, status, message, **options):
         result, calls = self.run_script(steps, **options)
@@ -223,7 +287,11 @@ class AwaitMergeTest(unittest.TestCase):
                 self.assertEqual(calls, [VIEW, BASE, VIEW, BASE, UPDATE, VIEW])
 
     def test_persistent_read_error_reaches_time_limit(self):
-        result, calls = self.run_script([pull(), (VIEW, {"error": "temporary GitHub error"})], timeout="0.6")
+        result, calls = self.run_with_controlled_time(
+            [pull(), (VIEW, {"error": "temporary GitHub error"})],
+            timeout="0.75", interval="0.25",
+            expected_sleeps=[0.25, 0.25, 0.25], expected_timeouts=[0.75, 0.5, 0.25],
+        )
         self.assertEqual(result.returncode, 1, result)
         self.assertIn("Warning:", result.stderr)
         self.assertIn("Timed out waiting for pull request #42", result.stderr)
@@ -268,10 +336,10 @@ class AwaitMergeTest(unittest.TestCase):
 
     def test_failed_update_reads_within_time_limit(self):
         behind = pull(merge_state="BEHIND")
-        result, calls = self.run_script([
+        result, calls = self.run_with_controlled_time([
             behind, (BASE, FIRST_BASE), (UPDATE, UPDATE_ERROR), behind,
             pull(state="MERGED"),
-        ], timeout="1", interval="15", expected_sleeps=[1])
+        ], timeout="1", interval="15", expected_sleeps=[1], expected_timeouts=[1, 1, 1, 1])
         self.assertEqual(result.returncode, 1, result)
         self.assertIn(UPDATE_ERROR["error"], result.stderr)
         self.assertEqual(calls, [VIEW, BASE, UPDATE, VIEW])
@@ -289,12 +357,24 @@ class AwaitMergeTest(unittest.TestCase):
         self.assert_steps([pull(base="another-branch")], 1, "must target main")
 
     def test_timeout(self):
-        result, calls = self.run_script([pull()], timeout="0.6")
+        result, calls = self.run_with_controlled_time(
+            [pull()], timeout="0.5", interval="0.25",
+            expected_sleeps=[0.25, 0.25], expected_timeouts=[0.5, 0.25],
+        )
         self.assertEqual(result.returncode, 1, result)
         self.assertIn("Timed out waiting for pull request #42", result.stderr)
         self.assertIn("OPEN/BLOCKED at first-head", result.stderr)
         self.assertTrue(calls)
         self.assertTrue(all(args == VIEW for args in calls))
+
+    def test_timeout_exit_status(self):
+        result = subprocess.run(
+            [sys.executable, "-c", textwrap.dedent(EXPIRED_CLOCK), str(SCRIPT),
+             "42", "--timeout", "0.5"],
+            capture_output=True, text=True, timeout=5,
+        )
+        self.assertEqual(result.returncode, 1, result)
+        self.assertIn("Timed out waiting for pull request #42", result.stderr)
 
 
 if __name__ == "__main__":

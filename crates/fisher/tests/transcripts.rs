@@ -635,10 +635,12 @@ fn info_allowance_matches_the_documented_grammar() {
         ("mate 0 nodes 20 nps 20000 time 1 pv b1a3", false),
         ("cp 0 nodes 20 nps 20000 time 01 pv b1a3", false),
         ("cp 0 nodes 1 nps 020 time 50 pv b1a3", false),
+        ("cp 0 nodes 0 nps 00 time 1 pv a7a8q", false),
         ("cp 0 nodes 20 nps -1 time 1 pv b1a3", false),
         ("cp 0 nodes 20 nps 20000 time 1 pv 0000", false),
         ("cp 0 nodes 20 nps 20000 time 1 pv a7a8K", false),
         ("cp 0 nodes 0 nps 0 time 1 pv a7a8k", false),
+        ("cp 0 nodes 0 nps 0 time 1 pv a7a8p", false),
         ("cp 0 nodes 20 nps 20000 time 1 pv b1a3 ", false),
         ("cp 0 nodes 20 nps 20000 time 1 pv b1a3  b8a6", false),
         (

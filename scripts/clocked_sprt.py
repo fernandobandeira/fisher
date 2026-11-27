@@ -1,8 +1,10 @@
 """Draw openings, play fastchess ranges, and read the kept games."""
 
 from collections import Counter
+from contextlib import contextmanager
 from dataclasses import dataclass
 from hashlib import sha256
+from http.client import HTTPException
 from io import BytesIO
 from pathlib import Path
 import re
@@ -11,7 +13,7 @@ import subprocess
 import sys
 from tempfile import TemporaryDirectory
 from urllib.request import urlopen
-from zipfile import ZipFile
+from zipfile import BadZipFile, ZipFile
 
 from sprt_statistic import MAX_PAIRS, decide, elo_interval, trace
 
@@ -41,6 +43,18 @@ MOVE_NUMBER = re.compile(r"\d+\.(?:\.\.)?")
 
 class UnreadableGames(ValueError):
     """The requested range has missing or unreadable games."""
+
+
+class Refused(Exception):
+    """An invocation or preflight failure prevented play."""
+
+
+@contextmanager
+def preflight():
+    try:
+        yield
+    except (OSError, ValueError, HTTPException, BadZipFile, subprocess.SubprocessError) as error:
+        raise Refused(str(error)) from error
 
 
 @dataclass(frozen=True)
@@ -115,25 +129,34 @@ def fastchess_runner():
 
 
 def play(out, measured, opponent, openings, concurrency):
-    runner = fastchess_runner()
+    with preflight():
+        runner = fastchess_runner()
+        build(measured, out / "measured")
+        build(opponent, out / "opponent")
+        (out / "openings.epd").write_bytes(opening_bytes(openings))
+        log = (out / "fastchess.log").open("w", encoding="utf-8")
     measured_name, opponent_name = engine_names(measured, opponent)
-    build(measured, out / "measured")
-    build(opponent, out / "opponent")
-    (out / "openings.epd").write_bytes(opening_bytes(openings))
-    with (out / "fastchess.log").open("w", encoding="utf-8") as log:
-        return subprocess.run(
-            [
-                runner,
-                "-engine", "cmd=./measured", f"name={measured_name}",
-                "-engine", "cmd=./opponent", f"name={opponent_name}",
-                "-each", "proto=uci", f"tc={TIME_CONTROL}", "timemargin=0",
-                "-openings", "file=openings.epd", "format=epd", "order=sequential",
-                "-rounds", str(len(openings)), "-games", "2", "-concurrency", str(concurrency),
-                "-pgnout", "file=games.pgn", "notation=uci", "append=false",
-                "-recover", "-autosaveinterval", "0", "-ratinginterval", "0",
-            ],
-            cwd=out, stdout=log, stderr=subprocess.STDOUT,
-        ).returncode
+    with log:
+        with preflight():
+            match = subprocess.Popen(
+                [
+                    runner,
+                    "-engine", "cmd=./measured", f"name={measured_name}",
+                    "-engine", "cmd=./opponent", f"name={opponent_name}",
+                    "-each", "proto=uci", f"tc={TIME_CONTROL}", "timemargin=0",
+                    "-openings", "file=openings.epd", "format=epd", "order=sequential",
+                    "-rounds", str(len(openings)), "-games", "2", "-concurrency", str(concurrency),
+                    "-pgnout", "file=games.pgn", "notation=uci", "append=false",
+                    "-recover", "-autosaveinterval", "0", "-ratinginterval", "0",
+                ],
+                cwd=out, stdout=log, stderr=subprocess.STDOUT,
+            )
+        with match:
+            try:
+                return match.wait()
+            except KeyboardInterrupt:
+                match.kill()
+                raise UnreadableGames("interrupted") from None
 
 
 def read_record(record):

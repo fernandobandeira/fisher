@@ -2,10 +2,13 @@
 """Compare the judge to the committed arithmetic and exercise kept PGNs."""
 
 import csv
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
+from http.client import IncompleteRead
 from io import StringIO
 from math import log
 import random
+from runpy import run_path
+from subprocess import CalledProcessError
 import sys
 import unittest
 from unittest.mock import patch
@@ -14,7 +17,7 @@ sys.dont_write_bytecode = True
 
 from clocked_sprt import (
     ROOT, TIME_CONTROL, Pair, draw_openings, engine_names, fastchess_runner,
-    fetch_openings, judge, print_result, read_pairs, read_record,
+    fetch_openings, judge, judge_pairs, print_result, read_pairs, read_record,
 )
 from sprt_statistic import ALPHA, BETA, MAX_PAIRS, SPRT_BOUNDS, decide, log_likelihood_ratio, trace, verdict
 
@@ -158,6 +161,72 @@ class Preflight(unittest.TestCase):
                 fastchess_runner()
 
 
+class CommandStatus(unittest.TestCase):
+    def invoke(self, **overrides):
+        run = run_path(str(ROOT / "scripts/clocked-sprt"))["run"]
+        stdout, stderr = StringIO(), StringIO()
+        with patch.dict(run.__globals__, overrides), patch(
+            "sys.argv", ["clocked-sprt", "measured", "opponent", "gain", "1", "1", "unused"],
+        ), patch(
+            "clocked_sprt.subprocess.check_output", side_effect=["a" * 40, "b" * 40],
+        ), redirect_stdout(stdout), redirect_stderr(stderr):
+            status = run()
+        return status, stdout.getvalue(), stderr.getvalue()
+
+    def test_failed_download(self):
+        with patch("clocked_sprt.urlopen") as urlopen:
+            response = urlopen.return_value.__enter__.return_value
+            response.read.side_effect = IncompleteRead(b"a", 4095)
+            status, stdout, stderr = self.invoke()
+            self.assertEqual(2, status)
+            self.assertNotIn("Result:", stdout)
+            self.assertIn("Refused: IncompleteRead(1 bytes read, 4095 more expected)", stderr)
+
+            response.read.side_effect = None
+            response.read.return_value = b"a"
+            status, stdout, stderr = self.invoke()
+            self.assertEqual(2, status)
+            self.assertNotIn("Result:", stdout)
+            self.assertIn("Refused: Published openings archive SHA-256 mismatch", stderr)
+
+    def test_interrupts_and_build_failure(self):
+        with patch("pathlib.Path.mkdir"), patch("pathlib.Path.write_bytes"), patch(
+            "pathlib.Path.open", return_value=StringIO(),
+        ), patch("clocked_sprt.fastchess_runner", return_value="fastchess"), patch(
+            "clocked_sprt.build",
+        ) as build, patch("clocked_sprt.subprocess.Popen") as start:
+            build.side_effect = KeyboardInterrupt
+            status, stdout, stderr = self.invoke(fetch_openings=lambda seed: ["opening"])
+            self.assertEqual(2, status)
+            self.assertNotIn("Result:", stdout)
+            self.assertEqual("Refused: interrupted before play\n", stderr)
+            start.assert_not_called()
+
+            build.side_effect = [None, CalledProcessError(5, "cargo")]
+            status, stdout, stderr = self.invoke(fetch_openings=lambda seed: ["opening"])
+            self.assertEqual(2, status)
+            self.assertNotIn("Result:", stdout)
+            self.assertIn("Refused:", stderr)
+            start.assert_not_called()
+
+            build.side_effect = None
+            match = start.return_value
+            match.wait.side_effect = KeyboardInterrupt
+            status, stdout, stderr = self.invoke(fetch_openings=lambda seed: ["opening"])
+            self.assertEqual(1, status)
+            self.assertEqual("Result: void (interrupted)", stdout.splitlines()[-1])
+            self.assertEqual("", stderr)
+            start.assert_called_once()
+            match.kill.assert_called_once()
+
+    def test_unforeseen_error(self):
+        with patch("clocked_sprt.urlopen", side_effect=RuntimeError("fixture error")):
+            status, stdout, stderr = self.invoke()
+        self.assertEqual(3, status)
+        self.assertNotIn("Result:", stdout)
+        self.assertEqual("Unexpected error (RuntimeError): fixture error\n", stderr)
+
+
 class KeptGames(unittest.TestCase):
     measured, opponent = "a" * 40, "b" * 40
     fixture_openings = ["rnbqkb1r/pp1pppp1/5n2/2p4p/2P1P2P/8/PP1P1PP1/RNBQKBNR w KQkq - 0 4"]
@@ -167,10 +236,10 @@ class KeptGames(unittest.TestCase):
             return read_pairs(pgn, self.fixture_openings, 1, self.measured, self.opponent)
 
     def test_draw_repeats_excludes_series(self):
-        book = ["one", "two", "three"]
-        draw = draw_openings(book, ["two"], "seed")
+        openings = ["one", "two", "three"]
+        draw = draw_openings(openings, ["two"], "seed")
         self.assertCountEqual(["one", "three"], draw)
-        self.assertEqual(draw, draw_openings(reversed(book), ["two"], "seed"))
+        self.assertEqual(draw, draw_openings(reversed(openings), ["two"], "seed"))
 
     def test_shuffled_games_and_missing_game(self):
         scores = [POINTS.index(row["points"]) for row in observations()["crosses-and-returns"]]
@@ -215,6 +284,14 @@ class KeptGames(unittest.TestCase):
             "Pair counts (0, 0.5, 1, 1.5, 2 points): [1, 0, 0, 0, 0]",
             report(pairs, opponent_view=True),
         )
+
+    def test_opponent_view_with_mixed_pairs(self):
+        pairs = [Pair(score, ("normal", "normal")) for score in (0, 1, 2, 3, 3, 4, 4, 4)]
+        gain, _ = judge_pairs(pairs, "gain")
+        no_loss, _ = judge_pairs(pairs, "no-loss", opponent_view=True)
+        self.assertEqual((1, 1, 1, 2, 3), gain.counts)
+        self.assertEqual((3, 2, 1, 1, 1), no_loss.counts)
+        self.assertAlmostEqual(gain.llr, -no_loss.llr, places=12)
 
     def test_illegal_move_still_requires_complete_record(self):
         games = (FIXTURES / "illegal-later.pgn").read_text(encoding="utf-8")

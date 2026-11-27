@@ -20,9 +20,18 @@ order, requested openings, fastchess log and PGN.
 The command plays and validates every game in the requested range. A loss on
 time, crash or stall, or illegal move counts as the loss fastchess gives. It
 prints counts for the pairs used by the judge and for all games read, including
-any supplied earlier games. Missing or unreadable games give `Result: void`
-and exit status 1. A refusal such as a pin mismatch or a verdict in the earlier
-games prints `Refused: …` to standard error and exits with status 2.
+any supplied earlier games.
+
+| Status | Meaning | Output |
+|---|---|---|
+| 0 | Pass, fail, no verdict yet, or inconclusive | `Result: …` on stdout |
+| 1 | A game is missing or unreadable after play starts or while reading kept games | `Result: void (…)` on stdout |
+| 2 | Play was refused before asking fastchess for games, or preflight failed | `Refused: …` on stderr |
+| 3 | An unforeseen error | `Unexpected error (…): …` on stderr |
+
+An interruption before play is a refusal. An interruption after fastchess has
+started play gives `Result: void (interrupted)`. Only statuses 0 and 1 report
+a result for a play or replay request. `--help` prints usage information.
 
 Replay a range by supplying its original fastchess PGN and a fresh directory.
 Replay downloads the same pinned published openings and reads the PGN results

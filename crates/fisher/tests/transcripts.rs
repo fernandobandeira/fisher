@@ -64,6 +64,9 @@ mod transcript_documents {
             position_moves => "position-moves",
             position_fen_four_fields => "position-fen-four-fields",
             position_fen_five_fields => "position-fen-five-fields",
+            kingside_k => "castling-letters/kingside-k",
+            kingside_kk => "castling-letters/kingside-kk",
+            kingside_h => "castling-letters/kingside-h",
             go_parameters => "go-parameters",
             go_depth => "go-depth",
             startpos_depth_two => "startpos-depth-2",
@@ -101,11 +104,8 @@ mod transcript_documents {
         }
     }
 
-    const STAGED_TRANSCRIPTS: &[(&str, &str)] = &[
-        ("castling-letters/kingside-h", "fisher-4h7"),
-        ("castling-letters/kingside-k", "fisher-4h7"),
-        ("castling-letters/kingside-kk", "fisher-4h7"),
-    ];
+    // Add future staged documents here with the ticket that will activate them.
+    const STAGED_TRANSCRIPTS: &[(&str, &str)] = &[];
 
     #[test]
     fn every_transcript_is_played_or_staged() -> io::Result<()> {
@@ -454,8 +454,9 @@ fn reference_position<'a>(mut tokens: impl Iterator<Item = &'a str>) -> Result<T
     Ok(position)
 }
 
-/// Checks the text of a FEN by the rules of `rules::Position::from_fen`,
-/// which accepts less than shakmaty: shakmaty also reads missing fields,
+/// Checks the text of a UCI FEN. Apart from the complete castling fields
+/// `KK` and `H`, it follows `rules::Position::from_fen`.
+/// Shakmaty also reads missing fields,
 /// pockets, promoted pieces, check counters, `_` between fields, castling by
 /// file, clocks beyond `u32` and a fullmove number of 0. The rules about
 /// kings, pawns, castling pieces and the en passant pawn are the same in both
@@ -492,7 +493,7 @@ fn check_fen_text(fen: &str) -> Result<(u64, u64), &'static str> {
         "b" => b'3',
         _ => return Err("side to move must be w or b"),
     };
-    if castling != "-" {
+    if !matches!(castling, "-" | "KK" | "H") {
         let mut seen = Vec::new();
         for letter in castling.chars() {
             if !"KQkq".contains(letter) {
@@ -1566,8 +1567,7 @@ fn a_stopped_search_reports_on_its_own_position() {
 
 #[test]
 fn the_runner_sets_up_the_fens_fisher_accepts() {
-    // Expected verdicts from the rules in crates/rules/src/fen.rs
-    // (`Position::from_fen`), after `uci` fills in four- and five-field FENs.
+    // Expected verdicts from the rules reader and the UCI FEN handling.
     let board = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR";
     let cases = [
         (format!("{board} w KQkq - 0 1"), true),
@@ -1580,7 +1580,9 @@ fn the_runner_sets_up_the_fens_fisher_accepts() {
         ("4k3/8/3N1N2/8/8/8/8/4K3 b - - 0 1".to_owned(), true),
         (format!("{board} w KQkq - 0 0"), false),
         (format!("{board} w KQkq - +1 1"), false),
-        (format!("{board} w KK - 0 1"), false),
+        // fisher-4h7 accepts only the complete fields KK and H as K.
+        (format!("{board} w KK - 0 1"), true),
+        (format!("{board} w KKK - 0 1"), false),
         (format!("{board} w HAha - 0 1"), false),
         (format!("{board} W KQkq - 0 1"), false),
         (format!("{board} w KQkq - 0 1 +3+3"), false),
@@ -1684,6 +1686,68 @@ fn the_runner_keeps_the_position_after_a_joined_en_passant_field() {
             "{fen:?}"
         );
     }
+}
+
+#[test]
+fn the_runner_tracks_kingside_castling_spellings() -> Result<(), String> {
+    // Stockfish 19 printed these positions for all three fields in fisher-4h7.
+    for field in ["K", "KK", "H"] {
+        let bare = format!("fen 4k3/8/8/8/8/8/8/4K2R w {field} - 0 1");
+        let position = reference_position(command_tokens(&bare))?;
+        assert_eq!(position.fen(), "4k3/8/8/8/8/8/8/4K2R w K - 0 1");
+        assert_eq!(position.chess.legal_moves().len(), 15);
+
+        let castle = format!("{bare} moves e1g1");
+        let position = reference_position(command_tokens(&castle))?;
+        assert_eq!(position.fen(), "4k3/8/8/8/8/8/8/5RK1 b - - 1 1");
+    }
+    Ok(())
+}
+
+#[test]
+fn the_runner_keeps_the_position_after_a_malformed_fen_with_a_castling_alias() -> io::Result<()> {
+    for (field, castling_error) in [
+        ("KK", "castling rights must not contain duplicates"),
+        ("H", "castling rights must use K, Q, k, q, or -"),
+    ] {
+        for (fen, diagnostic) in [
+            (
+                format!("4k3/8/8/8/8/8/8/4K2R w {field} z9 0 1"),
+                "invalid en passant square",
+            ),
+            (
+                format!("4k3/8/8/8/8/8/8/4K2R w {field} - x 1"),
+                "halfmove clock must be an unsigned decimal integer",
+            ),
+            (
+                format!("4k3/8/8/8/8/8/8/4K2R w {field} - 0 0"),
+                "fullmove number must be a positive decimal integer",
+            ),
+            (
+                format!("4k3/8/8/8/8/8/8/4K3 w {field} - 0 1"),
+                castling_error,
+            ),
+            (
+                format!("4k3/8/8/8/8/8/8/3K3R w {field} - 0 1"),
+                castling_error,
+            ),
+        ] {
+            assert!(
+                reference_position(command_tokens(&format!("fen {fen}"))).is_err(),
+                "{fen}"
+            );
+            let transcript = format!(
+                "> position fen 7k/8/5K1Q/8/8/8/8/8 b - - 0 1\n\
+                 > position fen {fen}\n> isready\n\
+                 < info string position rejected: invalid FEN: {diagnostic}\n< readyok\n\
+                 > go depth 1\n\
+                 < info depth 1 multipv 1 score cp -900 nodes 1 nps {{nps}} time {{time}} pv h8g8\n\
+                 < bestmove {{legal}}\n> quit\n! exit\n"
+            );
+            run_transcript(&fen, &transcript, HANG_TIMEOUT, Engine::start)?;
+        }
+    }
+    Ok(())
 }
 
 #[test]

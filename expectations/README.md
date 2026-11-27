@@ -15,7 +15,7 @@ The 15 searched transcripts that expect an `info` line come from fisher-2aj.2.
 
 ## UCI transcripts
 
-The current UCI transcripts live in `uci/`. Each `uci/*.uci` path describes one
+The current UCI transcripts live under `uci/`. Each `.uci` file describes one
 session with a fresh fisher process. Read the records top to bottom. Blank
 lines and lines starting with `#` are comments. The header gives the sources
 and date. A comment above a command or reply names the passage or owner
@@ -291,9 +291,11 @@ derivations and the changes to each schedule.
 
 ### MultiPV
 
-fisher-8hc.4 stages the [MultiPV sessions](uci/multipv/) before
-fisher-8hc.5 activates them. The current runner selects sessions by name
-directly in `uci/`. The staged handshake succeeds the active handshake.
+fisher-8hc.4 recorded the [MultiPV sessions](uci/multipv/) and fisher-8hc.5
+activated them. Each transcript test passes a session name relative to
+`expectations/uci/`. The runner appends `.uci` to that name. For example,
+the `handshake` test passes `multipv/handshake` and the runner reads
+[`uci/multipv/handshake.uci`](uci/multipv/handshake.uci).
 
 During a search, fisher rejects `setoption` for a declared option
 (`MultiPV`) with `setoption rejected: waiting for stop` and leaves the
@@ -306,12 +308,11 @@ variations start with the same root move. Every line carries the same
 depth, nodes, time and nps, sampled since the `go`. A terminal position's
 depth-0 response has no `multipv`.
 
-When fisher-8hc.5 activates these sessions, the runner checks these
-properties at every finished depth it reads and replays each variation
-under D5. It matches `bestmove` to the root move of variation 1 of the last
-finished depth. The scores are best first under D13. Equal scores keep
-legal move order under D48 and the 2026-11-27 comment on fisher-8hc. The
-sessions leave the choice of tied root moves open.
+The runner checks these properties at every finished depth it reads and
+replays each variation under D5. It matches `bestmove` to the root move of
+variation 1 of the last finished depth. The scores are best first under D13.
+Equal scores keep legal move order under D48 and the 2026-11-27 comment on
+fisher-8hc. The sessions leave the choice of tied root moves open.
 
 The searched records keep the [allowance forms](#searched-moves) and put
 each expected variation number in its literal `multipv` slot. A setting

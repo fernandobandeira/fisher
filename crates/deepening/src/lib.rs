@@ -265,6 +265,7 @@ fn run_search<const NODES_BETWEEN_READINGS: u64>(
             variations: result.variations,
         }));
     }
+    std::thread::sleep(request.started.elapsed().mul_f64(0.025));
     report(SearchReport::BestMove(Some(best_move)));
     limits.nodes
 }

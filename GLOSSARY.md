@@ -127,7 +127,7 @@ The score and principal variation found by playing every legal move to a fixed d
 _Avoid_: negamax, brute force, full-width search
 
 **Bound**:
-A value that a position's score is known to be at least, or at most, when the score itself is not known. A bound is never reported or compared as a score.
+A value that a position's score is known to be at least, or at most, when the score itself is not known. A bound is never reported or compared as a score. An SPRT bound names an Elo difference and is always written in full.
 _Avoid_: estimate, approximate score
 
 **Cutoff**:
@@ -236,6 +236,20 @@ _Avoid_: overhead (except in the option name Move Overhead), buffer
 **Loss on time**:
 A game the GUI gives against a color whose clock ran out before its move arrived.
 _Avoid_: time forfeit, flag, timeout (which names only the hang timeout)
+
+### Strength
+
+**Series**:
+The recorded games between two revisions of fisher under numbered conditions. They are played under a node limit and give no verdict.
+_Avoid_: strength test, SPRT (for the record)
+
+**SPRT**:
+The test that judges whether fisher plays stronger or does not play weaker. It plays opening pairs on a clock and gives a verdict when the results are enough to accept one of two hypotheses fixed beforehand.
+_Avoid_: series (for the test)
+
+**SPRT bounds**:
+The two Elo differences an SPRT chooses between. Always write the name in full.
+_Avoid_: decision bounds, bounds on their own
 
 ### Quality checks
 

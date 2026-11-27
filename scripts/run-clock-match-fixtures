@@ -1,23 +1,58 @@
 """Run the clock match fixtures in a cached, hash-pinned virtual environment."""
 
+import base64
+import csv
 import fcntl
 import hashlib
+import io
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
+import tempfile
 
 
-SCRIPTS = Path(__file__).resolve().parent
+HELPER = Path(__file__).resolve()
+SCRIPTS = HELPER.parent
 BUILD_REQUIREMENTS = SCRIPTS / "clock-match-build-requirements.txt"
 REQUIREMENTS = SCRIPTS / "clock-match-requirements.txt"
 
 
-def fixture_python():
-    build_hash = hashlib.sha256(BUILD_REQUIREMENTS.read_bytes()).hexdigest()
-    library_hash = hashlib.sha256(REQUIREMENTS.read_bytes()).hexdigest()
+def chess_record(venv):
+    record, = venv.glob("lib/python*/site-packages/chess-*.dist-info/RECORD")
+    return record
+
+
+def cache_is_intact(venv, python, ready):
+    if not (ready.is_file() and os.access(python, os.X_OK)):
+        return False
+    try:
+        record = chess_record(venv)
+        contents = record.read_bytes()
+        if hashlib.sha256(contents).hexdigest() != ready.read_text():
+            return False
+        site_packages = record.parent.parent
+        for path, checksum, _ in csv.reader(io.StringIO(contents.decode("utf-8")), strict=True):
+            if checksum:
+                digest = hashlib.sha256((site_packages / path).read_bytes()).digest()
+                encoded = base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
+                if checksum != f"sha256={encoded}":
+                    return False
+    except (OSError, ValueError, csv.Error):
+        return False
+    return True
+
+
+def fixture_python(snapshot):
+    # Hash the bytes pip will read, even if the checkout changes while waiting for the lock.
+    key = hashlib.sha256(HELPER.read_bytes())
+    for source in (BUILD_REQUIREMENTS, REQUIREMENTS):
+        contents = source.read_bytes()
+        (snapshot / source.name).write_bytes(contents)
+        key.update(hashlib.sha256(contents).digest())
     cache = SCRIPTS.parent / "target" / "clock-match-venv"
-    directory = cache / f"{sys.implementation.cache_tag}-{build_hash}-{library_hash}"
+    directory = cache / f"{sys.implementation.cache_tag}-{key.hexdigest()}"
     directory.mkdir(parents=True, exist_ok=True)
     venv = directory / "venv"
     python = venv / "bin" / "python"
@@ -27,23 +62,31 @@ def fixture_python():
     # use it only after both installs succeed.
     with (directory / "lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        if not (ready.is_file() and python.exists()):
-            subprocess.run([sys.executable, "-Im", "venv", "--clear", venv], check=True)
+        if not cache_is_intact(venv, python, ready):
+            if venv.is_symlink() or venv.is_file():
+                venv.unlink()
+            elif venv.exists():
+                shutil.rmtree(venv)
+            subprocess.run([sys.executable, "-Im", "venv", venv], check=True)
             # Keep the pinned build and library installs in the same order as clock-match.yml.
             install = [python, "-Im", "pip", "install", "--timeout", "15", "--retries", "2",
                        "--require-hashes"]
-            subprocess.run([*install, "--only-binary", ":all:", "-r", BUILD_REQUIREMENTS],
-                           check=True)
-            subprocess.run([*install, "--no-build-isolation", "--no-deps", "-r", REQUIREMENTS],
-                           check=True)
-            ready.touch()
+            subprocess.run([*install, "--only-binary", ":all:", "-r",
+                            snapshot / BUILD_REQUIREMENTS.name], check=True)
+            # Older pip can use a legacy install that writes no wheel RECORD.
+            subprocess.run([*install, "--no-build-isolation", "--no-deps", "-r",
+                            snapshot / REQUIREMENTS.name], check=True,
+                           env={**os.environ, "PIP_USE_PEP517": "1"})
+            ready.write_text(hashlib.sha256(chess_record(venv).read_bytes()).hexdigest())
     return python
 
 
 if __name__ == "__main__":
     try:
-        python = fixture_python()
-    except (OSError, subprocess.CalledProcessError) as error:
-        sys.exit(f"Clock match environment setup failed ({error}). "
+        with tempfile.TemporaryDirectory(prefix="fisher-clock-match-") as snapshot:
+            python = fixture_python(Path(snapshot))
+        os.execv(python, [python, "-I", SCRIPTS / "test-check-clock-match"])
+    except (OSError, ValueError, subprocess.CalledProcessError) as error:
+        sys.exit(f"Clock match environment setup failed ({error}).\n"
+                 "To reset the cache, run rm -rf -- target/clock-match-venv from the repo root.\n"
                  "To retry, run python3 -I scripts/run-clock-match-fixtures.")
-    os.execv(python, [python, "-I", SCRIPTS / "test-check-clock-match"])

@@ -1,0 +1,49 @@
+"""Run the clock match fixtures in a cached, hash-pinned virtual environment."""
+
+import fcntl
+import hashlib
+import os
+from pathlib import Path
+import subprocess
+import sys
+
+
+SCRIPTS = Path(__file__).resolve().parent
+BUILD_REQUIREMENTS = SCRIPTS / "clock-match-build-requirements.txt"
+REQUIREMENTS = SCRIPTS / "clock-match-requirements.txt"
+
+
+def fixture_python():
+    build_hash = hashlib.sha256(BUILD_REQUIREMENTS.read_bytes()).hexdigest()
+    library_hash = hashlib.sha256(REQUIREMENTS.read_bytes()).hexdigest()
+    cache = SCRIPTS.parent / "target" / "clock-match-venv"
+    directory = cache / f"{sys.implementation.cache_tag}-{build_hash}-{library_hash}"
+    directory.mkdir(parents=True, exist_ok=True)
+    venv = directory / "venv"
+    python = venv / "bin" / "python"
+    ready = venv / ".ready"
+
+    # A venv has absolute paths. Build it in place and let concurrent checks
+    # use it only after both installs succeed.
+    with (directory / "lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if not (ready.is_file() and python.exists()):
+            subprocess.run([sys.executable, "-Im", "venv", "--clear", venv], check=True)
+            # Keep the pinned build and library installs in the same order as clock-match.yml.
+            install = [python, "-Im", "pip", "install", "--timeout", "15", "--retries", "2",
+                       "--require-hashes"]
+            subprocess.run([*install, "--only-binary", ":all:", "-r", BUILD_REQUIREMENTS],
+                           check=True)
+            subprocess.run([*install, "--no-build-isolation", "--no-deps", "-r", REQUIREMENTS],
+                           check=True)
+            ready.touch()
+    return python
+
+
+if __name__ == "__main__":
+    try:
+        python = fixture_python()
+    except (OSError, subprocess.CalledProcessError) as error:
+        sys.exit(f"Clock match environment setup failed ({error}). "
+                 "To retry, run python3 -I scripts/run-clock-match-fixtures.")
+    os.execv(python, [python, "-I", SCRIPTS / "test-check-clock-match"])

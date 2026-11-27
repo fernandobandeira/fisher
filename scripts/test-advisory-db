@@ -105,6 +105,8 @@ esac
         for script in (ROOT / "scripts").iterdir():
             if script.is_file() and os.access(script, os.X_OK):
                 self.executable(f"scripts/{script.name}", "#!/bin/sh\nexit 0\n")
+        # The clock match helper runs through Python rather than as an executable.
+        (self.root / "scripts/run-clock-match-fixtures").write_text("raise SystemExit(0)\n")
         for name in ("scripts/check", "scripts/check-advisory-db", "deny.toml"):
             shutil.copy2(ROOT / name, self.root / name)
         manifest = self.root / "crates/example/Cargo.toml"

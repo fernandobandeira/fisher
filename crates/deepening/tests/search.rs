@@ -1,5 +1,6 @@
 use std::{
     error::Error,
+    num::NonZeroU8,
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -8,7 +9,7 @@ use std::{
 };
 
 use deepening::{FinishedDepth, Limits, Score, SearchReport, SearchRequest, search};
-use rules::Position;
+use rules::{Move, Position};
 
 fn reports_for(fen: &str) -> Result<Vec<SearchReport>, Box<dyn Error>> {
     Ok(reports_with_limits(
@@ -18,8 +19,16 @@ fn reports_for(fen: &str) -> Result<Vec<SearchReport>, Box<dyn Error>> {
 }
 
 fn reports_with_limits(position: Position, limits: Limits) -> Vec<SearchReport> {
+    reports_with_setting(position, limits, NonZeroU8::MIN)
+}
+
+fn reports_with_setting(
+    position: Position,
+    limits: Limits,
+    requested_variations: NonZeroU8,
+) -> Vec<SearchReport> {
     let request = SearchRequest {
-        requested_variations: std::num::NonZeroU8::MIN,
+        requested_variations,
         position,
         limits,
         interrupt: Arc::new(AtomicBool::new(false)),
@@ -28,6 +37,59 @@ fn reports_with_limits(position: Position, limits: Limits) -> Vec<SearchReport> 
     let mut reports = Vec::new();
     search(request, &mut |report| reports.push(report));
     reports
+}
+
+#[test]
+fn first_variation_matches_setting_one_when_root_moves_tie() -> Result<(), Box<dyn Error>> {
+    // The search crate uses plain minimax to check the D73 properties of
+    // these same positions in tied_root_moves.rs.
+    let positions = include_str!("../../../test-data/tied-root-moves.txt");
+    for entry in positions
+        .lines()
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+    {
+        let (setting, fen) = entry.split_once(' ').ok_or("expected setting and FEN")?;
+        let position = Position::from_fen(fen)?;
+        let setting = setting.parse::<NonZeroU8>()?;
+        assert!(
+            setting > NonZeroU8::MIN,
+            "{fen}: expected several variations"
+        );
+        let limits = Limits {
+            depth: Some(2),
+            ..Limits::default()
+        };
+        let single = reports_with_limits(position, limits.clone());
+        let several = reports_with_setting(position, limits, setting);
+        let first = first_variation_at_depth_two(&single, 1)?;
+        let count = usize::from(setting.get()).min(position.legal_moves().len());
+        let other = first_variation_at_depth_two(&several, count)?;
+        assert!(
+            first == other,
+            "{fen} at depth 2, setting {setting}: first variation differs from setting 1"
+        );
+    }
+    Ok(())
+}
+
+fn first_variation_at_depth_two(
+    reports: &[SearchReport],
+    count: usize,
+) -> Result<&(Score, Vec<Move>), String> {
+    let [
+        SearchReport::FinishedDepth(previous),
+        SearchReport::FinishedDepth(depth),
+        SearchReport::BestMove(Some(best_move)),
+    ] = reports
+    else {
+        return Err("expected two finished depths and a best move".to_owned());
+    };
+    assert_eq!(previous.depth, 1);
+    assert_eq!(depth.depth, 2);
+    assert_eq!(depth.variations.len(), count);
+    let first = depth.variations.first().ok_or("missing first variation")?;
+    assert_eq!(first.1.first(), Some(best_move));
+    Ok(first)
 }
 
 #[test]

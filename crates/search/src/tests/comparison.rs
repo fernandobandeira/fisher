@@ -31,10 +31,13 @@ fn assert_same_as_plain_minimax(
     let result = minimax(position, depth);
 
     assert_eq!(result.score, expected.score, "score of {case}");
-    assert_eq!(
-        result.best_move.map(move_text),
-        expected.chosen_root_move().map(move_text),
-        "chosen root move of {case}"
+    assert!(
+        result.best_move.map_or_else(
+            || expected.root_moves.is_empty(),
+            |best_move| expected.root_moves.contains(&(best_move, expected.score))
+        ),
+        "chosen root move {:?} of {case} is not an equal best move",
+        result.best_move.map(move_text)
     );
     if expected.root_moves.is_empty() {
         assert_eq!(

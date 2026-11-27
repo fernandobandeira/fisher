@@ -5,7 +5,9 @@
 
 mod comparison;
 mod plain_minimax;
+mod remembered_move;
 mod several_variations;
+mod tied_root_moves;
 
 #[path = "tests/support/mate_in_two.rs"]
 mod mate_in_two;

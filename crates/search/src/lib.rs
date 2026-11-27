@@ -1,4 +1,4 @@
-use std::{convert::Infallible, ops::ControlFlow};
+use std::{convert::Infallible, num::NonZeroU8, ops::ControlFlow};
 
 use rules::{Move, PieceKind, Position, Square};
 
@@ -22,10 +22,12 @@ pub struct SearchResult {
     pub principal_variation: Vec<Move>,
 }
 
+/// The result of one finished depth, with its requested ranked variations.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FinishedResult {
-    /// The best score at the root, including when there are no variations.
+    /// The best score from the root's side to move, also present when the root has no legal move.
     pub score: Score,
+    /// Total nodes reached while finding these variations, excluding the root.
     pub nodes: u64,
     /// Exact scores and their variations, best first and in legal move order on ties.
     pub variations: Vec<(Score, Vec<Move>)>,
@@ -59,7 +61,7 @@ pub fn minimax(position: &Position, depth: u8) -> SearchResult {
 /// Searches one depth, calling `interrupted` before playing the move that reaches each node.
 /// Returns `None` if the callback returns true anywhere in the depth.
 #[must_use]
-pub fn minimax_until_interrupted(
+fn minimax_until_interrupted(
     position: &Position,
     depth: u8,
     mut interrupted: impl FnMut() -> bool,
@@ -71,19 +73,18 @@ pub fn minimax_until_interrupted(
 }
 
 /// Searches one depth for up to `requested` variations.
-/// A zero request returns the best score without a variation. At depth zero
-/// and at a root with no legal move, the result has no variations.
+/// At depth zero and at a root with no legal move, the result has no variations.
 /// Calls `interrupted` before each node and returns `None` on the first refusal.
 #[must_use]
 pub fn minimax_variations_until_interrupted(
     position: &Position,
     depth: u8,
-    requested: u8,
+    requested: NonZeroU8,
     mut interrupted: impl FnMut() -> bool,
 ) -> Option<FinishedResult> {
-    if requested <= 1 || depth == 0 {
+    if requested == NonZeroU8::MIN || depth == 0 {
         let result = minimax_until_interrupted(position, depth, interrupted)?;
-        let variations = if requested == 1 && result.best_move.is_some() {
+        let variations = if result.best_move.is_some() {
             vec![(result.score, result.principal_variation)]
         } else {
             Vec::new()
@@ -95,7 +96,7 @@ pub fn minimax_variations_until_interrupted(
         });
     }
 
-    search_root_moves(position, depth, usize::from(requested), &mut || {
+    search_root_moves(position, depth, usize::from(requested.get()), &mut || {
         (!interrupted()).then_some(()).ok_or(())
     })
     .ok()

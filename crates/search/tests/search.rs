@@ -5,7 +5,7 @@ mod perft;
 #[path = "../src/tests/support/principal_variation.rs"]
 mod principal_variation;
 
-use std::error::Error;
+use std::{error::Error, num::NonZeroU8};
 
 use perft::check_perft;
 use rules::Position;
@@ -247,14 +247,12 @@ fn move_text(movement: rules::Move) -> String {
 
 #[test]
 fn checks_for_an_interrupt_before_each_node() {
-    use search::minimax_until_interrupted;
-
     let position = Position::starting();
     // Starting-position count for a single depth of 2, from fisher-4yn.
     let nodes = 59;
     for interrupt_at in [1, 2, 22, nodes] {
         let mut interrupt_checks = 0;
-        let result = minimax_until_interrupted(&position, 2, || {
+        let result = search_variations(&position, 2, NonZeroU8::MIN, || {
             interrupt_checks += 1;
             interrupt_checks >= interrupt_at
         });
@@ -262,21 +260,19 @@ fn checks_for_an_interrupt_before_each_node() {
         assert_eq!(interrupt_checks, interrupt_at);
     }
     let mut interrupt_checks = 0;
-    let result = minimax_until_interrupted(&position, 2, || {
+    let result = search_variations(&position, 2, NonZeroU8::MIN, || {
         interrupt_checks += 1;
         false
     });
     assert_eq!(interrupt_checks, nodes);
-    assert_eq!(result, Some(minimax(&position, 2)));
+    assert_eq!(result.map(SearchResult::from), Some(minimax(&position, 2)));
 }
 
 #[test]
 fn does_not_check_for_an_interrupt_at_the_root() {
-    use search::minimax_until_interrupted;
-
     let position = Position::starting();
     assert_eq!(
-        minimax_until_interrupted(&position, 0, || true),
+        search_variations(&position, 0, NonZeroU8::MIN, || true).map(SearchResult::from),
         Some(minimax(&position, 0))
     );
 }
@@ -284,7 +280,7 @@ fn does_not_check_for_an_interrupt_at_the_root() {
 fn search_variations(
     root: &Position,
     depth: u8,
-    requested: u8,
+    requested: NonZeroU8,
     mut interrupted: impl FnMut() -> bool,
 ) -> Option<FinishedResult> {
     // Exercise all outcomes of one search instantiation for LLVM region coverage.
@@ -297,11 +293,12 @@ fn several_variations_keep_legal_move_order_on_ties() -> TestResult {
     let root = Position::starting();
     let legal_moves = root.legal_moves();
     for requested in [2, 3, 255] {
+        let requested = NonZeroU8::new(requested).ok_or("expected a positive setting")?;
         // No move changes the material in the first two plies from the
         // starting position. D48 keeps legal move order on these ties.
         let expected: Vec<_> = legal_moves
             .iter()
-            .take(usize::from(requested))
+            .take(usize::from(requested.get()))
             .map(Some)
             .collect();
         for depth in [1, 2] {
@@ -319,9 +316,38 @@ fn several_variations_keep_legal_move_order_on_ties() -> TestResult {
 }
 
 #[test]
+fn tied_root_moves_keep_legal_order_across_the_last_requested_place() -> TestResult {
+    let root = Position::from_fen("7k/q7/8/8/8/8/8/R6K w - - 0 1")?;
+    // At depth one, Rxa7 is worth 500 cp. Every other move leaves the
+    // rook and queen on the board, worth -400 cp for White.
+    let (captures, quiet): (Vec<_>, Vec<_>) = root
+        .legal_moves()
+        .into_iter()
+        .partition(|&movement| move_text(movement) == "a1a7");
+    assert_eq!(captures.len(), 1);
+    assert!(quiet.len() > 2, "the tie must extend past rank three");
+    let expected: Vec<_> = captures
+        .into_iter()
+        .map(|movement| (Score::Centipawns(500), vec![movement]))
+        .chain(
+            quiet
+                .into_iter()
+                .take(2)
+                .map(|movement| (Score::Centipawns(-400), vec![movement])),
+        )
+        .collect();
+    let requested = NonZeroU8::new(3).ok_or("expected a positive setting")?;
+    let result =
+        search_variations(&root, 1, requested, || false).ok_or("expected a finished result")?;
+    assert_eq!(result.variations, expected);
+    Ok(())
+}
+
+#[test]
 fn one_requested_variation_matches_the_single_search() -> TestResult {
     let root = Position::starting();
-    let result = search_variations(&root, 2, 1, || false).ok_or("expected a finished result")?;
+    let result = search_variations(&root, 2, NonZeroU8::MIN, || false)
+        .ok_or("expected a finished result")?;
     assert_eq!(result.variations.len(), 1);
     assert_eq!(SearchResult::from(result), minimax(&root, 2));
     Ok(())
@@ -331,6 +357,7 @@ fn one_requested_variation_matches_the_single_search() -> TestResult {
 fn refuses_a_partial_set_of_variations() -> TestResult {
     let root = Position::starting();
     for requested in [1, 2, 3, 255] {
+        let requested = NonZeroU8::new(requested).ok_or("expected a positive setting")?;
         let mut checks = 0;
         let finished = search_variations(&root, 2, requested, || {
             checks += 1;
@@ -358,15 +385,12 @@ fn a_finished_root_can_have_no_variations() -> TestResult {
     let stalemate = Position::from_fen("7k/5Q2/6K1/8/8/8/8/8 b - - 0 1")?;
     for (root, depth) in [(starting, 0), (checkmate, 1), (stalemate, 1)] {
         for requested in [1, 2, 3, 255] {
+            let requested = NonZeroU8::new(requested).ok_or("expected a positive setting")?;
             let result = search_variations(&root, depth, requested, || true)
                 .ok_or("expected a finished result")?;
             assert_eq!(result.variations, []);
             assert_eq!(SearchResult::from(result), minimax(&root, depth));
         }
     }
-    let result =
-        search_variations(&starting, 2, 0, || false).ok_or("expected a finished result")?;
-    assert_eq!(result.variations, []);
-    assert_eq!(result.score, minimax(&starting, 2).score);
     Ok(())
 }

@@ -447,6 +447,8 @@ fn plain_minimax_passes_the_comparison_corpus() -> TestResult {
 #[test]
 fn search_passes_the_comparison_corpus() -> TestResult {
     check_comparison_corpus(|root, depth, requested| {
+        // The driver only requests settings 2, 3 and 255.
+        let requested = std::num::NonZeroU8::new(requested)?;
         crate::minimax_variations_until_interrupted(root, depth, requested, || false)
             .map(|result| result.variations)
     })

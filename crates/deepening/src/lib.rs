@@ -1,4 +1,5 @@
 use std::{
+    num::NonZeroU8,
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -238,7 +239,7 @@ fn run_search<const NODES_BETWEEN_READINGS: u64>(
             break;
         };
         let Some(result) =
-            minimax_variations_until_interrupted(&request.position, depth, 1, || {
+            minimax_variations_until_interrupted(&request.position, depth, NonZeroU8::MIN, || {
                 before_node();
                 limits.stop_before_node::<NODES_BETWEEN_READINGS>(&elapsed)
             })

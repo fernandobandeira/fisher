@@ -444,6 +444,7 @@ fn plain_minimax_passes_the_comparison_corpus() -> TestResult {
     })
 }
 
+// TODO(fisher-8hc.9): Pass the requested count to search and enable this test.
 #[test]
 #[ignore = "fisher-8hc.9 supplies the search that accepts a requested count"]
 fn search_passes_the_comparison_corpus() -> TestResult {

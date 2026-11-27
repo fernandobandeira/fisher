@@ -15,11 +15,12 @@ The 15 searched transcripts that expect an `info` line come from fisher-2aj.2.
 
 ## UCI transcripts
 
-The current UCI transcripts live under `uci/`. Each `.uci` file describes one
-session with a fresh fisher process. Read the records top to bottom. Blank
-lines and lines starting with `#` are comments. The header gives the sources
-and date. A comment above a command or reply names the passage or owner
-decision that supplies its expectation.
+The runner plays a session under `uci/` when a transcript test names it.
+The `whitespace/` and `castling-letters/` sessions are staged for activation.
+Each `.uci` file describes one session with a fresh fisher process. Read
+the records top to bottom. Blank lines and lines starting with `#` are
+comments. The header gives the sources and date. A comment above a command
+or response names the passage or owner decision that supplies its expectation.
 
 | Record | Meaning |
 |---|---|
@@ -397,5 +398,5 @@ send that holds a special byte.
 ## Castling letters
 
 fisher-vls staged the [sessions for kingside castling with `KK` and `H`](uci/castling-letters/README.md)
-on 2026-11-26, before fisher-4h7 accepts both fields over UCI. The runner
-does not read `uci/castling-letters/` until fisher-4h7 moves them into `uci/`.
+on 2026-11-26. The sessions stay staged until fisher-4h7 adds transcript
+tests that name them as `castling-letters/<name>`.

@@ -27,7 +27,7 @@ A deep module gives callers a small interface for a complete job. In Fisher, `Po
 
 `fisher` is the binary, and it holds no logic. Its `main.rs` wires the library crates together: it hands standard input, standard output and the search to the crate that runs the session, and returns what that crate returns. Whatever parses, decides, searches or formats lives in a library crate, where the build enforces its boundary and its tests reach it through the interface the binary uses.
 
-Since fisher-5sg.11, `uci` runs the session and `deepening` runs the search for a `go`. This rule waits for a check (fisher-u8o).
+`cargo xtask thin-binary` checks the binary target, source files and declarations as part of `scripts/check`. Review the wiring inside `main`.
 
 ### Dependency sources and advisories
 

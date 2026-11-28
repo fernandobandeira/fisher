@@ -57,6 +57,8 @@ check 'Guard-Change fixtures' 'scripts/check-guard-change --self-test' \
 check 'Await merge fixtures' 'scripts/test-await-merge' scripts/test-await-merge
 check 'Clock match fixtures' 'python3 -I scripts/run-clock-match-fixtures' \
     python3 -I scripts/run-clock-match-fixtures
+check 'Ordering fixtures' 'python3 -I strength/test-ordering.py' \
+    python3 -I strength/test-ordering.py
 check 'Advisory database fixtures' 'scripts/test-advisory-db' scripts/test-advisory-db
 check 'Clocked SPRT fixtures' 'scripts/test-clocked-sprt' scripts/test-clocked-sprt
 check 'Hosted SPRT fixtures' 'scripts/test-hosted-sprt' scripts/test-hosted-sprt

@@ -3,6 +3,7 @@
 //! minimax (fisher-4yn.4, D35). Both use the evaluation private to this crate,
 //! so these tests live inside it.
 
+mod captures;
 mod comparison;
 mod move_order_memory;
 mod plain_minimax;

@@ -22,13 +22,15 @@ pub(super) type ScoredVariation<'a> = (Score, &'a [Move]);
 /// return `Some(vec![])`, a finished result with no variations.
 /// The existing setting-1 search's empty principal variation maps to
 /// no first variation. A closure returning `None` failed to finish.
-pub(super) fn check_comparison_corpus(
+fn check_comparison_corpus(
+    first_variation: impl Fn(&Position, u8) -> Option<(Score, Vec<Move>)>,
     mut search: impl FnMut(&Position, u8, u8) -> Option<Vec<(Score, Vec<Move>)>>,
 ) -> TestResult {
     visit_comparison_corpus(|root, depth| {
-        let single = crate::minimax(root, depth);
-        let single_moves = single.principal_variation.as_slice();
-        let first = (!single_moves.is_empty()).then_some((single.score, single_moves));
+        let single = first_variation(root, depth);
+        let first = single
+            .as_ref()
+            .map(|(score, moves)| (*score, moves.as_slice()));
         for requested in [2, 3, 255] {
             let case = || format!("{} at depth {depth}, setting {requested}", root.to_fen());
             let result = search(root, depth, requested)
@@ -437,16 +439,27 @@ fn first_variation_must_match_the_single_score_and_all_moves() -> TestResult {
     Ok(())
 }
 
+fn plain_first_variation(root: &Position, depth: u8) -> Option<(Score, Vec<Move>)> {
+    scored_variations(root, depth, 1).pop()
+}
+
+fn search_first_variation(root: &Position, depth: u8) -> Option<(Score, Vec<Move>)> {
+    let single = crate::minimax(root, depth);
+    single
+        .best_move
+        .map(|_| (single.score, single.principal_variation))
+}
+
 #[test]
 fn plain_minimax_passes_the_comparison_corpus() -> TestResult {
-    check_comparison_corpus(|root, depth, requested| {
+    check_comparison_corpus(plain_first_variation, |root, depth, requested| {
         Some(scored_variations(root, depth, requested))
     })
 }
 
 #[test]
 fn search_passes_the_comparison_corpus() -> TestResult {
-    check_comparison_corpus(|root, depth, requested| {
+    check_comparison_corpus(search_first_variation, |root, depth, requested| {
         // The driver only requests settings 2, 3 and 255.
         let requested = std::num::NonZeroU8::new(requested)?;
         crate::minimax_variations_until_interrupted(
@@ -462,7 +475,7 @@ fn search_passes_the_comparison_corpus() -> TestResult {
 
 #[test]
 fn corpus_rejects_a_duplicate_at_setting_three() -> TestResult {
-    let result = check_comparison_corpus(|root, depth, requested| {
+    let result = check_comparison_corpus(plain_first_variation, |root, depth, requested| {
         let mut variations = scored_variations(root, depth, requested);
         if requested == 3
             && let [first, second, ..] = variations.as_mut_slice()
@@ -479,7 +492,7 @@ fn corpus_rejects_a_duplicate_at_setting_three() -> TestResult {
 
 #[test]
 fn corpus_rejects_a_different_first_variation_at_setting_255() -> TestResult {
-    let result = check_comparison_corpus(|root, depth, requested| {
+    let result = check_comparison_corpus(plain_first_variation, |root, depth, requested| {
         let mut variations = scored_variations(root, depth, requested);
         if requested == 255
             && let [first, second, ..] = variations.as_mut_slice()
@@ -496,7 +509,7 @@ fn corpus_rejects_a_different_first_variation_at_setting_255() -> TestResult {
 
 #[test]
 fn corpus_requires_a_finished_result_at_a_terminal_root() -> TestResult {
-    let result = check_comparison_corpus(|root, depth, requested| {
+    let result = check_comparison_corpus(plain_first_variation, |root, depth, requested| {
         (!root.legal_moves().is_empty()).then(|| scored_variations(root, depth, requested))
     });
     assert_rejected(

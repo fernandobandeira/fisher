@@ -1,15 +1,77 @@
 #![cfg(test)]
 
-use std::{error::Error, num::NonZeroU8};
+use std::{cmp::Reverse, error::Error, num::NonZeroU8};
 
 use rules::Position;
 
 use super::{
-    comparison::{check_each_prefix, visit_comparison_corpus},
+    comparison::{check_each_prefix, move_text, score_value, visit_comparison_corpus},
     plain_minimax::plain_minimax,
     several_variations::check_variations,
 };
 use crate::{MoveOrderMemory, SearchResult, minimax, minimax_variations_until_interrupted};
+
+type TestResult = Result<(), Box<dyn Error>>;
+
+#[test]
+fn a_previous_best_loses_priority_when_it_is_no_longer_equal_best() -> TestResult {
+    // Astra's PR #131 review position. At depth 2, f8h6 overtakes f8a3,
+    // and f8e7 precedes f8a3 in legal order at their tied score.
+    let root = Position::from_fen("4kb2/8/7B/8/8/N7/8/R3K3 b - - 0 10")?;
+    check_carried_rankings(&root, 2, [NonZeroU8::new(2).ok_or("expected a setting")?])
+}
+
+#[test]
+fn carried_memory_keeps_the_full_minimax_ranking() -> TestResult {
+    let settings = [2, 3, 255].map(|setting| NonZeroU8::new(setting).expect("positive setting"));
+    visit_comparison_corpus(|root, depth| check_carried_rankings(root, depth, settings))
+}
+
+fn check_carried_rankings<const COUNT: usize>(
+    root: &Position,
+    last_depth: u8,
+    settings: [NonZeroU8; COUNT],
+) -> TestResult {
+    let mut memories = settings.map(|_| MoveOrderMemory::default());
+    let mut previous_best = None;
+    for depth in 1..=last_depth {
+        let plain = plain_minimax(root, depth);
+        let mut ranked = plain.root_moves;
+        // The stable sort preserves plain minimax's legal order within a tie.
+        ranked.sort_by_key(|&(movement, score)| {
+            (
+                Reverse(score_value(score)),
+                score != plain.score || Some(movement) != previous_best,
+            )
+        });
+        previous_best = ranked.first().map(|&(movement, _)| movement);
+        for (setting, memory) in settings.into_iter().zip(&mut memories) {
+            let result =
+                minimax_variations_until_interrupted(root, depth, setting, memory, || false)
+                    .ok_or("search did not finish")?;
+            let case = || format!("{} at depth {depth}, setting {setting}", root.to_fen());
+            assert_eq!(result.score, plain.score, "{}", case());
+            let actual = result.variations.iter().map(|(score, moves)| {
+                moves
+                    .first()
+                    .map(|&movement| (move_text(movement), *score))
+                    .ok_or("missing root move")
+            });
+            let expected = ranked
+                .iter()
+                .take(usize::from(setting.get()))
+                .map(|&(movement, score)| (move_text(movement), score))
+                .collect::<Vec<_>>();
+            assert_eq!(
+                actual.collect::<Result<Vec<_>, _>>()?,
+                expected,
+                "{}",
+                case()
+            );
+        }
+    }
+    Ok(())
+}
 
 #[test]
 fn carried_memory_keeps_the_minimax_score_and_an_equal_best_move() -> Result<(), Box<dyn Error>> {

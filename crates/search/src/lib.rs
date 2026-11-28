@@ -1,4 +1,4 @@
-use std::{convert::Infallible, mem, num::NonZeroU8, ops::ControlFlow};
+use std::{cmp::Reverse, convert::Infallible, mem, num::NonZeroU8, ops::ControlFlow};
 
 use rules::{Move, PieceKind, Position, Square};
 
@@ -29,7 +29,8 @@ pub struct FinishedResult {
     pub score: Score,
     /// Total nodes reached while finding these variations, excluding the root.
     pub nodes: u64,
-    /// Exact scores and their variations, best first. Ties follow the root move order.
+    /// Exact scores and their variations, best first. Ties follow legal order,
+    /// with the remembered root move first if it is still equal best.
     pub variations: Vec<(Score, Vec<Move>)>,
 }
 
@@ -128,6 +129,22 @@ fn single_variation(result: SearchResult) -> FinishedResult {
     }
 }
 
+struct RootVariation {
+    score: i32,
+    legal_index: usize,
+    moves: Vec<Move>,
+}
+
+impl RootVariation {
+    fn rank_key(&self, previous_best: Option<usize>) -> (Reverse<i32>, bool, usize) {
+        (
+            Reverse(self.score),
+            previous_best != Some(self.legal_index),
+            self.legal_index,
+        )
+    }
+}
+
 fn search_root_moves<E>(
     position: &Position,
     depth: u8,
@@ -136,18 +153,15 @@ fn search_root_moves<E>(
     before_node: &mut impl FnMut() -> Result<(), E>,
 ) -> Result<FinishedResult, E> {
     let mut moves = position.legal_moves();
-    let mut previous_reply = try_previous_move_first(&mut moves, previous);
+    let (previous_index, mut previous_reply) = try_previous_move_first(&mut moves, previous);
+    let mut previous_best = previous_index;
     let count = requested.min(moves.len());
-    let mut ranked = Vec::with_capacity(count);
+    let mut ranked: Vec<RootVariation> = Vec::with_capacity(count);
     let mut replies: Vec<_> = (1..depth).map(|_| Vec::new()).collect();
     let mut nodes = 0;
-    for movement in moves {
-        // Once the requested ranks are filled, a new move has to beat the
-        // last score. A tie belongs to the move encountered earlier.
-        let alpha = ranked
-            .last()
-            .filter(|_| ranked.len() == count)
-            .map_or(-i32::MAX, |&(score, _)| score);
+    for (index, movement) in moves.into_iter().enumerate() {
+        let legal_index = legal_root_index(index, previous_index);
+        let alpha = root_alpha(&ranked, count, legal_index);
         let score = -search_move(
             movement,
             1,
@@ -161,26 +175,75 @@ fn search_root_moves<E>(
             // A cutoff in the reply search leaves only an upper bound here.
             continue;
         }
-        let mut variation = vec![movement];
+        let mut moves = vec![movement];
         if let Some(reply) = replies.first() {
-            variation.extend_from_slice(reply);
+            moves.extend_from_slice(reply);
         }
-        let rank = ranked.partition_point(|&(other, _)| other >= score);
-        ranked.insert(rank, (score, variation));
-        ranked.truncate(count);
+        rank_root_variation(
+            &mut ranked,
+            count,
+            &mut previous_best,
+            RootVariation {
+                score,
+                legal_index,
+                moves,
+            },
+        );
     }
 
     let score = ranked
         .first()
-        .map_or_else(|| terminal_score(position, 0), |&(score, _)| score);
+        .map_or_else(|| terminal_score(position, 0), |best| best.score);
     Ok(FinishedResult {
         score: mate_within_depth_or_centipawns(score, depth),
         nodes,
         variations: ranked
             .into_iter()
-            .map(|(score, moves)| (mate_within_depth_or_centipawns(score, depth), moves))
+            .map(|RootVariation { score, moves, .. }| {
+                (mate_within_depth_or_centipawns(score, depth), moves)
+            })
             .collect(),
     })
+}
+
+fn legal_root_index(index: usize, previous_index: Option<usize>) -> usize {
+    match previous_index {
+        Some(previous) if index == 0 => previous,
+        Some(previous) if index <= previous => index - 1,
+        _ => index,
+    }
+}
+
+fn root_alpha(ranked: &[RootVariation], count: usize, legal_index: usize) -> i32 {
+    ranked
+        .last()
+        .filter(|_| ranked.len() == count)
+        .map_or(-i32::MAX, |last| {
+            // A tie can win the last place if this move comes earlier in legal
+            // order. Keep a score equal to last.score inside the search window.
+            last.score - i32::from(legal_index.cmp(&last.legal_index).is_lt())
+        })
+}
+
+fn rank_root_variation(
+    ranked: &mut Vec<RootVariation>,
+    count: usize,
+    previous_best: &mut Option<usize>,
+    variation: RootVariation,
+) {
+    if ranked
+        .first()
+        .is_some_and(|best| variation.score > best.score)
+        && previous_best.take().is_some()
+    {
+        // The new best takes a place, so even if the remembered move displaced
+        // a tie at the last place, that tie still cannot make the ranking.
+        ranked.sort_unstable_by_key(|entry| entry.rank_key(None));
+    }
+    let key = variation.rank_key(*previous_best);
+    let rank = ranked.partition_point(|entry| entry.rank_key(*previous_best).cmp(&key).is_lt());
+    ranked.insert(rank, variation);
+    ranked.truncate(count);
 }
 
 fn search_depth<E>(
@@ -245,7 +308,7 @@ fn search<E>(
         return Ok(terminal_score(position, ply));
     }
 
-    let mut previous_reply = try_previous_move_first(&mut moves, previous);
+    let (_, mut previous_reply) = try_previous_move_first(&mut moves, previous);
     let mut best_score = -i32::MAX;
     let stopped = moves.into_iter().try_for_each(|movement| {
         let reply = search_move(
@@ -306,21 +369,26 @@ fn search_move<E>(
     )
 }
 
-/// Returns the rest of the previous variation for the move promoted to first.
-fn try_previous_move_first<'a>(moves: &mut [Move], previous: &'a [Move]) -> &'a [Move] {
+/// Returns the legal index and remaining variation of the move promoted to first.
+fn try_previous_move_first<'a>(
+    moves: &mut [Move],
+    previous: &'a [Move],
+) -> (Option<usize>, &'a [Move]) {
     let Some((remembered, replies)) = previous.split_first() else {
-        return &[];
+        return (None, &[]);
     };
     let index = moves.iter().position(|movement| {
         movement.from() == remembered.from()
             && movement.to() == remembered.to()
             && movement.promotion() == remembered.promotion()
     });
-    let Some(prefix) = index.and_then(|index| moves.get_mut(..=index)) else {
-        return &[];
+    let Some((index, prefix)) =
+        index.and_then(|index| moves.get_mut(..=index).map(|prefix| (index, prefix)))
+    else {
+        return (None, &[]);
     };
     prefix.rotate_right(1);
-    replies
+    (Some(index), replies)
 }
 
 fn terminal_score(position: &Position, ply: u8) -> i32 {

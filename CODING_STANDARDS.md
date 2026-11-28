@@ -2,6 +2,12 @@
 
 Most of the standards are not written here. They are the formatter, the lints in `Cargo.toml` and `clippy.toml`, the glossary lint, the tests and the crate boundaries, and `scripts/check` runs all of them. A reviewer does not comment on anything those already enforce.
 
+## Deferred-work comments
+
+When deferring work, create a ticket and leave `// TODO(fisher-<id>): <what is missing>` where the work belongs. See [tracker commands](docs/agents/issue-tracker.md). If the work has no place in the code yet, create the ticket alone.
+
+`scripts/check` runs `cargo xtask todos`. It requires that form with a nonblank description in Rust comments under `crates/` and the equivalent `# TODO(fisher-<id>): <what is missing>` in shell and Python comments under `scripts/` and `strength/`. Dotted child IDs are accepted. Bare or malformed `TODO` markers and `FIXME` markers fail.
+
 ## Standards that are still prose
 
 A rule lands here only while it waits for a check, or because it cannot be one.
@@ -35,15 +41,9 @@ Since fisher-5sg.11, `uci` runs the session and `deepening` runs the search for 
 
 `scripts/check` refreshes the RustSec advisory database separately. It verifies the checkout against its Git tree and checks its origin against `deny.toml`. If the refresh fails, it reports the snapshot date and requires a commit at most seven days old. Set `CARGO_NET_OFFLINE=true` to use cached dependencies and a usable snapshot without attempting a refresh. Run `cargo deny --locked fetch db` while online to populate the database. CI restores the database from a daily cache and only `main` saves it after a successful refresh. The weekly Check run requires a successful refresh.
 
-### Deferred work
+### Closing deferred-work tickets
 
-A `TODO` and a ticket always come as a pair, so the code shows what is missing and the tracker shows where it is followed.
-
-- When you defer something, create a ticket for it and leave `// TODO(fisher-<id>): <what is missing>` at the place in the code where the work would go. See [tracker commands](docs/agents/issue-tracker.md). Deferred work that has no place in the code yet has the ticket alone.
-- Every `TODO` in the code names its ticket in that form. A bare `// TODO` is not allowed.
-- A ticket is closed only when no `TODO` still names it.
-
-The first line cannot be a check. The other two wait for one.
+Close a ticket only when no `TODO` still names it. Automating this rule is tracked by fisher-xcl.
 
 ### Flaky tests
 

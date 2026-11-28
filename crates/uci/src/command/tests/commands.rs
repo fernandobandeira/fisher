@@ -1,5 +1,7 @@
 #![cfg(test)]
 
+use std::io;
+
 use super::super::*;
 use rules::Square;
 
@@ -36,6 +38,34 @@ fn multipv_requires_one_value_in_the_declared_range() {
     for line in ["setoption value 3", "setoption name MultiPV Extra value 3"] {
         assert_eq!(parse_command(line), Input::Ignored, "{line}");
     }
+}
+
+#[test]
+fn multipv_with_non_name_word_accepts_value() {
+    // expectations/uci/setoption-name/any-word.uci sets MultiPV to 2 with foo.
+    assert_eq!(
+        parse_command("setoption foo MultiPV value 2"),
+        Input::Handled(Command::SetMultiPv(NonZeroU8::new(2)))
+    );
+}
+
+#[test]
+fn multipv_with_non_name_word_reports_refused_value() -> io::Result<()> {
+    // Use foo from expectations/uci/setoption-name/any-word.uci and the
+    // refused value 0 from expectations/uci/multipv/option-values.uci.
+    let command = "setoption foo MultiPV value 0";
+    assert_eq!(
+        parse_command(command),
+        Input::Handled(Command::SetMultiPv(None))
+    );
+
+    let mut output = Vec::new();
+    crate::run_session(command.as_bytes(), &mut output, "test", |_, _| {})?;
+    assert_eq!(
+        output,
+        b"info string setoption rejected: MultiPV requires an integer from 1 to 255\n"
+    );
+    Ok(())
 }
 
 // The fields and searchmoves example come from the April 2006 UCI specification.

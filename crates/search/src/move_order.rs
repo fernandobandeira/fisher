@@ -1,4 +1,4 @@
-use std::cmp::Reverse;
+use std::{cmp::Reverse, sync::LazyLock};
 
 use rules::{Color, Move, PieceKind, Position, Promotion, Square};
 
@@ -73,11 +73,11 @@ pub(super) fn piece_taken(position: &Position, movement: &Move) -> Option<PieceK
         .then_some(PieceKind::Pawn)
 }
 
-/// A legal pawn move to an empty square on the en passant destination rank
-/// either advances from the same file or captures en passant from another.
-fn is_en_passant(movement: &Move, color: Color) -> bool {
-    let squares = match color {
-        Color::White => [
+type EnPassantSquares = [(Option<Square>, Option<Square>); 8];
+
+static EN_PASSANT_SQUARES: LazyLock<[EnPassantSquares; 2]> = LazyLock::new(|| {
+    [
+        [
             ("a5", "a6"),
             ("b5", "b6"),
             ("c5", "c6"),
@@ -87,7 +87,7 @@ fn is_en_passant(movement: &Move, color: Color) -> bool {
             ("g5", "g6"),
             ("h5", "h6"),
         ],
-        Color::Black => [
+        [
             ("a4", "a3"),
             ("b4", "b3"),
             ("c4", "c3"),
@@ -97,10 +97,21 @@ fn is_en_passant(movement: &Move, color: Color) -> bool {
             ("g4", "g3"),
             ("h4", "h3"),
         ],
+    ]
+    .map(|squares| squares.map(|(from, to)| (Square::parse(from), Square::parse(to))))
+});
+
+/// A legal pawn move to an empty square on the en passant destination rank
+/// either advances from the same file or captures en passant from another.
+fn is_en_passant(movement: &Move, color: Color) -> bool {
+    let [white, black] = &*EN_PASSANT_SQUARES;
+    let squares = match color {
+        Color::White => white,
+        Color::Black => black,
     };
-    squares.into_iter().any(|(from, to)| {
-        Square::parse(to) == Some(movement.to()) && Square::parse(from) != Some(movement.from())
-    })
+    squares
+        .iter()
+        .any(|&(from, to)| to == Some(movement.to()) && from != Some(movement.from()))
 }
 
 fn piece_value(kind: PieceKind) -> u8 {

@@ -41,9 +41,9 @@ A `TODO` and a ticket always come as a pair, so the code shows what is missing a
 
 - When you defer something, create a ticket for it and leave `// TODO(fisher-<id>): <what is missing>` at the place in the code where the work would go. See [tracker commands](docs/agents/issue-tracker.md). Deferred work that has no place in the code yet has the ticket alone.
 - Every `TODO` in the code names its ticket in that form. A bare `// TODO` is not allowed.
-- A ticket is closed only when no `TODO` still names it.
+- A ticket is closed only when no `TODO` still names it. [`scripts/close-ticket`](scripts/close-ticket) enforces this at close against `origin/main`. A TODO naming a child ticket blocks that child's closure.
 
-The first line cannot be a check. The other two wait for one.
+The first rule cannot be a check. The TODO format rule still waits for one.
 
 ### Flaky tests
 

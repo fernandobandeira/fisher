@@ -1,7 +1,6 @@
 #![cfg(test)]
-//! D68, staged for fisher-707.4. Add `mod from_previous_root;` to
-//! `remembered_move.rs` when the interruptible search takes `MoveOrderMemory`.
-//! `MoveOrderMemory::default()` stands in for the empty constructor.
+//! D68 checks that a move remembered from a previous root is played as the
+//! matching legal move of the position in hand.
 
 use std::{error::Error, num::NonZeroU8};
 

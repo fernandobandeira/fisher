@@ -37,4 +37,5 @@ check 'All 100 published mates' -p search --test search all_published_mates_in_t
 check 'Plain minimax comparison on the six perft positions' -p search --lib tests::comparison::perft_positions_at_depths_four_and_five
 check 'Plain minimax comparison on the last position of each seeded walk' -p search --lib tests::comparison::last_position_of_each_seeded_walk_at_depth_four
 check 'Plain minimax comparison on all 100 published mates' -p search --lib tests::comparison::all_published_mates_in_two_at_depth_four
+check 'Plain minimax comparison with carried move order memory' -p search --lib tests::comparison::carried_move_order_memory_keeps_plain_minimax_scores
 check 'Plain minimax four-ply node counts' -p search --lib tests::plain_minimax::node_count_matches_published_perft_at_four_plies

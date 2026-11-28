@@ -2,7 +2,11 @@
 //! Compares the search that `search` exports with plain minimax, on the
 //! corpus of fisher-4yn. Plain minimax supplies every expected value here.
 
-use std::error::Error;
+use std::{
+    error::Error,
+    io::{self, Write},
+    num::NonZeroU8,
+};
 
 use rules::{Move, Position, Promotion};
 use shakmaty::{CastlingMode, Chess, fen::Fen};
@@ -13,7 +17,10 @@ use super::{
     plain_minimax::plain_minimax,
     principal_variation::{self, MATE_SCORE},
 };
-use crate::{Score, SearchResult, minimax, minimax_until_interrupted};
+use crate::{
+    MoveOrderMemory, Score, SearchResult, minimax, minimax_until_interrupted,
+    minimax_variations_until_interrupted,
+};
 
 type TestResult = Result<(), Box<dyn Error>>;
 
@@ -145,10 +152,6 @@ pub(super) fn move_text(movement: Move) -> String {
         None => "",
     };
     format!("{}{}{promotion}", movement.from(), movement.to())
-}
-
-fn compare_at_depths(fen: &str, depths: impl IntoIterator<Item = u8>) -> TestResult {
-    visit_at_depths(fen, depths, &mut compare_case)
 }
 
 fn compare_case(position: &Position, depth: u8) -> TestResult {
@@ -350,8 +353,12 @@ fn published_mates_in_two_on_the_horizon() -> TestResult {
 #[test]
 #[ignore = "run in release mode for the deeper comparison"]
 fn perft_positions_at_depths_four_and_five() -> TestResult {
+    visit_deep_perft_positions(&mut compare_case)
+}
+
+fn visit_deep_perft_positions(visit: &mut impl FnMut(&Position, u8) -> TestResult) -> TestResult {
     for record in records()? {
-        compare_at_depths(record.fen, 4..=5)?;
+        visit_at_depths(record.fen, 4..=5, visit)?;
     }
     Ok(())
 }
@@ -359,10 +366,14 @@ fn perft_positions_at_depths_four_and_five() -> TestResult {
 #[test]
 #[ignore = "run in release mode for the deeper comparison"]
 fn last_position_of_each_seeded_walk_at_depth_four() -> TestResult {
+    visit_deep_seeded_walks(&mut compare_case)
+}
+
+fn visit_deep_seeded_walks(visit: &mut impl FnMut(&Position, u8) -> TestResult) -> TestResult {
     for seed in 1..=3 {
         let walk = seeded_walk(seed)?;
         let last = walk.last().ok_or("empty walk")?;
-        assert_same_as_plain_minimax(last, 4)?;
+        visit(last, 4)?;
     }
     Ok(())
 }
@@ -370,10 +381,7 @@ fn last_position_of_each_seeded_walk_at_depth_four() -> TestResult {
 #[test]
 #[ignore = "run in release mode for every published mate-in-two position"]
 fn all_published_mates_in_two_at_depth_four() -> TestResult {
-    let records = mate_in_two::records()?;
-    // The published table is documented as containing 100 positions.
-    assert_eq!(records.len(), 100);
-    for record in records {
+    for record in all_published_mate_records()? {
         let result = assert_same_as_plain_minimax(&Position::from_fen(record.fen)?, 4)?;
         assert_eq!(
             result.best_move.map(move_text).as_deref(),
@@ -382,5 +390,53 @@ fn all_published_mates_in_two_at_depth_four() -> TestResult {
             record.id
         );
     }
+    Ok(())
+}
+
+fn all_published_mate_records() -> Result<Vec<mate_in_two::Record>, String> {
+    let records = mate_in_two::records()?;
+    // The published table is documented as containing 100 positions.
+    assert_eq!(records.len(), 100);
+    Ok(records)
+}
+
+#[test]
+#[ignore = "run in release mode for the deeper comparison with carried move order memory"]
+fn carried_move_order_memory_keeps_plain_minimax_scores() -> TestResult {
+    let mut cases = 0;
+    let mut compare = |position: &Position, depth| {
+        check_carried_score(position, depth)?;
+        cases += 1;
+        Ok(())
+    };
+    visit_deep_perft_positions(&mut compare)?;
+    visit_deep_seeded_walks(&mut compare)?;
+    for record in all_published_mate_records()? {
+        visit_at_depths(record.fen, [4], &mut compare)?;
+    }
+    writeln!(
+        io::stdout().lock(),
+        "{cases} release-only scores matched plain minimax with carried move order memory"
+    )?;
+    Ok(())
+}
+
+fn check_carried_score(position: &Position, depth: u8) -> TestResult {
+    let mut memory = MoveOrderMemory::default();
+    let mut search = |depth| {
+        minimax_variations_until_interrupted(position, depth, NonZeroU8::MIN, &mut memory, || false)
+            .ok_or("search did not finish")
+    };
+    for earlier in 1..depth {
+        search(earlier)?;
+    }
+    let actual = search(depth)?;
+    let expected = plain_minimax(position, depth);
+    assert_eq!(
+        actual.score,
+        expected.score,
+        "{} at depth {depth} with carried move order memory",
+        position.to_fen()
+    );
     Ok(())
 }

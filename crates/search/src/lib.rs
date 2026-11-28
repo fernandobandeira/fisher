@@ -1,6 +1,9 @@
-use std::{cmp::Reverse, convert::Infallible, mem, num::NonZeroU8, ops::ControlFlow};
+use std::{cmp::Reverse, convert::Infallible, num::NonZeroU8, ops::ControlFlow};
 
 use rules::{Move, PieceKind, Position, Square};
+
+mod move_order;
+use move_order::ordered_moves;
 
 const CHECKMATE: i32 = 100_000;
 
@@ -61,8 +64,8 @@ pub struct MoveOrderMemory {
 /// The score is from the root's side to move, and nodes exclude the root.
 #[must_use]
 pub fn minimax(position: &Position, depth: u8) -> SearchResult {
-    let Ok(result) = search_depth(position, depth, &[], &mut || Ok::<(), Infallible>(()));
-    result
+    let Ok(result) = search_root_moves(position, depth, 1, &[], &mut || Ok::<(), Infallible>(()));
+    result.into()
 }
 
 /// Searches one depth, calling `interrupted` before playing the move that reaches each node.
@@ -98,35 +101,19 @@ pub fn minimax_variations_until_interrupted(
 ) -> Option<FinishedResult> {
     let before_node = &mut || (!interrupted()).then_some(()).ok_or(());
     let previous = &memory.principal_variation;
-    let result = if requested == NonZeroU8::MIN || depth == 0 {
-        search_depth(position, depth, previous, before_node).map(single_variation)
-    } else {
-        search_root_moves(
-            position,
-            depth,
-            usize::from(requested.get()),
-            previous,
-            before_node,
-        )
-    }
+    let result = search_root_moves(
+        position,
+        depth,
+        usize::from(requested.get()),
+        previous,
+        before_node,
+    )
     .ok()?;
     memory.principal_variation.clear();
     if let Some((_, moves)) = result.variations.first() {
         memory.principal_variation.extend_from_slice(moves);
     }
     Some(result)
-}
-
-fn single_variation(result: SearchResult) -> FinishedResult {
-    FinishedResult {
-        score: result.score,
-        nodes: result.nodes,
-        variations: result
-            .best_move
-            .map(|_| (result.score, result.principal_variation))
-            .into_iter()
-            .collect(),
-    }
 }
 
 struct RootVariation {
@@ -152,23 +139,33 @@ fn search_root_moves<E>(
     previous: &[Move],
     before_node: &mut impl FnMut() -> Result<(), E>,
 ) -> Result<FinishedResult, E> {
-    let mut moves = position.legal_moves();
-    let (previous_index, mut previous_reply) = try_previous_move_first(&mut moves, previous);
-    let mut previous_best = previous_index;
+    if depth == 0 {
+        return Ok(FinishedResult {
+            score: Score::Centipawns(material(position)),
+            nodes: 0,
+            variations: Vec::new(),
+        });
+    }
+
+    let moves = position.legal_moves();
     let count = requested.min(moves.len());
     let mut ranked: Vec<RootVariation> = Vec::with_capacity(count);
+    // Reuse one buffer per ply across sibling searches.
     let mut replies: Vec<_> = (1..depth).map(|_| Vec::new()).collect();
     let mut nodes = 0;
-    for (index, movement) in moves.into_iter().enumerate() {
-        let legal_index = legal_root_index(index, previous_index);
-        let alpha = root_alpha(&ranked, count, legal_index);
+    let mut ordered = ordered_moves(position, &moves, previous).peekable();
+    let mut previous_best = ordered
+        .peek()
+        .and_then(|&(index, _, replies)| replies.map(|_| index));
+    for (legal_index, movement, previous_reply) in ordered {
+        let alpha = root_alpha(&ranked, count, legal_index, previous_best);
         let score = -search_move(
             movement,
             1,
             (-i32::MAX, -alpha),
             &mut nodes,
             &mut replies,
-            mem::take(&mut previous_reply),
+            previous_reply.unwrap_or_default(),
             before_node,
         )?;
         if score <= alpha {
@@ -206,22 +203,21 @@ fn search_root_moves<E>(
     })
 }
 
-fn legal_root_index(index: usize, previous_index: Option<usize>) -> usize {
-    match previous_index {
-        Some(previous) if index == 0 => previous,
-        Some(previous) if index <= previous => index - 1,
-        _ => index,
-    }
-}
-
-fn root_alpha(ranked: &[RootVariation], count: usize, legal_index: usize) -> i32 {
+fn root_alpha(
+    ranked: &[RootVariation],
+    count: usize,
+    legal_index: usize,
+    previous_best: Option<usize>,
+) -> i32 {
     ranked
         .last()
         .filter(|_| ranked.len() == count)
         .map_or(-i32::MAX, |last| {
             // A tie can win the last place if this move comes earlier in legal
             // order. Keep a score equal to last.score inside the search window.
-            last.score - i32::from(legal_index.cmp(&last.legal_index).is_lt())
+            let wins_tie = previous_best != Some(last.legal_index)
+                && legal_index.cmp(&last.legal_index).is_lt();
+            last.score - i32::from(wins_tie)
         })
 }
 
@@ -244,35 +240,6 @@ fn rank_root_variation(
     let rank = ranked.partition_point(|entry| entry.rank_key(*previous_best).cmp(&key).is_lt());
     ranked.insert(rank, variation);
     ranked.truncate(count);
-}
-
-fn search_depth<E>(
-    position: &Position,
-    depth: u8,
-    previous: &[Move],
-    before_node: &mut impl FnMut() -> Result<(), E>,
-) -> Result<SearchResult, E> {
-    let mut nodes = 0;
-    // Reuse one buffer per ply across sibling searches.
-    let mut variations: Vec<_> = (0..depth).map(|_| Vec::new()).collect();
-    search(
-        position,
-        0,
-        (-i32::MAX, i32::MAX),
-        &mut nodes,
-        &mut variations,
-        previous,
-        before_node,
-    )
-    .map(|score| {
-        let principal_variation = variations.into_iter().next().unwrap_or_default();
-        SearchResult {
-            best_move: principal_variation.first().copied(),
-            score: mate_within_depth_or_centipawns(score, depth),
-            nodes,
-            principal_variation,
-        }
-    })
 }
 
 /// Returns a mate score if the mate is within the search depth, or a centipawn score otherwise.
@@ -303,21 +270,21 @@ fn search<E>(
         return Ok(material(position));
     };
     best_variation.clear();
-    let mut moves = position.legal_moves();
+    let moves = position.legal_moves();
     if moves.is_empty() {
         return Ok(terminal_score(position, ply));
     }
 
-    let (_, mut previous_reply) = try_previous_move_first(&mut moves, previous);
     let mut best_score = -i32::MAX;
-    let stopped = moves.into_iter().try_for_each(|movement| {
+    let mut ordered = ordered_moves(position, &moves, previous);
+    let stopped = ordered.try_for_each(|(_, movement, previous_reply)| {
         let reply = search_move(
             movement,
             ply + 1,
             (-beta, -alpha),
             nodes,
             replies,
-            mem::take(&mut previous_reply),
+            previous_reply.unwrap_or_default(),
             before_node,
         );
         reply.map_or_else(
@@ -367,28 +334,6 @@ fn search_move<E>(
         previous,
         before_node,
     )
-}
-
-/// Returns the legal index and remaining variation of the move promoted to first.
-fn try_previous_move_first<'a>(
-    moves: &mut [Move],
-    previous: &'a [Move],
-) -> (Option<usize>, &'a [Move]) {
-    let Some((remembered, replies)) = previous.split_first() else {
-        return (None, &[]);
-    };
-    let index = moves.iter().position(|movement| {
-        movement.from() == remembered.from()
-            && movement.to() == remembered.to()
-            && movement.promotion() == remembered.promotion()
-    });
-    let Some((index, prefix)) =
-        index.and_then(|index| moves.get_mut(..=index).map(|prefix| (index, prefix)))
-    else {
-        return (None, &[]);
-    };
-    prefix.rotate_right(1);
-    (Some(index), replies)
 }
 
 fn terminal_score(position: &Position, ply: u8) -> i32 {

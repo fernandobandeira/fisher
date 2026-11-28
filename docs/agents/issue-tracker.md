@@ -9,7 +9,7 @@ Beads stores Fisher issues in a local Dolt database. IDs start with `fisher-`. S
 - Record dependencies with `bd dep add <ticket-id> --blocked-by <blocker-id>`.
 - Fetch a ticket by ID with `bd show <id>`.
 - Find implementation work with `bd ready --type task --label ready-for-agent --unassigned`. Claim it with `bd update <id> --claim` before starting work.
-- Record updates and evidence with `bd comments add <id> -f <path>`. Close the ticket with `bd close <id>` once its acceptance criteria and the checks pass.
+- Record updates and evidence with `bd comments add <id> -f <path>`. Run [`scripts/close-ticket <id> [bd close options]`](../../scripts/close-ticket) once the ticket's acceptance criteria and the checks pass. Close one ticket per invocation. The wrapper fetches `origin/main` and refuses if a TODO names that exact ID.
 
 Use `bd prime` for the general Beads command reference.
 

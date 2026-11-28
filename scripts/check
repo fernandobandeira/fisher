@@ -55,6 +55,7 @@ check 'Crate source path fixtures' 'scripts/check-source-paths --self-test' \
 check 'Guard-Change fixtures' 'scripts/check-guard-change --self-test' \
     scripts/check-guard-change --self-test
 check 'Await merge fixtures' 'scripts/test-await-merge' scripts/test-await-merge
+check 'Close ticket fixtures' 'scripts/test-close-ticket' scripts/test-close-ticket
 check 'Clock match fixtures' 'python3 -I scripts/run-clock-match-fixtures' \
     python3 -I scripts/run-clock-match-fixtures
 check 'Ordering fixtures' 'python3 -I strength/test-ordering.py' \

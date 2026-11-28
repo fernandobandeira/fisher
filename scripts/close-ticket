@@ -1,0 +1,23 @@
+#!/bin/sh
+set -eu
+
+case ${1-} in
+    fisher-?*) id=$1; shift ;;
+    *) printf 'Usage: scripts/close-ticket <fisher-id> [bd close options]\n' >&2; exit 2 ;;
+esac
+
+main=refs/remotes/origin/main
+if ! git fetch --quiet origin "+refs/heads/main:$main"; then
+    printf 'Cannot close %s: could not fetch main from origin.\n' "$id" >&2
+    exit 1
+fi
+
+if matches=$(git grep -nF --full-name -e "TODO($id)" "$main" -- :/); then
+    printf 'Cannot close %s while these TODOs are on origin/main:\n%s\n' "$id" "$matches" >&2
+    exit 1
+elif [ "$?" -ne 1 ]; then
+    printf 'Cannot close %s: could not search origin/main for TODOs.\n' "$id" >&2
+    exit 1
+fi
+
+exec bd close "$id" "$@"

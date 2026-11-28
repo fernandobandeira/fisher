@@ -3,7 +3,7 @@ use std::{cmp::Reverse, convert::Infallible, num::NonZeroU8};
 use rules::{Move, PieceKind, Position, Square};
 
 mod move_order;
-use move_order::{KillerMoves, MovePriority, capture_priority, ordered_moves};
+use move_order::{KillerMoves, MovePriority, ordered_moves};
 
 const CHECKMATE: i32 = 100_000;
 
@@ -314,12 +314,7 @@ fn search<E>(
             before_node,
         )?;
         if score >= beta {
-            remember_cutoff(
-                progress.killers.get_mut(ply_index),
-                position,
-                &movement,
-                priority,
-            );
+            remember_cutoff(progress.killers.get_mut(ply_index), &movement, priority);
             return Ok(score);
         }
         if score > best.score || (score == best.score && wins_tie) {
@@ -348,18 +343,12 @@ impl BestReply {
     }
 }
 
-fn remember_cutoff(
-    killers: Option<&mut KillerMoves>,
-    position: &Position,
-    movement: &Move,
-    priority: MovePriority,
-) {
-    let quiet = if priority == MovePriority::Remembered {
-        capture_priority(position, movement) == MovePriority::Quiet
-    } else {
-        priority.is_quiet()
-    };
-    if quiet && let Some(killers) = killers {
+fn remember_cutoff(killers: Option<&mut KillerMoves>, movement: &Move, priority: MovePriority) {
+    // A remembered variation is searched first with a full window, so
+    // its remembered moves cannot cut off.
+    if priority.is_quiet()
+        && let Some(killers) = killers
+    {
         killers.remember(movement);
     }
 }

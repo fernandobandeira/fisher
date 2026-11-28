@@ -52,11 +52,34 @@ that contains the sample. Use the hosted run's times for D64.
 
 ### Time threshold
 
-The owner's agent settled the verdict rule on 2026-11-27. The threshold in
-[`ordering-threshold.tsv`](ordering-threshold.tsv) always governs a D64 verdict.
-A verdict requires the CPU model in that file. The script prints the CPU model
-before timing. If it differs, discard the run for the verdict and dispatch again
-based on the CPU model alone.
+The owner's agent settled the verdict rule on 2026-11-28. The recorded 1%
+threshold in [`ordering-threshold.tsv`](ordering-threshold.tsv) always governs
+a D64 verdict. A measurement on any hosted CPU model counts, and node counts
+are exact across machines. The time verdict is about the measured median time
+on the runner used.
+
+The first run dispatched for a measured revision against its base decides.
+Repeat a run only for a reason fixed before timing, such as a failed or
+cancelled job, a failed build, or node counts that did not repeat. A timing
+result is never a reason to repeat a run. Record the link, CPU model and result
+of every run of the measured revision in the ordering's pull request.
+Identify the run that supplied the verdict.
+
+- If the measured median time change is at or below −2% or above +2%, take
+  the time verdict from that run on any hosted CPU model. These bounds allow
+  for the 1% threshold and the observed discrepancy of about one percentage
+  point between the nominal and measured delay in the fixed-delay control.
+- A change greater than −2% and at most +2% is marginal. Take the time
+  verdict only on the recorded CPU model or from a paired run
+  (`calibrate_first`) whose calibration is at most the recorded threshold.
+  Any follow-up to resolve a marginal first run must use one of these routes,
+  even if its result is clear. Otherwise, bring the marginal run to the owner.
+  Do not dispatch again in search of a clear result.
+
+Use the classification printed beside the percentage. The script classifies
+the exact change before rounding the displayed percentage. If runs of the same
+revision against its base indicate different verdicts, withhold the verdict and
+bring all the runs to the owner.
 
 Dispatch **Ordering sample** with the measured revision blank to calibrate.
 The workflow builds the base twice and runs five self-comparisons. Divide each
@@ -66,8 +89,12 @@ allows up to 300 minutes.
 
 Set `calibrate_first` with a measured revision for a calibration check before
 measurement on the same runner. The recorded threshold still governs. If the
-paired calibration exceeds the recorded threshold, withhold the verdict and
-bring the run to the owner.
+paired calibration exceeds the recorded threshold, withhold the verdict
+regardless of the measured time change and bring the run to the owner.
+
+The accepted risk is that a paired run measures noise on its own runner and
+cannot show whether the ordering costs more on another CPU. A real cost of up
+to about 2% can read inside the threshold even on the recorded CPU.
 
 ### Hosted qualification
 
@@ -90,10 +117,10 @@ reported **114,642,076 nodes**, matching the local result.
 | [46043091865](https://github.com/fernandobandeira/fisher/actions/runs/46043091865) | AMD EPYC 7763 | Reversing legal move traversal below the root changed 114,642,076 nodes to 611,209,419. |
 
 The fixed delay took a smaller share of the sample time on the slower CPU.
-The difference between the nominal delay and the measured change was about
-one percentage point, consistent with build-layout effects on timing. The
-revised copy adds 2.5% of each search's elapsed time before reporting the best
-move, so the delay scales with the work the runner did.
+On EPYC 7763, the nominal delay of about 1.67% measured +0.65%, a discrepancy
+of about one percentage point. The revised copy adds 2.5% of each search's
+elapsed time before reporting the best move, so the delay scales with the
+work the runner did.
 
 Lightweight tags keep the three control revisions available to rebuild.
 
@@ -108,7 +135,7 @@ git fetch origin 'refs/tags/ordering-qualification/*:refs/tags/ordering-qualific
 ```
 
 Run `python3 strength/test-ordering.py` to check the timing comparison with
-a planted first-run cost.
+a planted first-run cost and verify classification at the time-change bounds.
 
 ### Reproduce the draw
 

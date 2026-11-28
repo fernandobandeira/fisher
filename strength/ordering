@@ -258,7 +258,7 @@ def report_threshold(model):
     print(f"Recorded time threshold: {record['percent']}% (CPU model: {record['cpu_model']})", flush=True)
     if model != record["cpu_model"]:
         print("CPU model differs from the model in the recorded D64 threshold. "
-              "Dispatch again on the recorded model before taking a verdict.", flush=True)
+              "See strength/README.md for the time verdict rule.", flush=True)
 
 
 def compare(revisions, binaries, positions):
@@ -281,7 +281,13 @@ def compare(revisions, binaries, positions):
         print(f"{label} {commit}: {sum(counts)} nodes, {middle / 1e9:.6f} s median"
               f" ({readings} s)", flush=True)
     gap = 100 * (medians[1] - medians[0]) / medians[0]
-    print(f"Measured time change: {float(gap):+.4f}%", flush=True)
+    if gap <= -2:
+        classification = "clear gain"
+    elif gap > 2:
+        classification = "clear fail"
+    else:
+        classification = "marginal"
+    print(f"Measured time change: {float(gap):+.4f}% ({classification})", flush=True)
     return gap
 
 

@@ -5,29 +5,81 @@ use rules::{Color, Move, PieceKind, Position, Promotion, Square};
 #[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd)]
 pub(super) enum MovePriority {
     Quiet,
+    OlderKiller,
+    LatestKiller,
     QueenPromotion,
     Capture { taken: u8, taking: Reverse<u8> },
     Remembered,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+struct MoveKey(Square, Square, Option<Promotion>);
+
+impl From<&Move> for MoveKey {
+    fn from(movement: &Move) -> Self {
+        Self(movement.from(), movement.to(), movement.promotion())
+    }
+}
+
+#[derive(Clone, Copy, Default)]
+pub(super) struct KillerMoves {
+    latest: Option<MoveKey>,
+    older: Option<MoveKey>,
+}
+
+impl KillerMoves {
+    pub(super) fn remember(&mut self, movement: &Move) {
+        let key = Some(MoveKey::from(movement));
+        if self.latest != key {
+            self.older = self.latest;
+            self.latest = key;
+        }
+    }
+
+    pub(super) fn priority(self, movement: &Move) -> MovePriority {
+        let key = Some(MoveKey::from(movement));
+        if self.latest == key {
+            MovePriority::LatestKiller
+        } else if self.older == key {
+            MovePriority::OlderKiller
+        } else {
+            MovePriority::Quiet
+        }
+    }
+}
+
+impl MovePriority {
+    pub(super) fn is_quiet(self) -> bool {
+        self <= Self::LatestKiller
+    }
+
+    pub(super) fn is_killer(self) -> bool {
+        matches!(self, Self::LatestKiller | Self::OlderKiller)
+    }
 }
 
 pub(super) fn ordered_moves<'a>(
     position: &Position,
     moves: &'a [Move],
     previous: &'a [Move],
-) -> impl Iterator<Item = (usize, Move, Option<&'a [Move]>)> + 'a {
+    killers: KillerMoves,
+) -> impl Iterator<Item = (usize, Move, MovePriority, Option<&'a [Move]>)> + 'a {
     let mut order: Vec<_> = moves
         .iter()
         .enumerate()
         .map(|(index, movement)| {
-            let remembered = previous.first().is_some_and(|prior| {
-                movement.from() == prior.from()
-                    && movement.to() == prior.to()
-                    && movement.promotion() == prior.promotion()
-            });
-            let priority = if remembered {
-                MovePriority::Remembered
-            } else {
-                capture_priority(position, movement)
+            let priority = match previous.first() {
+                Some(prior) if MoveKey::from(movement) == MoveKey::from(prior) => {
+                    MovePriority::Remembered
+                }
+                _ => {
+                    let priority = capture_priority(position, movement);
+                    if priority == MovePriority::Quiet {
+                        killers.priority(movement)
+                    } else {
+                        priority
+                    }
+                }
             };
             (Reverse(priority), index, movement)
         })
@@ -38,7 +90,7 @@ pub(super) fn ordered_moves<'a>(
         .map(move |(Reverse(priority), index, movement)| {
             let replies = (priority == MovePriority::Remembered)
                 .then(|| previous.get(1..).unwrap_or_default());
-            (index, *movement, replies)
+            (index, *movement, priority, replies)
         })
 }
 

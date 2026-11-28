@@ -1,9 +1,9 @@
-use std::{cmp::Reverse, convert::Infallible, num::NonZeroU8, ops::ControlFlow};
+use std::{cmp::Reverse, convert::Infallible, num::NonZeroU8};
 
 use rules::{Move, PieceKind, Position, Square};
 
 mod move_order;
-use move_order::ordered_moves;
+use move_order::{KillerMoves, MovePriority, ordered_moves};
 
 const CHECKMATE: i32 = 100_000;
 
@@ -57,6 +57,7 @@ impl From<FinishedResult> for SearchResult {
 #[derive(Default)]
 pub struct MoveOrderMemory {
     principal_variation: Vec<Move>,
+    killers: Vec<KillerMoves>,
 }
 
 /// Searches to the given depth in plies with alpha-beta pruning.
@@ -64,7 +65,14 @@ pub struct MoveOrderMemory {
 /// The score is from the root's side to move, and nodes exclude the root.
 #[must_use]
 pub fn minimax(position: &Position, depth: u8) -> SearchResult {
-    let Ok(result) = search_root_moves(position, depth, 1, &[], &mut || Ok::<(), Infallible>(()));
+    let Ok(result) = search_root_moves(
+        position,
+        depth,
+        1,
+        &[],
+        &mut vec![KillerMoves::default(); usize::from(depth)],
+        &mut || Ok::<(), Infallible>(()),
+    );
     result.into()
 }
 
@@ -101,11 +109,15 @@ pub fn minimax_variations_until_interrupted(
 ) -> Option<FinishedResult> {
     let before_node = &mut || (!interrupted()).then_some(()).ok_or(());
     let previous = &memory.principal_variation;
+    memory
+        .killers
+        .resize(usize::from(depth), KillerMoves::default());
     let result = search_root_moves(
         position,
         depth,
         usize::from(requested.get()),
         previous,
+        &mut memory.killers,
         before_node,
     )
     .ok()?;
@@ -120,6 +132,11 @@ struct RootVariation {
     score: i32,
     legal_index: usize,
     moves: Vec<Move>,
+}
+
+struct SearchProgress<'a> {
+    nodes: u64,
+    killers: &'a mut [KillerMoves],
 }
 
 impl RootVariation {
@@ -137,6 +154,7 @@ fn search_root_moves<E>(
     depth: u8,
     requested: usize,
     previous: &[Move],
+    killers: &mut [KillerMoves],
     before_node: &mut impl FnMut() -> Result<(), E>,
 ) -> Result<FinishedResult, E> {
     if depth == 0 {
@@ -152,18 +170,18 @@ fn search_root_moves<E>(
     let mut ranked: Vec<RootVariation> = Vec::with_capacity(count);
     // Reuse one buffer per ply across sibling searches.
     let mut replies: Vec<_> = (1..depth).map(|_| Vec::new()).collect();
-    let mut nodes = 0;
-    let mut ordered = ordered_moves(position, &moves, previous).peekable();
+    let mut progress = SearchProgress { nodes: 0, killers };
+    let mut ordered = ordered_moves(position, &moves, previous, KillerMoves::default()).peekable();
     let mut previous_best = ordered
         .peek()
-        .and_then(|&(index, _, replies)| replies.map(|_| index));
-    for (legal_index, movement, previous_reply) in ordered {
+        .and_then(|&(index, _, _, replies)| replies.map(|_| index));
+    for (legal_index, movement, _, previous_reply) in ordered {
         let alpha = root_alpha(&ranked, count, legal_index, previous_best);
         let score = -search_move(
             movement,
             1,
             (-i32::MAX, -alpha),
-            &mut nodes,
+            &mut progress,
             &mut replies,
             previous_reply.unwrap_or_default(),
             before_node,
@@ -193,7 +211,7 @@ fn search_root_moves<E>(
         .map_or_else(|| terminal_score(position, 0), |best| best.score);
     Ok(FinishedResult {
         score: mate_within_depth_or_centipawns(score, depth),
-        nodes,
+        nodes: progress.nodes,
         variations: ranked
             .into_iter()
             .map(|RootVariation { score, moves, .. }| {
@@ -260,8 +278,8 @@ fn mate_within_depth_or_centipawns(score: i32, depth: u8) -> Score {
 fn search<E>(
     position: &Position,
     ply: u8,
-    (mut alpha, beta): (i32, i32),
-    nodes: &mut u64,
+    (alpha, beta): (i32, i32),
+    progress: &mut SearchProgress<'_>,
     variations: &mut [Vec<Move>],
     previous: &[Move],
     before_node: &mut impl FnMut() -> Result<(), E>,
@@ -275,42 +293,62 @@ fn search<E>(
         return Ok(terminal_score(position, ply));
     }
 
-    let mut best_score = -i32::MAX;
-    let mut ordered = ordered_moves(position, &moves, previous);
-    let stopped = ordered.try_for_each(|(_, movement, previous_reply)| {
-        let reply = search_move(
+    let mut best = BestReply {
+        score: -i32::MAX,
+        killer_index: None,
+    };
+    let ply_index = usize::from(ply);
+    let killers = progress.killers.get(ply_index).copied().unwrap_or_default();
+    let ordered = ordered_moves(position, &moves, previous, killers);
+    for (index, movement, priority, previous_reply) in ordered {
+        let wins_tie = best.wins_tie(alpha, index, priority);
+        let reply_alpha = alpha.max(best.score) - i32::from(wins_tie);
+        let score = -search_move(
             movement,
             ply + 1,
-            (-beta, -alpha),
-            nodes,
+            (-beta, -reply_alpha),
+            progress,
             replies,
             previous_reply.unwrap_or_default(),
             before_node,
-        );
-        reply.map_or_else(
-            |error| ControlFlow::Break(Err(error)),
-            |reply_score| {
-                let score = -reply_score;
-                if score >= beta {
-                    // This score suffices for the cutoff. Its variation is not used.
-                    return ControlFlow::Break(Ok(score));
-                }
-                if score > best_score {
-                    best_score = score;
-                    best_variation.clear();
-                    best_variation.push(movement);
-                    if let Some(reply) = replies.first() {
-                        best_variation.extend_from_slice(reply);
-                    }
-                }
-                alpha = alpha.max(score);
-                ControlFlow::Continue(())
-            },
-        )
-    });
-    match stopped {
-        ControlFlow::Break(result) => result,
-        ControlFlow::Continue(()) => Ok(best_score),
+        )?;
+        if score >= beta {
+            remember_cutoff(progress.killers.get_mut(ply_index), &movement, priority);
+            return Ok(score);
+        }
+        if score > best.score || (score == best.score && wins_tie) {
+            best.score = score;
+            best.killer_index = priority.is_killer().then_some(index);
+            best_variation.clear();
+            best_variation.push(movement);
+            best_variation.extend_from_slice(replies.first().map_or(&[], Vec::as_slice));
+        }
+    }
+    Ok(best.score)
+}
+
+struct BestReply {
+    score: i32,
+    killer_index: Option<usize>,
+}
+
+impl BestReply {
+    fn wins_tie(&self, alpha: i32, index: usize, priority: MovePriority) -> bool {
+        // A killer can move ahead of an earlier quiet move during search.
+        // Give the earlier move a chance to prove equality in the variation.
+        self.score > alpha
+            && priority.is_quiet()
+            && self.killer_index.is_some_and(|killer| index < killer)
+    }
+}
+
+fn remember_cutoff(killers: Option<&mut KillerMoves>, movement: &Move, priority: MovePriority) {
+    // A remembered variation is searched first with a full window, so
+    // its remembered moves cannot cause a cutoff.
+    if priority.is_quiet()
+        && let Some(killers) = killers
+    {
+        killers.remember(movement);
     }
 }
 
@@ -318,18 +356,18 @@ fn search_move<E>(
     movement: Move,
     ply: u8,
     bounds: (i32, i32),
-    nodes: &mut u64,
+    progress: &mut SearchProgress<'_>,
     replies: &mut [Vec<Move>],
     previous: &[Move],
     before_node: &mut impl FnMut() -> Result<(), E>,
 ) -> Result<i32, E> {
     before_node()?;
-    *nodes += 1;
+    progress.nodes += 1;
     search(
         &movement.play(),
         ply,
         bounds,
-        nodes,
+        progress,
         replies,
         previous,
         before_node,

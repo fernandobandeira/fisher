@@ -7,6 +7,7 @@ use shakmaty::{CastlingMode, Chess, EnPassantMode, Position as _, fen::Fen, uci:
 
 use super::comparison::move_text;
 
+mod at_the_same_ply;
 mod from_previous_root;
 
 // D68, reasoned by hand from the rules and material. In each position White's

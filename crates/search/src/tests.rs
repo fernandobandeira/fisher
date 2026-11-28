@@ -5,6 +5,7 @@
 
 mod captures;
 mod comparison;
+mod killer_moves;
 mod move_order_memory;
 mod plain_minimax;
 mod remembered_move;

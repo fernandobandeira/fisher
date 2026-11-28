@@ -280,6 +280,23 @@ fn does_not_check_for_an_interrupt_at_the_root() {
     );
 }
 
+#[test]
+fn interruptible_search_scores_a_mate_before_the_horizon() -> TestResult {
+    // Qb7 is protected by the white king and covers a7 and b8.
+    let root = Position::from_fen("k7/8/1QK5/8/8/8/8/8 w - - 0 1")?;
+    let result = search_variations(&root, 2, NonZeroU8::MIN, || false)
+        .ok_or("expected a finished result")?;
+
+    assert_eq!(
+        result.score,
+        Score::Mate {
+            plies: 1,
+            winning: true,
+        }
+    );
+    Ok(())
+}
+
 fn search_variations(
     root: &Position,
     depth: u8,

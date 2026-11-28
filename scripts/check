@@ -48,6 +48,8 @@ fi
 
 check Format 'cargo fmt --all' cargo fmt --all -- --check
 check Lints 'scripts/check' crates_inherit_lints
+check 'Doctest fixtures' 'scripts/check-doctests --self-test' scripts/check-doctests --self-test
+check Doctests 'scripts/check-doctests' scripts/check-doctests
 check 'Crate boundary fixtures' 'scripts/check-crate-boundaries --self-test' \
     scripts/check-crate-boundaries --self-test
 check 'Crate source path fixtures' 'scripts/check-source-paths --self-test' \

@@ -1,0 +1,75 @@
+#!/usr/bin/env python3
+"""Check that workspace library targets have doctests disabled."""
+
+import argparse
+import json
+from pathlib import Path
+import subprocess
+import sys
+
+
+LIBRARY_KINDS = {"lib", "rlib", "dylib", "cdylib", "staticlib", "proc-macro"}
+
+
+def crates_with_doctests(metadata):
+    members = set(metadata["workspace_members"])
+    return sorted(
+        package["name"]
+        for package in metadata["packages"]
+        if package["id"] in members
+        and any(
+            not LIBRARY_KINDS.isdisjoint(target["kind"]) and target["doctest"]
+            for target in package["targets"]
+        )
+    )
+
+
+def self_test():
+    metadata = {
+        "workspace_members": ["library", "binary"],
+        "packages": [
+            {
+                "id": "library",
+                "name": "library",
+                "targets": [{"kind": ["lib"], "doctest": True}],
+            },
+            {
+                "id": "binary",
+                "name": "binary",
+                "targets": [{"kind": ["bin"], "doctest": False}],
+            },
+        ],
+    }
+    if (actual := crates_with_doctests(metadata)) != ["library"]:
+        raise AssertionError(f"expected only the library with doctests enabled, got {actual}")
+
+    metadata["packages"][0]["targets"][0]["doctest"] = False
+    if actual := crates_with_doctests(metadata):
+        raise AssertionError(f"expected the disabled library and binary to pass, got {actual}")
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--self-test", action="store_true")
+    if parser.parse_args().self_test:
+        self_test()
+        return 0
+
+    root = Path(__file__).resolve().parent.parent
+    try:
+        metadata = json.loads(subprocess.check_output(
+            ["cargo", "metadata", "--locked", "--format-version", "1", "--no-deps"],
+            cwd=root,
+        ))
+    except (OSError, ValueError, subprocess.CalledProcessError) as error:
+        print(f"Could not read Cargo workspace metadata: {error}", file=sys.stderr)
+        return 1
+
+    crates = crates_with_doctests(metadata)
+    for crate in crates:
+        print(f"{crate}: doctests are enabled. Set doctest = false in the [lib] section.", file=sys.stderr)
+    return int(bool(crates))
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -19,6 +19,8 @@ A deep module gives callers a small interface for a complete job. In Fisher, `Po
 - Keep each capability with its owner. Before adding a crate dependency, identify the operation the caller needs. Keep shared work behind that operation so callers can use it without assembling the same internal steps themselves.
 - Exercise public behavior through the same interface the application uses. An integration test alone is insufficient reason to export an implementation detail. Private tests can live beside the code. Keep tests of a public library interface in the crate that owns it. Tests that exercise the wired binary through UCI stay in `fisher`.
 
+Write executable examples as unit or integration tests. The normal workspace test run skips doc examples because every `[lib]` target sets `doctest = false`. `scripts/check` enforces this using Cargo metadata. An explicit `cargo test --doc` overrides the manifest setting.
+
 `scripts/check-crate-boundaries` checks declared workspace dependencies, including build, test, optional and target-specific ones. Its dependency table is the one list of permitted directions. The independent reference, `shakmaty`, is a development dependency only. The same dependency table applies to integration tests. When proposing a new direction, change the dependency table and its `--self-test` fixtures in the same script.
 
 `cargo xtask interfaces` checks library roots for public module declarations. Rust also checks unnecessarily public items inside private modules with `unreachable_pub`. Review macro-generated exports and re-exports for exposed implementation modules. A reviewer checks that each public item has a caller.

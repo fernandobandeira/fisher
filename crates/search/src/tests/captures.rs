@@ -97,3 +97,38 @@ fn piece_kind(role: Role) -> PieceKind {
         Role::King => PieceKind::King,
     }
 }
+
+#[test]
+fn capture_priorities_favor_the_piece_taken_then_the_piece_taking() -> Result<(), Box<dyn Error>> {
+    let position = Position::from_fen("7k/8/3q4/8/3Rp3/8/5N2/K7 w - - 0 1")?;
+    let rook_takes_queen = priority(&position, "d4d6")?;
+    let rook_takes_pawn = priority(&position, "d4e4")?;
+    let knight_takes_pawn = priority(&position, "f2e4")?;
+
+    assert!(rook_takes_queen > rook_takes_pawn);
+    assert!(knight_takes_pawn > rook_takes_pawn);
+    Ok(())
+}
+
+#[test]
+fn queen_promotion_and_en_passant_have_capture_priorities() -> Result<(), Box<dyn Error>> {
+    let position = Position::from_fen("7k/P7/1p6/2PpP3/8/8/8/K7 w - d6 0 1")?;
+    let pawn_takes_pawn = priority(&position, "c5b6")?;
+    let en_passant = priority(&position, "e5d6")?;
+    let queen_promotion = priority(&position, "a7a8q")?;
+    let quiet_move = priority(&position, "a1b1")?;
+
+    assert!(en_passant == pawn_takes_pawn);
+    assert!(pawn_takes_pawn > queen_promotion);
+    assert!(queen_promotion > quiet_move);
+    Ok(())
+}
+
+fn priority(position: &Position, text: &str) -> Result<MovePriority, String> {
+    position
+        .legal_moves()
+        .iter()
+        .find(|&&movement| move_text(movement) == text)
+        .map(|movement| capture_priority(position, movement))
+        .ok_or_else(|| format!("{text} is not legal in {}", position.to_fen()))
+}

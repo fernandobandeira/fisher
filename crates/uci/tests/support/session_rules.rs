@@ -188,11 +188,11 @@ struct Session<'a> {
     last_bestmove: Option<String>,
 }
 
-pub(super) fn check(history: &[Event<'_>]) -> Result<(), Violation> {
+pub(super) fn check(record: &[Event<'_>]) -> Result<(), Violation> {
     // Keep each possible handling order until a response rules it out.
     // Once one command waits for bestmove, later commands wait behind it.
     let mut sessions = vec![Session::default()];
-    for (index, event) in history.iter().enumerate() {
+    for (index, event) in record.iter().enumerate() {
         let mut next = Vec::new();
         let mut failure = None;
         for mut session in sessions {
@@ -228,7 +228,7 @@ pub(super) fn check(history: &[Event<'_>]) -> Result<(), Violation> {
             Err((rule, detail)) => {
                 result = Err(Violation {
                     rule,
-                    event: history.len() + 1,
+                    event: record.len() + 1,
                     detail,
                 });
             }
@@ -458,7 +458,7 @@ impl<'a> Session<'a> {
             .as_ref()
             .ok_or((1, "bestmove without an outstanding go"))?;
         // Once the next search reports `BestMove` with the same move, the
-        // history cannot tell which search produced a matching bestmove.
+        // The record cannot tell which search produced a matching bestmove.
         if search.best_move.is_none() && self.last_bestmove.as_deref() == Some(text) {
             return Err((
                 1,
@@ -549,7 +549,7 @@ impl<'a> Session<'a> {
             return Err((8, "missing command response"));
         }
         if !self.exiting {
-            return Err((9, "history has no quit or end of input"));
+            return Err((9, "session record has no quit or end of input"));
         }
         Ok(())
     }

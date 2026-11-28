@@ -1,14 +1,14 @@
-//! Hand-written histories from fisher-8ie and D11, D20, D24 and D25,
+//! Hand-written session records from fisher-8ie and D11, D20, D24 and D25,
 //! read 2026-11-24. The two forced moves come from go-parameters.uci.
 //! The finished-depth reports are scripted and do not run a search.
 
-#[path = "support/search_history.rs"]
-mod search_history;
+#[path = "support/session_rules.rs"]
+mod session_rules;
 
 use std::{io, time::Duration};
 
 use deepening::{FinishedDepth, Score, SearchReport};
-use search_history::{Event, Event::*, check, scripted_input};
+use session_rules::{Event, Event::*, check, scripted_input};
 
 const A: &str = "7k/8/5K1Q/8/8/8/8/8 b - - 0 1";
 const B: &str = "7k/8/5K2/6Q1/8/8/8/8 b - - 0 1";
@@ -52,16 +52,16 @@ fn finished_depth() -> Event<'static> {
     }))
 }
 
-fn accepts(history: &[Event<'_>]) {
-    assert_eq!(check(history), Ok(()), "{history:?}");
+fn accepts(record: &[Event<'_>]) {
+    assert_eq!(check(record), Ok(()), "{record:?}");
 }
 
-fn rejects(rule: u8, name: &str, history: &[Event<'_>]) {
-    let result = check(history);
+fn rejects(rule: u8, name: &str, record: &[Event<'_>]) {
+    let result = check(record);
     assert_eq!(
         result.as_ref().err().map(|violation| violation.rule),
         Some(rule),
-        "{name} should breach rule {rule}. Got {result:?} in {history:?}"
+        "{name} should breach rule {rule}. Got {result:?} in {record:?}"
     );
 }
 
@@ -752,7 +752,7 @@ fn deferred_quit_after_an_unknown_prefix() {
         "missing bestmove when a deferred quit hides later readiness",
         &[POSITION_A, GO, STOP, quit.clone(), READY],
     );
-    let mut history = vec![
+    let mut record = vec![
         POSITION_A,
         GO,
         STOP,
@@ -761,13 +761,13 @@ fn deferred_quit_after_an_unknown_prefix() {
         best_move_report(A),
         MOVE_A,
     ];
-    accepts(&history);
-    history.push(READY_OK);
-    rejects(9, "unsolicited readyok after a deferred quit", &history);
+    accepts(&record);
+    record.push(READY_OK);
+    rejects(9, "unsolicited readyok after a deferred quit", &record);
 }
 
 #[test]
-fn a_joined_en_passant_field_is_rejected_by_the_history_checker() {
+fn a_joined_en_passant_field_is_rejected_by_the_session_checker() {
     for command in [
         "position fen 4k3/8/8/8/8/8/8/4K2R w K -\u{a0}0 1",
         "position fen 4k3/8/8/8/8/8/8/4K2R w K -\u{a0}7 42",
@@ -785,7 +785,7 @@ fn a_joined_en_passant_field_is_rejected_by_the_history_checker() {
 }
 
 #[test]
-fn the_history_checker_rejects_promoted_piece_markers() {
+fn the_session_checker_rejects_promoted_piece_markers() {
     // Stockfish 19 rejects these boards (fisher-2ou).
     for fen in [
         "4k3/8/8/8/8/8/8/4K2R~ w K - 0 1",
@@ -796,7 +796,7 @@ fn the_history_checker_rejects_promoted_piece_markers() {
 }
 
 #[test]
-fn the_history_checker_rejects_more_than_eight_pawns_of_a_color() {
+fn the_session_checker_rejects_more_than_eight_pawns_of_a_color() {
     // Stockfish 19 rejects these boards and accepts the control (fisher-2ou).
     for fen in [
         "4k3/8/8/8/8/P7/PPPPPPPP/4K2R w K - 0 1",
@@ -833,7 +833,7 @@ fn check_fen_board_rejection(fen: &str) {
 }
 
 #[test]
-fn kingside_castling_spellings_agree_with_the_history_checker() -> io::Result<()> {
+fn kingside_castling_spellings_agree_with_the_session_checker() -> io::Result<()> {
     // Stockfish 19 printed these positions for all three fields in fisher-4h7.
     for field in ["K", "KK", "H"] {
         let bare = format!("position fen 4k3/8/8/8/8/8/8/4K2R w {field} - 0 1");
@@ -866,23 +866,23 @@ fn kingside_castling_spellings_agree_with_the_history_checker() -> io::Result<()
                 },
             )?;
             let text = std::str::from_utf8(&output).map_err(io::Error::other)?;
-            let mut history = [
+            let mut record = [
                 Command(&command),
                 GO,
                 QUIT,
                 Report(SearchReport::BestMove(Some(movement))),
                 Response(text),
             ];
-            accepts(&history);
-            history[4] = Response("bestmove 0000\n");
-            rejects(5, "a null move with legal moves available", &history);
+            accepts(&record);
+            record[4] = Response("bestmove 0000\n");
+            rejects(5, "a null move with legal moves available", &record);
         }
     }
     Ok(())
 }
 
 #[test]
-fn the_history_checker_requires_rejections_for_other_castling_fields() -> io::Result<()> {
+fn the_session_checker_requires_rejections_for_other_castling_fields() -> io::Result<()> {
     for fen in [
         "4k3/8/8/8/8/8/8/4K2R w KKK - 0 1",
         "4k3/8/8/8/8/8/8/4K2R w Kk - 0 1",
@@ -902,7 +902,7 @@ fn the_history_checker_requires_rejections_for_other_castling_fields() -> io::Re
 }
 
 #[test]
-fn the_history_checker_accepts_distinct_standard_castling_letters() {
+fn the_session_checker_accepts_distinct_standard_castling_letters() {
     accepts(&[
         Command("position fen 4k2r/8/8/8/8/8/8/4K2R w Kk - 0 1"),
         Command("position fen r3k2r/8/8/8/8/8/8/R3K2R w qkQK - 0 1"),
@@ -1223,7 +1223,7 @@ fn setoption_consumes_any_token_in_the_name_position() {
 
 #[test]
 fn setoption_diagnostics_require_the_matching_command_and_state() {
-    for (name, history) in [
+    for (name, record) in [
         (
             "busy rejection while idle",
             [SET_MULTIPV, REJECT_SETOPTION, QUIT],
@@ -1237,7 +1237,7 @@ fn setoption_diagnostics_require_the_matching_command_and_state() {
             [UNKNOWN_OPTION, INVALID_MULTIPV, QUIT],
         ),
     ] {
-        rejects(10, name, &history);
+        rejects(10, name, &record);
     }
 }
 
@@ -1248,7 +1248,7 @@ fn setoption_diagnostics_must_precede_readyok() {
         "missing diagnostic for value 0",
         &[ZERO_MULTIPV, READY, READY_OK, QUIT],
     );
-    for (name, history) in [
+    for (name, record) in [
         (
             "missing rejection while searching",
             vec![
@@ -1278,12 +1278,12 @@ fn setoption_diagnostics_must_precede_readyok() {
             ],
         ),
     ] {
-        rejects(7, name, &history);
+        rejects(7, name, &record);
     }
 }
 
 #[test]
-fn multipv_history_requires_exactly_the_reported_variations() {
+fn multipv_session_record_requires_exactly_the_reported_variations() {
     let pawn_move = |target| {
         rules::Position::starting()
             .legal_moves()
@@ -1307,7 +1307,7 @@ fn multipv_history_requires_exactly_the_reported_variations() {
     let best_move = Report(SearchReport::BestMove(best_move));
     let bestmove = Response("bestmove e2e4\n");
 
-    let history = |variations: &[Event<'static>]| {
+    let record = |variations: &[Event<'static>]| {
         let mut events = vec![
             SET_MULTIPV,
             ZERO_MULTIPV,
@@ -1327,21 +1327,21 @@ fn multipv_history_requires_exactly_the_reported_variations() {
         ]);
         events
     };
-    accepts(&history(&[first.clone(), second.clone()]));
+    accepts(&record(&[first.clone(), second.clone()]));
     rejects(
         3,
         "bestmove before variation 2",
-        &history(std::slice::from_ref(&first)),
+        &record(std::slice::from_ref(&first)),
     );
     rejects(
         3,
         "unreported variation 3",
-        &history(&[first, second, extra]),
+        &record(&[first, second, extra]),
     );
 }
 
 #[test]
-fn history_rejects_a_searched_depth_without_a_variation() {
+fn session_record_rejects_a_searched_depth_without_a_variation() {
     for variations in [Vec::new(), vec![(Score::Centipawns(-900), Vec::new())]] {
         let depth = Report(SearchReport::FinishedDepth(FinishedDepth {
             depth: 1,
@@ -1356,7 +1356,7 @@ fn history_rejects_a_searched_depth_without_a_variation() {
 
 #[test]
 fn command_responses_precede_bestmove() {
-    for (rule, name, history) in [
+    for (rule, name, record) in [
         (
             8,
             "B1: late rejection for position recorded after BestMove",
@@ -1452,7 +1452,7 @@ fn command_responses_precede_bestmove() {
             ],
         ),
     ] {
-        rejects(rule, name, &history);
+        rejects(rule, name, &record);
     }
     for exit in [QUIT, EndOfInput] {
         rejects(
@@ -1473,7 +1473,7 @@ fn command_responses_precede_bestmove() {
 
 // Shows the scripted input driving the public session entry. While the search
 // runs on the command thread it cannot detect an early acknowledgement; see the
-// recording contract in `support/search_history.rs`.
+// recording contract in `support/session_rules.rs`.
 #[test]
 fn scripted_input_drives_the_session_entry() -> io::Result<()> {
     let (input, commands) = scripted_input();
@@ -1505,7 +1505,7 @@ fn scripted_input_drives_the_session_entry() -> io::Result<()> {
         uci::run_session(input, &mut output, "test", move |request, report| {
             assert!(request.limits.infinite);
             let commands = commands_for_search
-                .recv_timeout(search_history::HANG_TIMEOUT)
+                .recv_timeout(session_rules::HANG_TIMEOUT)
                 .unwrap();
             commands.send_line("isready").unwrap();
             report(SearchReport::FinishedDepth(depth.clone()));
@@ -1517,7 +1517,7 @@ fn scripted_input_drives_the_session_entry() -> io::Result<()> {
     })?;
 
     let text = std::str::from_utf8(&output).map_err(io::Error::other)?;
-    let mut history = vec![
+    let mut record = vec![
         POSITION_A,
         INFINITE,
         READY,
@@ -1526,8 +1526,8 @@ fn scripted_input_drives_the_session_entry() -> io::Result<()> {
         best_move_report(A),
         QUIT,
     ];
-    history.extend(text.split_inclusive('\n').map(Response));
-    accepts(&history);
+    record.extend(text.split_inclusive('\n').map(Response));
+    accepts(&record);
     Ok(())
 }
 
@@ -1639,7 +1639,7 @@ mod model {
     #[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
     struct Schedule {
         actions: usize,
-        history: Vec<Observation>,
+        record: Vec<Observation>,
         input: InputState,
         stop_during_search: bool,
         worker: VecDeque<Message>,
@@ -1655,11 +1655,11 @@ mod model {
     impl Schedule {
         fn record(&mut self, message: Message) {
             self.actions += 1;
-            self.history.push(Observation::Message(message));
+            self.record.push(Observation::Message(message));
         }
 
         fn write(&mut self, line: Line) {
-            self.history.push(Observation::Line(line));
+            self.record.push(Observation::Line(line));
         }
 
         fn answer(&mut self, engine: Engine, line: Line) {
@@ -1679,7 +1679,7 @@ mod model {
             self.write(Line::Bestmove(work.root));
             self.previous_move = Some(work.root);
             self.work = None;
-            self.history
+            self.record
                 .extend(self.late.drain(..).map(Observation::Line));
             self.exited = work.phase == Phase::Exiting;
             while !self.exited
@@ -1815,13 +1815,13 @@ mod model {
         }
     }
 
-    type Histories = HashSet<Vec<Observation>>;
+    type SessionRecords = HashSet<Vec<Observation>>;
 
     fn explore(
         engine: Engine,
         schedule: Schedule,
         seen: &mut HashSet<Schedule>,
-        histories: &mut Histories,
+        records: &mut SessionRecords,
     ) {
         if !seen.insert(schedule.clone()) {
             return;
@@ -1835,12 +1835,12 @@ mod model {
             MAX_ACTIONS
         };
         if schedule.actions < limit {
-            explore_inputs(engine, &schedule, limit, seen, histories);
-            explore_reports(engine, &schedule, limit, seen, histories);
+            explore_inputs(engine, &schedule, limit, seen, records);
+            explore_reports(engine, &schedule, limit, seen, records);
         }
-        explore_deliveries(engine, &schedule, seen, histories);
+        explore_deliveries(engine, &schedule, seen, records);
         if schedule.exited && schedule.worker.is_empty() && schedule.channel.is_empty() {
-            histories.insert(schedule.history);
+            records.insert(schedule.record);
         }
     }
 
@@ -1849,7 +1849,7 @@ mod model {
         schedule: &Schedule,
         limit: usize,
         seen: &mut HashSet<Schedule>,
-        histories: &mut Histories,
+        records: &mut SessionRecords,
     ) {
         if schedule.input == InputState::Closed {
             return;
@@ -1861,7 +1861,7 @@ mod model {
             {
                 let mut next = schedule.clone();
                 next.record_input(command);
-                explore(engine, next, seen, histories);
+                explore(engine, next, seen, records);
             }
         }
     }
@@ -1871,7 +1871,7 @@ mod model {
         schedule: &Schedule,
         limit: usize,
         seen: &mut HashSet<Schedule>,
-        histories: &mut Histories,
+        records: &mut SessionRecords,
     ) {
         if !schedule.exited
             && (schedule.actions + 1 < limit || schedule.input != InputState::Open)
@@ -1881,7 +1881,7 @@ mod model {
                 if kind == ReportKind::BestMove || !work.depth_reported {
                     let mut next = schedule.clone();
                     next.record_report(kind, work);
-                    explore(engine, next, seen, histories);
+                    explore(engine, next, seen, records);
                 }
             }
         }
@@ -1891,7 +1891,7 @@ mod model {
         engine: Engine,
         schedule: &Schedule,
         seen: &mut HashSet<Schedule>,
-        histories: &mut Histories,
+        records: &mut SessionRecords,
     ) {
         // Delivery is unobservable. Delivering BestMove just before or just
         // after recording a command enumerates both channel orders. Commands
@@ -1901,7 +1901,7 @@ mod model {
             if let Some(message) = next.worker.pop_front() {
                 next.channel.push_back(message);
             }
-            explore(engine, next, seen, histories);
+            explore(engine, next, seen, records);
         }
         if !schedule.channel.is_empty() {
             let mut next = schedule.clone();
@@ -1910,19 +1910,19 @@ mod model {
             {
                 next.handle(engine, message);
             }
-            explore(engine, next, seen, histories);
+            explore(engine, next, seen, records);
         }
     }
 
-    fn generate(engine: Engine) -> Histories {
-        let mut histories = HashSet::new();
+    fn generate(engine: Engine) -> SessionRecords {
+        let mut records = HashSet::new();
         explore(
             engine,
             Schedule::default(),
             &mut HashSet::new(),
-            &mut histories,
+            &mut records,
         );
-        histories
+        records
     }
 
     fn event(observation: Observation, moves: &[rules::Move; 2]) -> Event<'static> {
@@ -1975,22 +1975,18 @@ mod model {
         clippy::print_stderr,
         reason = "report the size of the bounded model run"
     )]
-    fn model_histories_obey_session_rules() {
+    fn model_records_obey_session_rules() {
         let moves = [forced_move(A), forced_move(B)];
-        let events = |history: &[Observation]| {
+        let events = |record: &[Observation]| {
             std::iter::once(POSITION_A)
-                .chain(
-                    history
-                        .iter()
-                        .map(|&observation| event(observation, &moves)),
-                )
+                .chain(record.iter().map(|&observation| event(observation, &moves)))
                 .collect::<Vec<_>>()
         };
         let correct = generate(Engine::Correct);
         assert!(!correct.is_empty());
-        eprintln!("Correct engine: {} histories", correct.len());
-        for history in &correct {
-            accepts(&events(history));
+        eprintln!("Correct engine: {} records", correct.len());
+        for record in &correct {
+            accepts(&events(record));
         }
         for engine in [
             Engine::LateRejection,
@@ -2007,13 +2003,13 @@ mod model {
             let violations = generated.difference(&correct);
             assert!(
                 violations.clone().next().is_some(),
-                "{engine:?} emitted no bad history"
+                "{engine:?} emitted no bad record"
             );
-            eprintln!("{engine:?}: {} bad histories", violations.clone().count());
-            for history in violations {
+            eprintln!("{engine:?}: {} bad records", violations.clone().count());
+            for record in violations {
                 assert!(
-                    check(&events(history)).is_err(),
-                    "{engine:?} accepted: {history:?}"
+                    check(&events(record)).is_err(),
+                    "{engine:?} accepted: {record:?}"
                 );
             }
         }

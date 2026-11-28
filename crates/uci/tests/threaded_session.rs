@@ -1,5 +1,5 @@
-#[path = "support/search_history.rs"]
-mod search_history;
+#[path = "support/session_rules.rs"]
+mod session_rules;
 
 use std::{
     io::{self, Write},
@@ -9,7 +9,7 @@ use std::{
 };
 
 use deepening::{FinishedDepth, Score, SearchReport, SearchRequest};
-use search_history::{Event, HANG_TIMEOUT, ScriptedInput, check, scripted_input};
+use session_rules::{Event, HANG_TIMEOUT, ScriptedInput, check, scripted_input};
 
 const A: &str = "position fen 7k/8/5K1Q/8/8/8/8/8 b - - 0 1";
 const B: &str = "position fen 7k/8/5K2/6Q1/8/8/8/8 b - - 0 1";
@@ -33,18 +33,18 @@ impl Recorded {
     }
 }
 
-type History = Arc<Mutex<Vec<Recorded>>>;
+type SessionRecord = Arc<Mutex<Vec<Recorded>>>;
 
-fn recorded(history: &History) -> MutexGuard<'_, Vec<Recorded>> {
+fn recorded(record: &SessionRecord) -> MutexGuard<'_, Vec<Recorded>> {
     #[expect(
         clippy::unwrap_used,
         reason = "a poisoned test recorder is a test failure"
     )]
-    history.lock().unwrap()
+    record.lock().unwrap()
 }
 
 struct Replies {
-    history: History,
+    record: SessionRecord,
     lines: mpsc::Sender<String>,
     pending: Vec<u8>,
 }
@@ -58,13 +58,13 @@ impl Write for Replies {
     fn flush(&mut self) -> io::Result<()> {
         let line =
             String::from_utf8(std::mem::take(&mut self.pending)).map_err(io::Error::other)?;
-        recorded(&self.history).push(Recorded::Response(line.clone()));
+        recorded(&self.record).push(Recorded::Response(line.clone()));
         self.lines.send(line).map_err(io::Error::other)
     }
 }
 
 struct Session {
-    history: History,
+    record: SessionRecord,
     input: Option<ScriptedInput>,
     replies: mpsc::Receiver<String>,
     result: mpsc::Receiver<io::Result<()>>,
@@ -75,14 +75,14 @@ impl Session {
         mut search: impl FnMut(SearchRequest, &mut dyn FnMut(SearchReport)) + Send + 'static,
     ) -> Self {
         let (input, commands) = scripted_input();
-        let history = History::default();
+        let record = SessionRecord::default();
         let (lines, replies) = mpsc::channel();
         let output = Replies {
-            history: Arc::clone(&history),
+            record: Arc::clone(&record),
             lines,
             pending: Vec::new(),
         };
-        let reports = Arc::clone(&history);
+        let reports = Arc::clone(&record);
         let (done, result) = mpsc::channel();
         thread::spawn(move || {
             let search = move |request, report: &mut dyn FnMut(SearchReport)| {
@@ -94,7 +94,7 @@ impl Session {
             drop(done.send(uci::run_session(input, output, "test", search)));
         });
         Self {
-            history,
+            record,
             input: Some(commands),
             replies,
             result,
@@ -102,7 +102,7 @@ impl Session {
     }
 
     fn command(&self, command: &'static str) -> io::Result<()> {
-        recorded(&self.history).push(Recorded::Command(command));
+        recorded(&self.record).push(Recorded::Command(command));
         self.input
             .as_ref()
             .ok_or_else(|| io::Error::other("input closed"))?
@@ -110,7 +110,7 @@ impl Session {
     }
 
     fn eof(&mut self) {
-        recorded(&self.history).push(Recorded::EndOfInput);
+        recorded(&self.record).push(Recorded::EndOfInput);
         drop(self.input.take());
     }
 
@@ -120,9 +120,9 @@ impl Session {
 
     fn finish(self) -> io::Result<Vec<String>> {
         receive(&self.result)??;
-        let records = recorded(&self.history);
-        let history: Vec<_> = records.iter().map(Recorded::as_event).collect();
-        check(&history).map_err(|error| io::Error::other(format!("{error}: {history:?}")))?;
+        let records = recorded(&self.record);
+        let events: Vec<_> = records.iter().map(Recorded::as_event).collect();
+        check(&events).map_err(|error| io::Error::other(format!("{error}: {events:?}")))?;
         Ok(self.replies.into_iter().collect())
     }
 }
@@ -349,7 +349,7 @@ impl ScriptSearch {
     }
 }
 
-fn play_short_history(steps: impl Iterator<Item = Step>) -> io::Result<()> {
+fn play_short_session(steps: impl Iterator<Item = Step>) -> io::Result<()> {
     let (mut session, script) = Script::start();
     let mut search = ScriptSearch::Idle;
     let mut exiting = false;
@@ -380,25 +380,25 @@ fn play_short_history(steps: impl Iterator<Item = Step>) -> io::Result<()> {
 #[test]
 fn checks_every_sequence_up_to_four_steps() -> io::Result<()> {
     let started = Instant::now();
-    let mut histories = 0;
+    let mut session_count = 0;
     for length in 0..=4 {
-        for history in 0..ALPHABET.len().pow(length) {
-            let mut index = history;
+        for sequence in 0..ALPHABET.len().pow(length) {
+            let mut index = sequence;
             let steps = (0..length).map(|_| {
                 let step = ALPHABET.get(index % ALPHABET.len()).copied();
                 index /= ALPHABET.len();
                 step
             });
-            play_short_history(steps.flatten()).map_err(|error| {
-                io::Error::other(format!("history {length}/{history}: {error}"))
+            play_short_session(steps.flatten()).map_err(|error| {
+                io::Error::other(format!("sequence {length}/{sequence}: {error}"))
             })?;
-            histories += 1;
+            session_count += 1;
         }
     }
-    assert_eq!(histories, 11_111);
+    assert_eq!(session_count, 11_111);
     writeln!(
         io::stderr().lock(),
-        "{histories} histories in {:?}",
+        "{session_count} sessions in {:?}",
         started.elapsed()
     )
 }

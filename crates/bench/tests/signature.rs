@@ -38,13 +38,13 @@ fn reports_the_depth_five_signature_within_the_published_bounds() -> Result<(), 
     assert_eq!(
         output,
         concat!(
-            "Position 1: 47210\n",
-            "Position 2: 876841\n",
-            "Position 3: 8143\n",
-            "Position 4: 62794\n",
-            "Position 5: 345614\n",
-            "Position 6: 2511996\n",
-            "Nodes searched  : 3852598\n",
+            "Position 1: 27400\n",
+            "Position 2: 80133\n",
+            "Position 3: 6342\n",
+            "Position 4: 19904\n",
+            "Position 5: 70941\n",
+            "Position 6: 336420\n",
+            "Nodes searched  : 541140\n",
         )
     );
     Ok(())

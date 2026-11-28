@@ -4,7 +4,7 @@ use std::convert::Infallible;
 
 use rules::{Move, Position};
 
-use crate::move_order::{KillerMoves, MovePriority, ordered_moves};
+use crate::move_order::{KillerMoves, MovePriority, capture_priority, ordered_moves};
 use crate::tests::comparison::move_text;
 use crate::{BestReply, SearchProgress, remember_cutoff, search};
 
@@ -96,27 +96,18 @@ fn a_quiet_cutoff_fills_only_the_killer_slot_at_its_ply() {
 }
 
 #[test]
-fn a_remembered_variation_move_fills_a_slot_only_if_it_is_quiet() {
+fn captures_do_not_fill_killer_slots() {
     let position = Position::from_fen("7k/8/8/8/8/8/n7/R6K w - - 0 1").unwrap();
     let moves = position.legal_moves();
     let capture = find_move(&moves, "a1a2");
-    let quiet = find_move(&moves, "a1b1");
     let mut killers = KillerMoves::default();
 
     remember_cutoff(
         Some(&mut killers),
-        &position,
         &capture,
-        MovePriority::Remembered,
+        capture_priority(&position, &capture),
     );
     assert!(killers.priority(&capture) == MovePriority::Quiet);
-    remember_cutoff(
-        Some(&mut killers),
-        &position,
-        &quiet,
-        MovePriority::Remembered,
-    );
-    assert!(killers.priority(&quiet) == MovePriority::LatestKiller);
     assert!(MovePriority::LatestKiller.is_quiet());
     assert!(!MovePriority::QueenPromotion.is_quiet());
     assert!(MovePriority::LatestKiller.is_killer());

@@ -39,12 +39,12 @@ fn reports_the_depth_five_signature_within_the_published_bounds() -> Result<(), 
         output,
         concat!(
             "Position 1: 47210\n",
-            "Position 2: 924617\n",
-            "Position 3: 13537\n",
-            "Position 4: 73647\n",
-            "Position 5: 756217\n",
-            "Position 6: 2586344\n",
-            "Nodes searched  : 4401572\n",
+            "Position 2: 876841\n",
+            "Position 3: 8143\n",
+            "Position 4: 62794\n",
+            "Position 5: 345614\n",
+            "Position 6: 2511996\n",
+            "Nodes searched  : 3852598\n",
         )
     );
     Ok(())

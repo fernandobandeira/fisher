@@ -1,12 +1,15 @@
 #![cfg(test)]
 
-use std::convert::Infallible;
+use std::{convert::Infallible, num::NonZeroU8};
 
 use rules::{Move, Position};
 
 use crate::move_order::{KillerMoves, MovePriority, capture_priority, ordered_moves};
 use crate::tests::comparison::move_text;
-use crate::{BestReply, SearchProgress, remember_cutoff, search};
+use crate::{
+    BestReply, MoveOrderMemory, SearchProgress, minimax_variations_until_interrupted,
+    remember_cutoff, search,
+};
 
 #[test]
 fn the_latest_distinct_cutoff_replaces_the_older_killer() {
@@ -126,6 +129,27 @@ fn an_earlier_quiet_move_can_tie_a_killer_only_above_alpha() {
     assert!(!best.wins_tie(100, 1, MovePriority::Quiet));
     assert!(!best.wins_tie(99, 2, MovePriority::Quiet));
     assert!(!best.wins_tie(99, 1, MovePriority::QueenPromotion));
+}
+
+#[test]
+fn an_interrupted_reply_keeps_the_last_finished_principal_variation() {
+    let position = Position::starting();
+    let mut memory = MoveOrderMemory::default();
+    assert!(
+        minimax_variations_until_interrupted(&position, 1, NonZeroU8::MIN, &mut memory, || false)
+            .is_some()
+    );
+    let previous = memory.principal_variation.clone();
+    let mut checks = 0;
+    let result =
+        minimax_variations_until_interrupted(&position, 2, NonZeroU8::MIN, &mut memory, || {
+            checks += 1;
+            checks == 2
+        });
+
+    assert!(result.is_none());
+    assert_eq!(checks, 2);
+    assert_eq!(memory.principal_variation, previous);
 }
 
 fn find_move(moves: &[Move], text: &str) -> Move {

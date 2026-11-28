@@ -281,7 +281,13 @@ def compare(revisions, binaries, positions):
         print(f"{label} {commit}: {sum(counts)} nodes, {middle / 1e9:.6f} s median"
               f" ({readings} s)", flush=True)
     gap = 100 * (medians[1] - medians[0]) / medians[0]
-    print(f"Measured time change: {float(gap):+.4f}%", flush=True)
+    if gap <= -2:
+        classification = "clear gain"
+    elif gap > 2:
+        classification = "clear fail"
+    else:
+        classification = "marginal"
+    print(f"Measured time change: {float(gap):+.4f}% ({classification})", flush=True)
     return gap
 
 

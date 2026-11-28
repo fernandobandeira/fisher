@@ -2,9 +2,12 @@ use std::{cmp::Reverse, sync::LazyLock};
 
 use rules::{Color, Move, PieceKind, Position, Promotion, Square};
 
+use crate::history::History;
+
 #[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd)]
 pub(super) enum MovePriority {
     Quiet,
+    History(i32),
     OlderKiller,
     LatestKiller,
     QueenPromotion,
@@ -63,7 +66,11 @@ pub(super) fn ordered_moves<'a>(
     moves: &'a [Move],
     previous: &'a [Move],
     killers: KillerMoves,
-) -> impl Iterator<Item = (usize, Move, MovePriority, Option<&'a [Move]>)> + 'a {
+    history: &History,
+) -> impl Iterator<Item = (usize, Move, MovePriority, Option<&'a [Move]>)> + use<'a> {
+    let color = position.side_to_move();
+    let mut origin = None;
+    let mut destinations = &[][..];
     let mut order: Vec<_> = moves
         .iter()
         .enumerate()
@@ -75,7 +82,22 @@ pub(super) fn ordered_moves<'a>(
                 _ => {
                     let priority = capture_priority(position, movement);
                     if priority == MovePriority::Quiet {
-                        killers.priority(movement)
+                        let killer = killers.priority(movement);
+                        if killer.is_killer() {
+                            killer
+                        } else {
+                            let from = movement.from();
+                            if origin != Some(from) {
+                                origin = Some(from);
+                                destinations = history.destinations(color, from);
+                            }
+                            destinations
+                                .iter()
+                                .find(|(to, _)| *to == movement.to())
+                                .map_or(MovePriority::Quiet, |&(_, score)| {
+                                    MovePriority::History(score)
+                                })
+                        }
                     } else {
                         priority
                     }

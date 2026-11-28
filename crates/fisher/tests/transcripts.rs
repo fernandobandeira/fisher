@@ -24,6 +24,70 @@ use wait_timeout::ChildExt;
 const LEGAL_BESTMOVE: &str = "bestmove {legal}";
 const HANG_TIMEOUT: Duration = Duration::from_secs(30);
 
+mod bench_agreement {
+    use std::{io, time::Instant};
+
+    use super::{Engine, HANG_TIMEOUT, TranscriptIo, search_info};
+
+    #[test]
+    fn bench_counts_match_go_depth_five() -> io::Result<()> {
+        let positions: Vec<_> = include_str!("../../../expectations/perft.epd")
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty() && !line.starts_with('#'))
+            .map(|line| line.split_once(';').map_or(line, |(fen, _)| fen).trim())
+            .collect();
+        assert!(!positions.is_empty(), "no bench positions");
+
+        let reports = bench_position_reports()?;
+        assert_eq!(reports.len(), positions.len(), "bench position count");
+        for (index, (fen, report)) in positions.into_iter().zip(reports).enumerate() {
+            let nodes = depth_five_nodes(fen)?;
+            assert_eq!(
+                report,
+                format!("Position {}: {nodes}", index + 1),
+                "bench and go depth 5 disagree for {fen}"
+            );
+        }
+        Ok(())
+    }
+
+    fn bench_position_reports() -> io::Result<Vec<String>> {
+        let mut bench = Engine::start_with_args(&["bench"])?;
+        let deadline = Instant::now() + HANG_TIMEOUT;
+        let mut reports = Vec::new();
+        while let Some(line) = bench.read_reply(deadline)? {
+            if line.starts_with("Position ") {
+                reports.push(line);
+            }
+        }
+        bench.wait_for_success(HANG_TIMEOUT)?;
+        Ok(reports)
+    }
+
+    fn depth_five_nodes(fen: &str) -> io::Result<u64> {
+        let mut engine = Engine::start()?;
+        engine.send(format!("position fen {fen}\ngo depth 5\n").as_bytes())?;
+        let deadline = Instant::now() + HANG_TIMEOUT;
+        let mut nodes = None;
+        while let Some(line) = engine.read_reply(deadline)? {
+            if line.starts_with("bestmove ") {
+                engine.send(b"quit\n")?;
+                engine.wait_for_success(HANG_TIMEOUT)?;
+                return nodes
+                    .ok_or_else(|| io::Error::other(format!("missing depth-5 info for {fen}")));
+            }
+            if let Some(info) = search_info(&line)
+                && info.depth == "5"
+            {
+                assert!(nodes.is_none(), "extra depth-5 info for {fen}: {line}");
+                nodes = Some(info.nodes.parse().map_err(io::Error::other)?);
+            }
+        }
+        Err(io::Error::other(format!("missing bestmove for {fen}")))
+    }
+}
+
 mod transcript_documents {
     use std::{
         collections::{BTreeMap, BTreeSet},
@@ -869,6 +933,10 @@ struct Engine {
 
 impl Engine {
     fn start() -> io::Result<Self> {
+        Self::start_with_args(&[])
+    }
+
+    fn start_with_args(args: &[&str]) -> io::Result<Self> {
         let mut child = {
             // On macOS, concurrent spawns can inherit each other's pipes and delay EOF.
             static SPAWN: Mutex<()> = Mutex::new(());
@@ -876,6 +944,7 @@ impl Engine {
                 .lock()
                 .map_err(|_| io::Error::other("fisher spawn lock is poisoned"))?;
             Command::new(env!("CARGO_BIN_EXE_fisher"))
+                .args(args)
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .spawn()?

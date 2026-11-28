@@ -344,7 +344,7 @@ impl BestReply {
 
 fn remember_cutoff(killers: Option<&mut KillerMoves>, movement: &Move, priority: MovePriority) {
     // A remembered variation is searched first with a full window, so
-    // its remembered moves cannot cut off.
+    // its remembered moves cannot cause a cutoff.
     if priority.is_quiet()
         && let Some(killers) = killers
     {

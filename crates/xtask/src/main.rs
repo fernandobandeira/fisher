@@ -1,5 +1,6 @@
 mod glossary;
 mod interfaces;
+mod thin_binary;
 
 use std::env;
 use std::path::{Path, PathBuf};
@@ -19,6 +20,7 @@ fn main() -> ExitCode {
     let check = match command.to_str() {
         Some("glossary") => glossary::check,
         Some("interfaces") => interfaces::check,
+        Some("thin-binary") => thin_binary::check,
         _ => return usage(),
     };
     match check(&root) {
@@ -35,6 +37,6 @@ fn main() -> ExitCode {
 
 #[expect(clippy::print_stderr, reason = "The xtask CLI prints usage to stderr")]
 fn usage() -> ExitCode {
-    eprintln!("Usage: cargo xtask <glossary|interfaces> [--root <path>]");
+    eprintln!("Usage: cargo xtask <glossary|interfaces|thin-binary> [--root <path>]");
     ExitCode::FAILURE
 }

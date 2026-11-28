@@ -69,6 +69,7 @@ check Clippy 'cargo clippy --locked --workspace --all-targets --all-features -- 
 check Tests 'cargo test --locked --workspace' cargo test --locked --workspace
 check Glossary 'cargo xtask glossary' cargo xtask glossary
 check 'Crate interfaces' 'cargo xtask interfaces' cargo xtask interfaces
+check 'Thin binary' 'cargo xtask thin-binary' cargo xtask thin-binary
 
 # Populate Cargo's registry and package cache for the offline dependency check.
 check 'Locked dependencies' 'cargo fetch --locked' cargo fetch --locked

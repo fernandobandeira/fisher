@@ -2,13 +2,13 @@
 
 use std::{convert::Infallible, num::NonZeroU8};
 
-use rules::{Move, Position};
+use rules::{Color, Move, Position};
 
+use crate::history::History;
 use crate::move_order::{KillerMoves, MovePriority, capture_priority, ordered_moves};
 use crate::tests::comparison::move_text;
 use crate::{
-    BestReply, MoveOrderMemory, SearchProgress, minimax_variations_until_interrupted,
-    remember_cutoff, search,
+    BestReply, MoveOrderMemory, SearchProgress, minimax_variations_until_interrupted, search,
 };
 
 #[test]
@@ -47,9 +47,12 @@ fn remembered_variation_and_captures_take_priority_over_killer_slots() {
     let mut killers = KillerMoves::default();
     killers.remember(&quiet_rook);
     killers.remember(&knight);
+    let mut history = History::default();
+    history.remember(Color::White, &quiet_rook, 1);
+    history.remember(Color::White, &knight, 1);
 
     let priorities = |previous| {
-        ordered_moves(&position, &moves, previous, killers)
+        ordered_moves(&position, &moves, previous, killers, &history)
             .map(|(_, movement, priority, _)| (move_text(movement), priority))
             .collect::<std::collections::BTreeMap<_, _>>()
     };
@@ -60,12 +63,12 @@ fn remembered_variation_and_captures_take_priority_over_killer_slots() {
     ));
     assert!(without_previous.get("a7a8q") == Some(&MovePriority::QueenPromotion));
     assert!(without_previous.get("a7a8n") == Some(&MovePriority::LatestKiller));
-    assert!(without_previous.get("a7a8b") == Some(&MovePriority::Quiet));
+    assert!(without_previous.get("a7a8b") == Some(&MovePriority::History(82)));
 
     let previous = [knight];
     assert!(priorities(&previous).get("a7a8n") == Some(&MovePriority::Remembered));
     assert_eq!(
-        ordered_moves(&position, &moves, &previous, killers).count(),
+        ordered_moves(&position, &moves, &previous, killers, &history).count(),
         moves.len()
     );
 }
@@ -78,9 +81,11 @@ fn a_quiet_cutoff_fills_only_the_killer_slot_at_its_ply() {
     let moves = position.legal_moves();
     let reply = find_move(&moves, "h8h7");
     let mut killers = [KillerMoves::default(); 3];
+    let mut history = History::default();
     let mut progress = SearchProgress {
         nodes: 0,
         killers: &mut killers,
+        history: &mut history,
     };
     let Ok(score) = search(
         &position,
@@ -96,6 +101,11 @@ fn a_quiet_cutoff_fills_only_the_killer_slot_at_its_ply() {
     assert!(killers[0].priority(&reply) == MovePriority::Quiet);
     assert!(killers[1].priority(&reply) == MovePriority::LatestKiller);
     assert!(killers[2].priority(&reply) == MovePriority::Quiet);
+    assert_eq!(
+        history.destinations(Color::Black, reply.from()),
+        &[(reply.to(), 82)]
+    );
+    assert_eq!(history.destinations(Color::White, reply.from()), []);
 }
 
 #[test]
@@ -104,13 +114,22 @@ fn captures_do_not_fill_killer_slots() {
     let moves = position.legal_moves();
     let capture = find_move(&moves, "a1a2");
     let mut killers = KillerMoves::default();
+    let mut history = History::default();
 
-    remember_cutoff(
-        Some(&mut killers),
+    SearchProgress {
+        nodes: 0,
+        killers: std::slice::from_mut(&mut killers),
+        history: &mut history,
+    }
+    .remember_cutoff(
+        &position,
+        0,
         &capture,
         capture_priority(&position, &capture),
+        1,
     );
     assert!(killers.priority(&capture) == MovePriority::Quiet);
+    assert_eq!(history.destinations(Color::White, capture.from()), []);
     assert!(MovePriority::LatestKiller.is_quiet());
     assert!(!MovePriority::QueenPromotion.is_quiet());
     assert!(MovePriority::LatestKiller.is_killer());
@@ -119,10 +138,35 @@ fn captures_do_not_fill_killer_slots() {
 }
 
 #[test]
+fn history_priorities_follow_the_depth_bonus_and_butterfly_key() {
+    let root = Position::starting();
+    let moves = root.legal_moves();
+    let first = find_move(&moves, "a2a3");
+    let same_origin = find_move(&moves, "a2a4");
+    let other_origin = find_move(&moves, "b2b3");
+    let mut history = History::default();
+    history.remember(Color::White, &first, 10);
+    history.remember(Color::White, &first, 11);
+    history.remember(Color::White, &same_origin, 2);
+    history.remember(Color::White, &other_origin, 4);
+
+    let priorities: std::collections::BTreeMap<_, _> =
+        ordered_moves(&root, &moves, &[], KillerMoves::default(), &history)
+            .map(|(_, movement, priority, _)| (move_text(movement), priority))
+            .collect();
+    // Stockfish 17 gives each deep cutoff 1596 before damping. The
+    // second adds 1596 - floor(1596 * 1596 / 7183).
+    assert!(priorities.get("a2a3") == Some(&MovePriority::History(2838)));
+    assert!(priorities.get("a2a4") == Some(&MovePriority::History(272)));
+    assert!(priorities.get("b2b3") == Some(&MovePriority::History(652)));
+    assert!(priorities.get("b2b4") == Some(&MovePriority::Quiet));
+}
+
+#[test]
 fn an_earlier_quiet_move_can_tie_a_killer_only_above_alpha() {
     let best = BestReply {
         score: 100,
-        killer_index: Some(2),
+        prioritized_quiet: Some(2),
     };
 
     assert!(best.wins_tie(99, 1, MovePriority::Quiet));

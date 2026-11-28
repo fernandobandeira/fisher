@@ -52,11 +52,21 @@ that contains the sample. Use the hosted run's times for D64.
 
 ### Time threshold
 
-The owner's agent settled the verdict rule on 2026-11-27. The threshold in
-[`ordering-threshold.tsv`](ordering-threshold.tsv) always governs a D64 verdict.
-A verdict requires the CPU model in that file. The script prints the CPU model
-before timing. If it differs, discard the run for the verdict and dispatch again
-based on the CPU model alone.
+The owner's agent settled the verdict rule on 2026-11-28. The recorded 1%
+threshold in [`ordering-threshold.tsv`](ordering-threshold.tsv) always governs
+a D64 verdict. A measurement on any hosted CPU model counts, and node counts
+are exact across machines.
+
+- If the measured median time change is at or below −2% or above +2%, take
+  the time verdict from that run on any hosted CPU model. These bounds
+  account for the 1% threshold and about one percentage point of build-layout
+  effect.
+- A change greater than −2% and at most +2% is marginal. Take the time
+  verdict only on the recorded CPU model or from a paired run
+  (`calibrate_first`) whose calibration is at most the recorded threshold.
+  Otherwise, bring the run to the owner for a decision.
+
+Record the CPU model of the run used for each verdict.
 
 Dispatch **Ordering sample** with the measured revision blank to calibrate.
 The workflow builds the base twice and runs five self-comparisons. Divide each
@@ -66,8 +76,8 @@ allows up to 300 minutes.
 
 Set `calibrate_first` with a measured revision for a calibration check before
 measurement on the same runner. The recorded threshold still governs. If the
-paired calibration exceeds the recorded threshold, withhold the verdict and
-bring the run to the owner.
+paired calibration exceeds the recorded threshold, withhold the verdict
+regardless of the measured time change and bring the run to the owner.
 
 ### Hosted qualification
 

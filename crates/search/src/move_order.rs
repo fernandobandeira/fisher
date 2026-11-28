@@ -29,17 +29,16 @@ pub(super) fn ordered_moves<'a>(
             } else {
                 capture_priority(position, movement)
             };
-            (Reverse(priority), index)
+            (Reverse(priority), index, movement)
         })
         .collect();
-    order.sort_unstable();
+    order.sort_unstable_by_key(|&(priority, index, _)| (priority, index));
     order
         .into_iter()
-        .filter_map(move |(Reverse(priority), index)| {
-            let movement = *moves.get(index)?;
+        .map(move |(Reverse(priority), index, movement)| {
             let replies = (priority == MovePriority::Remembered)
                 .then(|| previous.get(1..).unwrap_or_default());
-            Some((index, movement, replies))
+            (index, *movement, replies)
         })
 }
 
@@ -66,24 +65,42 @@ pub(super) fn piece_taken(position: &Position, movement: &Move) -> Option<PieceK
     if let Some(piece) = position.piece_at(movement.to()) {
         return Some(piece.kind());
     }
-    let piece = position.piece_at(movement.from())?;
-    (piece.kind() == PieceKind::Pawn && is_en_passant(movement, piece.color()))
+    position
+        .piece_at(movement.from())
+        .is_some_and(|piece| {
+            piece.kind() == PieceKind::Pawn && is_en_passant(movement, piece.color())
+        })
         .then_some(PieceKind::Pawn)
 }
 
 /// A legal pawn move to an empty square on the en passant destination rank
 /// either advances from the same file or captures en passant from another.
 fn is_en_passant(movement: &Move, color: Color) -> bool {
-    // Square::all walks a1 through h8, one rank at a time.
-    let (from, to) = match color {
-        Color::White => (4, 5),
-        Color::Black => (3, 2),
+    let squares = match color {
+        Color::White => [
+            ("a5", "a6"),
+            ("b5", "b6"),
+            ("c5", "c6"),
+            ("d5", "d6"),
+            ("e5", "e6"),
+            ("f5", "f6"),
+            ("g5", "g6"),
+            ("h5", "h6"),
+        ],
+        Color::Black => [
+            ("a4", "a3"),
+            ("b4", "b3"),
+            ("c4", "c3"),
+            ("d4", "d3"),
+            ("e4", "e3"),
+            ("f4", "f3"),
+            ("g4", "g3"),
+            ("h4", "h3"),
+        ],
     };
-    Square::all()
-        .skip(8 * from)
-        .zip(Square::all().skip(8 * to))
-        .take(8)
-        .any(|(from, to)| movement.to() == to && movement.from() != from)
+    squares.into_iter().any(|(from, to)| {
+        Square::parse(to) == Some(movement.to()) && Square::parse(from) != Some(movement.from())
+    })
 }
 
 fn piece_value(kind: PieceKind) -> u8 {
